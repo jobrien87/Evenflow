@@ -11,7 +11,7 @@ services:
     plan: free
     rootDir: server
     buildCommand: npm install && npx prisma generate
-    startCommand: npx prisma db push --accept-data-loss=false && node src/index.js
+    startCommand: npx prisma db push --accept-data-loss=false && node prisma/seed.js && node src/index.js
     healthCheckPath: /api/health
     envVars:
       - key: DATABASE_URL
