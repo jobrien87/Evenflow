@@ -1,0 +1,274 @@
+const express = require('express');
+const { z } = require('zod');
+const { prisma } = require('../lib/db');
+const { requireAuth, scopeAgencyId } = require('../middleware/auth');
+const { recordAudit } = require('../lib/audit');
+const { scoreLead } = require('../lib/priority');
+const { normalizePhone, normalizeEmail } = require('../lib/normalize');
+const { recordLeadSaleRevenue } = require('../lib/financialEvents');
+const { notifyUser } = require('../lib/notifications');
+const { updateCustomerProductsAndDetectCrossSells } = require('../lib/opportunityEvents');
+
+const router = express.Router();
+router.use(requireAuth);
+
+// List leads — always server-side scoped to the caller's agency (never trust client agencyId).
+router.get('/', async (req, res, next) => {
+  try {
+    const agencyId = scopeAgencyId(req);
+    if (req.user.role !== 'PLATFORM_OWNER' && !agencyId) {
+      return res.json({ success: true, leads: [], page: 1, pageSize: 0, total: 0 });
+    }
+
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const pageSize = Math.min(Math.max(parseInt(req.query.pageSize, 10) || 25, 1), 100);
+    const where = {
+      ...(agencyId ? { agencyId } : {}),
+      ...(req.query.status ? { status: req.query.status } : {}),
+      ...(req.user.role === 'PRODUCER' ? { assignedToId: req.user.id } : {}),
+      archivedAt: null,
+    };
+
+    const [leads, total] = await Promise.all([
+      prisma.lead.findMany({
+        where,
+        include: { customer: true, assignedTo: { select: { id: true, firstName: true, lastName: true } } },
+        orderBy: [{ priorityScore: 'desc' }, { receivedAt: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.lead.count({ where }),
+    ]);
+
+    return res.json({ success: true, leads, page, pageSize, total });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const createLeadSchema = z.object({
+  agencyId: z.string().uuid().optional(),
+  firstName: z.string().min(1),
+  lastName: z.string().min(1),
+  phone: z.string().optional(),
+  email: z.string().email().optional().or(z.literal('')),
+  product: z.string().optional(),
+  source: z.string().optional().default('manual'),
+  assignedToId: z.string().uuid().optional(),
+  customFields: z.record(z.any()).optional(),
+});
+
+router.post('/', async (req, res, next) => {
+  try {
+    const parsed = createLeadSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+    const agencyId = req.user.role === 'PLATFORM_OWNER' ? parsed.data.agencyId : req.user.agencyId;
+    if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+
+    const phoneNormalized = normalizePhone(parsed.data.phone);
+    const email = normalizeEmail(parsed.data.email);
+
+    // Duplicate detection: same normalized phone or email within the same agency, unarchived.
+    let duplicateOf = null;
+    if (phoneNormalized || email) {
+      duplicateOf = await prisma.customer.findFirst({
+        where: {
+          OR: [
+            phoneNormalized ? { phoneNormalized } : undefined,
+            email ? { email } : undefined,
+          ].filter(Boolean),
+        },
+      });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const customer = duplicateOf
+        ? duplicateOf
+        : await tx.customer.create({
+            data: {
+              firstName: parsed.data.firstName,
+              lastName: parsed.data.lastName,
+              phoneNormalized,
+              email,
+            },
+          });
+
+      const lead = await tx.lead.create({
+        data: {
+          agencyId,
+          customerId: customer.id,
+          source: parsed.data.source,
+          product: parsed.data.product,
+          assignedToId: parsed.data.assignedToId,
+          assignedAt: parsed.data.assignedToId ? new Date() : null,
+          status: parsed.data.assignedToId ? 'ASSIGNED' : 'NEW',
+          createdById: req.user.id,
+          customFields: parsed.data.customFields || {},
+        },
+      });
+
+      const { priorityScore, priorityBand, priorityReason } = scoreLead(lead);
+      const updatedLead = await tx.lead.update({
+        where: { id: lead.id },
+        data: { priorityScore, priorityReason },
+      });
+
+      await tx.leadEvent.create({
+        data: {
+          leadId: lead.id,
+          type: duplicateOf ? 'lead.created.possible_duplicate' : 'lead.created',
+          toStatus: updatedLead.status,
+          metadata: { source: parsed.data.source, priorityBand },
+        },
+      });
+
+      return { lead: updatedLead, customer, isDuplicate: !!duplicateOf };
+    });
+
+    await recordAudit({
+      actorId: req.user.id,
+      actorRole: req.user.role,
+      agencyId,
+      action: 'lead.created',
+      entityType: 'Lead',
+      entityId: result.lead.id,
+      after: result.lead,
+      correlationId: req.correlationId,
+    });
+
+    if (parsed.data.assignedToId) {
+      await notifyUser({
+        userId: parsed.data.assignedToId,
+        agencyId,
+        type: 'lead.assigned',
+        severity: 'INFO',
+        title: 'New lead assigned to you',
+        body: `${result.customer.firstName} ${result.customer.lastName}${parsed.data.product ? ' — ' + parsed.data.product : ''}`,
+        relatedEntityType: 'Lead',
+        relatedEntityId: result.lead.id,
+      });
+    }
+
+    return res.status(201).json({ success: true, lead: result.lead, possibleDuplicate: result.isDuplicate });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/:leadId', async (req, res, next) => {
+  try {
+    const lead = await prisma.lead.findUnique({
+      where: { id: req.params.leadId },
+      include: {
+        customer: true,
+        assignedTo: { select: { id: true, firstName: true, lastName: true } },
+        events: { orderBy: { createdAt: 'desc' } },
+        notes: { include: { author: { select: { firstName: true, lastName: true } } }, orderBy: { createdAt: 'desc' } },
+        tasks: { orderBy: { createdAt: 'desc' } },
+      },
+    });
+    if (!lead) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (req.user.role !== 'PLATFORM_OWNER' && lead.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    return res.json({ success: true, lead });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const dispositionSchema = z.object({
+  status: z.enum([
+    'NEW', 'ASSIGNED', 'ATTEMPTED', 'CONTACTED', 'APPOINTMENT', 'QUOTE_STARTED',
+    'QUOTED', 'FOLLOW_UP', 'SOLD', 'LOST', 'BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT', 'ARCHIVED',
+  ]),
+  note: z.string().optional(),
+  saleProduct: z.string().optional(),
+  salePremiumCents: z.number().int().positive().optional(),
+});
+
+// Disposition a lead — records status HISTORY, never overwrites it.
+router.post('/:leadId/disposition', async (req, res, next) => {
+  try {
+    const parsed = dispositionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+    const lead = await prisma.lead.findUnique({ where: { id: req.params.leadId } });
+    if (!lead) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (req.user.role !== 'PLATFORM_OWNER' && lead.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+
+    const fromStatus = lead.status;
+    const now = new Date();
+    const patch = { status: parsed.data.status };
+    if (fromStatus === 'NEW' || fromStatus === 'ASSIGNED') {
+      if (!lead.firstAttemptAt && ['ATTEMPTED', 'CONTACTED'].includes(parsed.data.status)) {
+        patch.firstAttemptAt = now;
+      }
+    }
+    if (parsed.data.status === 'CONTACTED' && !lead.firstContactAt) {
+      patch.firstContactAt = now;
+    }
+    if (parsed.data.status === 'SOLD') {
+      patch.saleProduct = parsed.data.saleProduct || null;
+      patch.salePremiumCents = parsed.data.salePremiumCents || null;
+    }
+
+    const [updated] = await prisma.$transaction([
+      prisma.lead.update({ where: { id: lead.id }, data: patch }),
+      prisma.leadEvent.create({
+        data: {
+          leadId: lead.id,
+          type: 'lead.disposition',
+          fromStatus,
+          toStatus: parsed.data.status,
+          metadata: { note: parsed.data.note || null },
+        },
+      }),
+      ...(parsed.data.note
+        ? [prisma.leadNote.create({ data: { leadId: lead.id, authorId: req.user.id, content: parsed.data.note } })]
+        : []),
+    ]);
+
+    const { priorityScore, priorityReason } = scoreLead(updated);
+    await prisma.lead.update({ where: { id: lead.id }, data: { priorityScore, priorityReason } });
+
+    await recordAudit({
+      actorId: req.user.id,
+      actorRole: req.user.role,
+      agencyId: lead.agencyId,
+      action: 'lead.disposition',
+      entityType: 'Lead',
+      entityId: lead.id,
+      before: { status: fromStatus },
+      after: { status: parsed.data.status },
+      correlationId: req.correlationId,
+    });
+
+    // Real, entered sale premium feeds the Financial Ledger directly.
+    if (parsed.data.status === 'SOLD' && parsed.data.salePremiumCents) {
+      await recordLeadSaleRevenue(updated);
+    }
+
+    // A real sold product updates the customer's real product ledger and
+    // detects genuine cross-sell gaps — same honest, non-fabricated hook
+    // used for the transfer path.
+    if (parsed.data.status === 'SOLD' && updated.customerId && parsed.data.saleProduct) {
+      await updateCustomerProductsAndDetectCrossSells({
+        customerId: updated.customerId,
+        agencyId,
+        soldProduct: parsed.data.saleProduct,
+      });
+    }
+
+    return res.json({ success: true, lead: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+module.exports = router;

@@ -1,0 +1,208 @@
+import { useEffect, useState } from 'react';
+import { api } from '../lib/api';
+import { useAuth } from '../lib/AuthContext';
+
+const REVENUE_CATEGORIES = ['SUBSCRIPTION', 'TRANSFER_REVENUE', 'LEAD_REVENUE', 'OTHER'];
+const COST_CATEGORIES = ['VENDOR_LEAD_COST', 'TELEMARKETER_COST', 'TRANSFER_COST', 'API_COST', 'CREDIT', 'REFUND', 'OTHER'];
+
+export default function FinancialsPanel() {
+  const { user } = useAuth();
+  const [summary, setSummary] = useState(null);
+  const [vendors, setVendors] = useState([]);
+  const [aiUsage, setAiUsage] = useState(null);
+  const [showEntryForm, setShowEntryForm] = useState(false);
+  const [entryType, setEntryType] = useState('revenue');
+  const [entryForm, setEntryForm] = useState({ category: 'OTHER', amount: '', notes: '' });
+  const [entryStatus, setEntryStatus] = useState('');
+
+  const isPlatformOwner = user.role === 'PLATFORM_OWNER';
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function load() {
+    const promises = [api.financialSummary(), api.financialByVendor()];
+    if (isPlatformOwner) promises.push(api.edUsageSummary());
+    const results = await Promise.all(promises);
+    setSummary(results[0]);
+    setVendors(results[1].vendors);
+    if (isPlatformOwner) setAiUsage(results[2]);
+  }
+
+  async function submitEntry(e) {
+    e.preventDefault();
+    setEntryStatus('Saving…');
+    try {
+      const amountCents = Math.round(parseFloat(entryForm.amount) * 100);
+      if (entryType === 'revenue') {
+        await api.createRevenueEvent({ category: entryForm.category, amountCents, notes: entryForm.notes });
+      } else {
+        await api.createCostEvent({ category: entryForm.category, amountCents, notes: entryForm.notes });
+      }
+      setEntryStatus('Recorded.');
+      setEntryForm({ category: 'OTHER', amount: '', notes: '' });
+      await load();
+      setTimeout(() => { setShowEntryForm(false); setEntryStatus(''); }, 1000);
+    } catch (err) {
+      setEntryStatus(err.data?.message || 'Failed to record.');
+    }
+  }
+
+  if (!summary) return <div style={{ color: '#666' }}>Loading…</div>;
+
+  return (
+    <div style={s.wrap}>
+      <div style={s.periodLabel}>
+        {new Date(summary.period.from).toLocaleDateString()} – {new Date(summary.period.to).toLocaleDateString()}
+      </div>
+
+      <div style={s.statsRow}>
+        <Stat label="Revenue" value={`$${summary.revenue.toLocaleString()}`} />
+        <Stat label="Cost" value={`$${summary.cost.toLocaleString()}`} />
+        <Stat label="Gross Profit" value={`$${summary.grossProfit.toLocaleString()}`} highlight={summary.grossProfit >= 0} />
+      </div>
+
+      <div style={s.statsRow}>
+        <Stat
+          label="Margin"
+          value={summary.marginPercent !== null ? `${summary.marginPercent}%` : 'INSUFFICIENT DATA'}
+          muted={summary.marginPercent === null}
+        />
+        <Stat
+          label="ROI"
+          value={summary.roiPercent !== null ? `${summary.roiPercent}%` : 'INSUFFICIENT DATA'}
+          muted={summary.roiPercent === null}
+        />
+        <Stat label="Sales Recorded" value={summary.salesRecorded} />
+      </div>
+
+      {(summary.marginReason || summary.roiReason) && (
+        <div style={s.reasonNote}>
+          {summary.marginReason && <div>{summary.marginReason}</div>}
+          {summary.roiReason && <div>{summary.roiReason}</div>}
+        </div>
+      )}
+
+      {isPlatformOwner && (
+        <section style={s.section}>
+          <div style={s.headerRow}>
+            <h3 style={s.h3}>MANUAL LEDGER ENTRY</h3>
+            <button style={s.smallButton} onClick={() => setShowEntryForm(!showEntryForm)}>+ RECORD ENTRY</button>
+          </div>
+          {showEntryForm && (
+            <form onSubmit={submitEntry} style={s.form}>
+              <div style={s.toggleRow}>
+                <button type="button" style={s.miniTab(entryType === 'revenue')} onClick={() => setEntryType('revenue')}>REVENUE</button>
+                <button type="button" style={s.miniTab(entryType === 'cost')} onClick={() => setEntryType('cost')}>COST</button>
+              </div>
+              <select style={s.input} value={entryForm.category} onChange={(e) => setEntryForm({ ...entryForm, category: e.target.value })}>
+                {(entryType === 'revenue' ? REVENUE_CATEGORIES : COST_CATEGORIES).map((c) => (
+                  <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>
+                ))}
+              </select>
+              <input style={s.input} type="number" step="0.01" min="0" placeholder="Amount ($)" value={entryForm.amount} onChange={(e) => setEntryForm({ ...entryForm, amount: e.target.value })} required />
+              <input style={s.input} placeholder="Notes" value={entryForm.notes} onChange={(e) => setEntryForm({ ...entryForm, notes: e.target.value })} />
+              <button style={s.submitButton} type="submit">Record {entryType === 'revenue' ? 'Revenue' : 'Cost'}</button>
+              {entryStatus && <div style={s.status}>{entryStatus}</div>}
+            </form>
+          )}
+        </section>
+      )}
+
+      <section style={s.section}>
+        <h3 style={s.h3}>REVENUE BY CATEGORY</h3>
+        {summary.revenueByCategory.length === 0 && <div style={s.empty}>No revenue events recorded this period.</div>}
+        {summary.revenueByCategory.map((r) => (
+          <div key={r.category} style={s.catRow}>
+            <span>{r.category.replace(/_/g, ' ')}</span>
+            <span style={{ color: '#00e5ff' }}>${r.amount.toLocaleString()}</span>
+          </div>
+        ))}
+      </section>
+
+      <section style={s.section}>
+        <h3 style={s.h3}>COST BY CATEGORY</h3>
+        {summary.costByCategory.length === 0 && <div style={s.empty}>No cost events recorded this period.</div>}
+        {summary.costByCategory.map((c) => (
+          <div key={c.category} style={s.catRow}>
+            <span>{c.category.replace(/_/g, ' ')}</span>
+            <span style={{ color: '#ff4d4d' }}>${c.amount.toLocaleString()}</span>
+          </div>
+        ))}
+      </section>
+
+      <section style={s.section}>
+        <h3 style={s.h3}>VENDOR COST PER LEAD</h3>
+        {vendors.map((v) => (
+          <div key={v.vendorId} style={s.vendorRow}>
+            <div>
+              <div style={s.rowTitle}>{v.vendorName}</div>
+              <div style={s.rowSub}>{v.leadsReceived} leads · {v.status}</div>
+            </div>
+            <div style={s.costPer}>
+              {v.costPerLead !== null ? `$${v.costPerLead.toFixed(2)}/lead` : 'not configured'}
+            </div>
+          </div>
+        ))}
+        {vendors.length === 0 && <div style={s.empty}>No vendors yet.</div>}
+      </section>
+
+      {isPlatformOwner && aiUsage && (
+        <section style={s.section}>
+          <h3 style={s.h3}>AI OPERATIONAL COST (ED)</h3>
+          <div style={s.aiUsageBox}>
+            <div style={s.aiUsageRow}><span>Total calls</span><span>{aiUsage.totalCalls}</span></div>
+            <div style={s.aiUsageRow}><span>Input tokens</span><span>{aiUsage.totalInputTokens.toLocaleString()}</span></div>
+            <div style={s.aiUsageRow}><span>Output tokens</span><span>{aiUsage.totalOutputTokens.toLocaleString()}</span></div>
+            <div style={s.aiUsageRow}><span>Estimated total cost</span><span>${aiUsage.estimatedTotalCostUsd.toFixed(4)}</span></div>
+            <div style={s.aiUsageNote}>{aiUsage.note}</div>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function Stat({ label, value, highlight, muted }) {
+  return (
+    <div style={s.stat}>
+      <div style={{ ...s.statValue, color: muted ? '#666' : highlight === false ? '#ff4d4d' : highlight ? '#00e5ff' : '#fff', fontSize: muted ? 14 : 24 }}>
+        {value}
+      </div>
+      <div style={s.statLabel}>{label}</div>
+    </div>
+  );
+}
+
+const s = {
+  wrap: {},
+  periodLabel: { color: '#666', fontSize: 12, marginBottom: 16 },
+  statsRow: { display: 'flex', gap: 16, marginBottom: 16 },
+  stat: { background: '#111', border: '1px solid #222', borderRadius: 8, padding: 16, flex: 1, textAlign: 'center' },
+  statValue: { fontSize: 24, fontWeight: 700 },
+  statLabel: { fontSize: 11, color: '#888', marginTop: 4 },
+  reasonNote: { color: '#ffb84d', fontSize: 12, marginBottom: 20, fontStyle: 'italic' },
+  section: { marginBottom: 28 },
+  headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  h3: { color: '#888', fontSize: 12, letterSpacing: 2 },
+  smallButton: { padding: '8px 14px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
+  form: { display: 'flex', flexDirection: 'column', gap: 10, background: '#111', padding: 16, borderRadius: 8, border: '1px solid #222' },
+  toggleRow: { display: 'flex', gap: 8 },
+  miniTab: (active) => ({
+    flex: 1, padding: '8px', borderRadius: 6, border: '1px solid #333', cursor: 'pointer', fontSize: 11, fontWeight: 700,
+    background: active ? '#00e5ff' : 'transparent', color: active ? '#000' : '#aaa',
+  }),
+  input: { padding: '10px 12px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff' },
+  submitButton: { padding: '10px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
+  status: { color: '#00e5ff', fontSize: 12 },
+  catRow: { display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #1a1a1a', fontSize: 13 },
+  vendorRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#111', border: '1px solid #1a1a1a', borderRadius: 8, padding: 12, marginBottom: 8 },
+  rowTitle: { fontWeight: 600, fontSize: 13 },
+  rowSub: { color: '#666', fontSize: 11 },
+  costPer: { color: '#00e5ff', fontSize: 13, fontWeight: 600 },
+  empty: { color: '#666', fontStyle: 'italic', fontSize: 13 },
+  aiUsageBox: { background: '#111', border: '1px solid #222', borderRadius: 8, padding: 16 },
+  aiUsageRow: { display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 13, color: '#ccc' },
+  aiUsageNote: { color: '#666', fontSize: 11, marginTop: 8, fontStyle: 'italic' },
+};

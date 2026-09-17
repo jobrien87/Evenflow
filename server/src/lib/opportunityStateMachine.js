@@ -1,0 +1,17 @@
+const TRANSITIONS = {
+  OPEN: ['ASSIGNED', 'ATTEMPTED', 'INELIGIBLE', 'SNOOZED'],
+  ASSIGNED: ['ATTEMPTED', 'CONTACTED', 'INELIGIBLE', 'SNOOZED'],
+  ATTEMPTED: ['CONTACTED', 'DECLINED', 'SNOOZED', 'INELIGIBLE'],
+  CONTACTED: ['QUOTED', 'DECLINED', 'SNOOZED'],
+  QUOTED: ['WON', 'DECLINED', 'SNOOZED'],
+  SNOOZED: ['ATTEMPTED', 'CONTACTED', 'DECLINED', 'INELIGIBLE'],
+  WON: [],
+  DECLINED: [],
+  INELIGIBLE: [],
+};
+
+function canTransition(from, to) {
+  return (TRANSITIONS[from] || []).includes(to);
+}
+
+module.exports = { canTransition, TRANSITIONS };

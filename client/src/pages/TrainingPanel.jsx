@@ -1,0 +1,174 @@
+import { useEffect, useState } from 'react';
+import { api } from '../lib/api';
+
+export default function TrainingPanel() {
+  const [assignments, setAssignments] = useState([]);
+  const [recommended, setRecommended] = useState(null);
+  const [notEntitled, setNotEntitled] = useState(false);
+  const [openCourse, setOpenCourse] = useState(null);
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function load() {
+    try {
+      const [assignData, recData] = await Promise.all([api.myTrainingAssignments(), api.recommendedTraining()]);
+      setAssignments(assignData.assignments);
+      setRecommended(recData);
+      setNotEntitled(false);
+    } catch (err) {
+      if (err.data?.error === 'MODULE_NOT_ENTITLED') setNotEntitled(true);
+    }
+  }
+
+  if (notEntitled) {
+    return <div style={s.notEntitledBox}>Training isn't included on your agency's current plan.</div>;
+  }
+
+  if (openCourse) {
+    return <CourseViewer assignment={openCourse} onBack={() => { setOpenCourse(null); load(); }} />;
+  }
+
+  return (
+    <div style={s.wrap}>
+      {recommended && recommended.recommended && (
+        <section style={s.section}>
+          <h3 style={s.h3}>RECOMMENDED FOR YOU</h3>
+          <div style={s.recCard}>
+            <div style={s.recTitle}>{recommended.recommended.title}</div>
+            <div style={s.recReason}>{recommended.reason}</div>
+          </div>
+        </section>
+      )}
+      {recommended && !recommended.recommended && recommended.reason && (
+        <div style={s.recEmptyNote}>{recommended.reason}</div>
+      )}
+
+      <section style={s.section}>
+        <h3 style={s.h3}>MY TRAINING ({assignments.length})</h3>
+        {assignments.map((a) => (
+          <div key={a.id} style={s.row} onClick={() => setOpenCourse(a)}>
+            <div>
+              <div style={s.rowTitle}>{a.course.title}</div>
+              <div style={s.rowSub}>{a.progress.completed}/{a.progress.total} lessons complete{a.dueAt ? ` · due ${new Date(a.dueAt).toLocaleDateString()}` : ''}</div>
+            </div>
+            <div style={s.statusBadge(a.status)}>{a.status.replace('_', ' ')}</div>
+          </div>
+        ))}
+        {assignments.length === 0 && <div style={s.empty}>No training assigned yet.</div>}
+      </section>
+    </div>
+  );
+}
+
+function CourseViewer({ assignment, onBack }) {
+  const [activeLesson, setActiveLesson] = useState(null);
+  const [answers, setAnswers] = useState({});
+  const [result, setResult] = useState(null);
+  const [completedIds, setCompletedIds] = useState(new Set(assignment.lessonCompletions.map((c) => c.lessonId)));
+
+  async function submitLesson(lesson) {
+    const quizAnswers = lesson.quiz ? lesson.quiz.map((_, i) => answers[i] ?? -1) : undefined;
+    const res = await api.completeLesson(lesson.id, { assignmentId: assignment.id, answers: quizAnswers });
+    setResult(res.grading);
+    setCompletedIds((prev) => new Set(prev).add(lesson.id));
+    setAnswers({});
+  }
+
+  return (
+    <div style={s.wrap}>
+      <button style={s.backButton} onClick={onBack}>← BACK TO TRAINING</button>
+      <h3 style={s.courseTitle}>{assignment.course.title}</h3>
+      <p style={s.courseDescription}>{assignment.course.description}</p>
+
+      {!activeLesson ? (
+        <div>
+          {assignment.course.lessons.map((lesson, i) => (
+            <div key={lesson.id} style={s.lessonRow} onClick={() => { setActiveLesson(lesson); setResult(null); }}>
+              <span style={s.lessonCheck(completedIds.has(lesson.id))}>{completedIds.has(lesson.id) ? '✓' : i + 1}</span>
+              <span style={s.lessonTitle}>{lesson.title}</span>
+              {lesson.quiz && <span style={s.quizTag}>QUIZ</span>}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={s.lessonView}>
+          <button style={s.backButton} onClick={() => { setActiveLesson(null); setResult(null); }}>← LESSONS</button>
+          <h4 style={s.lessonHeading}>{activeLesson.title}</h4>
+          <div style={s.lessonContent}>{activeLesson.content}</div>
+
+          {activeLesson.quiz && !result && (
+            <div style={s.quizBlock}>
+              {activeLesson.quiz.map((q, qi) => (
+                <div key={qi} style={s.quizQuestion}>
+                  <div style={s.quizQuestionText}>{q.question}</div>
+                  {q.options.map((opt, oi) => (
+                    <label key={oi} style={s.quizOption}>
+                      <input type="radio" name={`q${qi}`} checked={answers[qi] === oi} onChange={() => setAnswers({ ...answers, [qi]: oi })} />
+                      {opt}
+                    </label>
+                  ))}
+                </div>
+              ))}
+              <button style={s.submitButton} onClick={() => submitLesson(activeLesson)}>SUBMIT QUIZ</button>
+            </div>
+          )}
+
+          {!activeLesson.quiz && !completedIds.has(activeLesson.id) && (
+            <button style={s.submitButton} onClick={() => submitLesson(activeLesson)}>MARK COMPLETE</button>
+          )}
+
+          {result && (
+            <div style={s.resultBox}>
+              {result.scorePercent !== null ? (
+                <>Quiz score: <strong>{result.scorePercent}%</strong> ({result.correctCount}/{result.total} correct)</>
+              ) : (
+                'Marked complete.'
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const s = {
+  wrap: {},
+  notEntitledBox: { background: '#1a1610', border: '1px solid #ffb84d55', color: '#ffb84d', padding: 20, borderRadius: 8, fontSize: 13 },
+  section: { marginBottom: 28 },
+  h3: { color: '#888', fontSize: 12, letterSpacing: 2, marginBottom: 12 },
+  recCard: { background: '#0d1a1a', border: '1px solid #00e5ff44', borderRadius: 8, padding: 16 },
+  recTitle: { fontWeight: 700, fontSize: 15, color: '#00e5ff' },
+  recReason: { color: '#aaa', fontSize: 12, marginTop: 6 },
+  recEmptyNote: { color: '#555', fontSize: 12, fontStyle: 'italic', marginBottom: 20 },
+  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#111', border: '1px solid #1a1a1a', borderRadius: 8, padding: 14, marginBottom: 8, cursor: 'pointer' },
+  rowTitle: { fontWeight: 600, fontSize: 14, color: '#fff' },
+  rowSub: { color: '#666', fontSize: 12 },
+  statusBadge: (status) => ({
+    fontSize: 11, padding: '4px 8px', borderRadius: 4,
+    color: status === 'COMPLETED' ? '#00e5ff' : status === 'IN_PROGRESS' ? '#ffb84d' : '#888',
+    border: `1px solid ${status === 'COMPLETED' ? '#00e5ff44' : status === 'IN_PROGRESS' ? '#ffb84d44' : '#333'}`,
+  }),
+  empty: { color: '#666', fontStyle: 'italic', fontSize: 13 },
+  backButton: { background: 'none', border: 'none', color: '#888', fontSize: 12, cursor: 'pointer', marginBottom: 12, padding: 0 },
+  courseTitle: { color: '#fff', fontSize: 20, marginBottom: 4 },
+  courseDescription: { color: '#888', fontSize: 13, marginBottom: 20 },
+  lessonRow: { display: 'flex', alignItems: 'center', gap: 12, background: '#111', border: '1px solid #1a1a1a', borderRadius: 8, padding: 14, marginBottom: 8, cursor: 'pointer' },
+  lessonCheck: (done) => ({
+    width: 26, height: 26, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700,
+    background: done ? '#0d1a1a' : '#1a1a1a', color: done ? '#00e5ff' : '#888',
+  }),
+  lessonTitle: { color: '#fff', fontSize: 14, flex: 1 },
+  quizTag: { fontSize: 10, color: '#ffb84d', border: '1px solid #ffb84d44', padding: '2px 6px', borderRadius: 4 },
+  lessonView: {},
+  lessonHeading: { color: '#fff', fontSize: 18, marginBottom: 12 },
+  lessonContent: { color: '#ccc', fontSize: 14, lineHeight: 1.7, marginBottom: 20, whiteSpace: 'pre-wrap' },
+  quizBlock: { background: '#0d0d0d', border: '1px solid #222', borderRadius: 8, padding: 16 },
+  quizQuestion: { marginBottom: 16 },
+  quizQuestionText: { color: '#fff', fontSize: 14, fontWeight: 600, marginBottom: 8 },
+  quizOption: { display: 'flex', alignItems: 'center', gap: 8, color: '#ccc', fontSize: 13, marginBottom: 6, cursor: 'pointer' },
+  submitButton: { padding: '10px 18px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
+  resultBox: { background: '#0d1a1a', border: '1px solid #00e5ff44', color: '#00e5ff', padding: 14, borderRadius: 8, marginTop: 16, fontSize: 14 },
+};

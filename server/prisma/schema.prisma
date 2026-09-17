@@ -1,0 +1,1067 @@
+// EvenFlow — Foundational Production Schema
+// This is the CORE slice of the full EvenFlow spec:
+// Auth, RBAC, multi-tenancy (Platform/Agency), CRM leads, Work Queue, Tasks, Audit.
+// Additional modules (Transfers, Vendor API, Calls, Billing, ED, Training) extend this
+// same schema in later migrations — see README "Roadmap" section.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  PLATFORM_OWNER
+  AGENCY_OWNER
+  AGENCY_MANAGER
+  PRODUCER
+  TELEMARKETER
+  SUPPORT_ADMIN
+  READ_ONLY
+}
+
+enum AgencyStatus {
+  CREATED
+  INVITED
+  OPENED
+  ACTIVATED
+  SETUP_INCOMPLETE
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  DEACTIVATED
+}
+
+enum LeadStatus {
+  NEW
+  ASSIGNED
+  ATTEMPTED
+  CONTACTED
+  APPOINTMENT
+  QUOTE_STARTED
+  QUOTED
+  FOLLOW_UP
+  SOLD
+  LOST
+  BAD_CONTACT
+  DUPLICATE
+  DO_NOT_CONTACT
+  ARCHIVED
+}
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  SNOOZED
+  CANCELLED
+}
+
+enum TaskType {
+  FOLLOW_UP
+  CALLBACK
+  APPOINTMENT
+  MANAGER
+  TRAINING
+  WINBACK
+  CROSS_SELL
+}
+
+enum TelemarketerStatus {
+  INVITED
+  ACTIVE
+  DEACTIVATED
+}
+
+enum TransferStatus {
+  LEAD_CAPTURED
+  QUALIFYING
+  QUALIFIED
+  NOT_QUALIFIED
+  READY
+  ROUTING
+  NO_ELIGIBLE_DESTINATION
+  OFFERED
+  ACCEPTED
+  REJECTED
+  MISSED
+  EXPIRED
+  CONNECTED
+  COMPLETED
+  FAILED
+  DISPOSITIONED
+  CREDIT_REQUESTED
+  CREDIT_APPROVED
+  CREDIT_DENIED
+  CANCELLED
+}
+
+enum TransferDisposition {
+  CONTACTED
+  QUOTE_STARTED
+  QUOTED
+  SOLD
+  FOLLOW_UP
+  NOT_INTERESTED
+  DUPLICATE
+  BAD_CONTACT
+  NOT_ELIGIBLE
+  DISCONNECTED
+  OTHER
+}
+
+enum CreditRequestStatus {
+  REQUESTED
+  APPROVED
+  DENIED
+  INFO_REQUESTED
+}
+
+enum VendorStatus {
+  PENDING
+  TESTING
+  VERIFIED
+  LIVE
+  PAUSED
+  FAILED
+}
+
+enum CredentialStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum RevenueCategory {
+  SUBSCRIPTION
+  TRANSFER_REVENUE
+  LEAD_REVENUE
+  OTHER
+}
+
+enum CostCategory {
+  VENDOR_LEAD_COST
+  TELEMARKETER_COST
+  TRANSFER_COST
+  API_COST
+  CREDIT
+  REFUND
+  OTHER
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_ON_CUSTOMER
+  RESOLVED
+  CLOSED
+}
+
+enum CallSource {
+  MANUAL_UPLOAD
+  BROWSER_EXTENSION
+  PHONE_SYSTEM
+  API_IMPORT
+  WEBHOOK
+  OTHER
+}
+
+enum CallStatus {
+  UPLOADED
+  QUEUED
+  TRANSCRIBING
+  TRANSCRIBED
+  ANALYZING
+  COMPLETE
+  FAILED
+}
+
+enum PlanInterval {
+  MONTHLY
+  ANNUAL
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+model User {
+  id            String       @id @default(uuid())
+  email         String       @unique
+  passwordHash  String?
+  firstName     String
+  lastName      String
+  role          Role
+  status        UserStatus   @default(INVITED)
+  agencyId      String?
+  agency        Agency?      @relation(fields: [agencyId], references: [id])
+  invitedById   String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  deactivatedAt DateTime?
+
+  invitations       Invitation[]     @relation("InvitationsSent")
+  ownInvitation     Invitation?      @relation("InvitationForUser")
+  assignedLeads     Lead[]           @relation("AssignedProducer")
+  createdLeads      Lead[]           @relation("LeadCreatedBy")
+  tasksAssigned     Task[]           @relation("TaskAssignee")
+  tasksCreated      Task[]           @relation("TaskCreatedBy")
+  leadNotes         LeadNote[]
+  auditEvents       AuditEvent[]
+  sessions          Session[]
+  telemarketerAssignments TelemarketerAssignment[] @relation("TMAssignments")
+  transfersCreated  Transfer[]       @relation("TransferCreatedByTM")
+  transfersAccepted Transfer[]       @relation("TransferAcceptedBy")
+  callsUploaded     Call[]           @relation("CallUploadedBy")
+  trainingAssignments TrainingAssignment[]
+
+  @@index([agencyId])
+  @@index([role])
+}
+
+model Invitation {
+  id          String   @id @default(uuid())
+  email       String
+  role        Role
+  token       String   @unique
+  agencyId    String?
+  agency      Agency?  @relation(fields: [agencyId], references: [id])
+  invitedById String
+  invitedBy   User     @relation("InvitationsSent", fields: [invitedById], references: [id])
+  userId      String?  @unique
+  user        User?    @relation("InvitationForUser", fields: [userId], references: [id])
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([email])
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  tokenHash String   @unique
+  userAgent String?
+  ipAddress String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+
+  @@index([userId])
+}
+
+model Agency {
+  id             String       @id @default(uuid())
+  name           String
+  status         AgencyStatus @default(CREATED)
+  timezone       String       @default("America/New_York")
+  officeHours    Json?
+  products       String[]     @default([])
+  crmEnabled     Boolean      @default(true)
+  transfersEnabled Boolean    @default(false)
+  coachingEnabled  Boolean    @default(false)
+  transferPaused    Boolean   @default(false)
+  transferDailyCap  Int?
+  transferStates    String[]  @default([])
+  // Fee EvenFlow/Yield charges this agency per accepted transfer, in integer cents.
+  // Null = not configured; no revenue event is fabricated if unset.
+  transferFeeCents  Int?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  archivedAt     DateTime?
+
+  users        User[]
+  leads        Lead[]
+  tasks        Task[]
+  invitations  Invitation[]
+  auditEvents  AuditEvent[]
+  goals        Goal[]
+  telemarketerAssignments TelemarketerAssignment[]
+  transfers    Transfer[]
+  vendors      Vendor[]
+  revenueEvents RevenueEvent[]
+  costEvents    CostEvent[]
+  calls         Call[]
+  subscriptions AgencySubscription[]
+  opportunities Opportunity[]
+}
+
+model Customer {
+  id            String   @id @default(uuid())
+  firstName     String
+  lastName      String
+  phoneNormalized String?
+  email         String?
+  address       String?
+  city          String?
+  state         String?
+  zip           String?
+  // Products this customer currently holds — populated only from real SOLD
+  // dispositions (lead or transfer), never inferred or guessed. This is
+  // what the cross-sell detector actually reads.
+  products      String[] @default([])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  leads Lead[]
+  transfers Transfer[]
+  opportunities Opportunity[]
+
+  @@index([phoneNormalized])
+  @@index([email])
+}
+
+model Lead {
+  id              String     @id @default(uuid())
+  agencyId        String
+  agency          Agency     @relation(fields: [agencyId], references: [id])
+  customerId      String?
+  customer        Customer?  @relation(fields: [customerId], references: [id])
+  source          String     @default("manual")
+  vendorId        String?
+  vendor          Vendor?    @relation(fields: [vendorId], references: [id])
+  externalLeadId  String?
+  rawPayload      Json?
+  product         String?
+  status          LeadStatus @default(NEW)
+  priorityScore   Int        @default(0)
+  priorityReason  String?
+  assignedToId    String?
+  assignedTo      User?      @relation("AssignedProducer", fields: [assignedToId], references: [id])
+  createdById     String?
+  createdBy       User?      @relation("LeadCreatedBy", fields: [createdById], references: [id])
+  receivedAt      DateTime   @default(now())
+  assignedAt      DateTime?
+  firstAttemptAt  DateTime?
+  firstContactAt  DateTime?
+  customFields    Json?
+  // Captured when a producer dispositions this lead as SOLD — real, entered
+  // data (not a fabricated commission calculation), which is what makes it
+  // legitimate to feed straight into the Financial Ledger as revenue.
+  saleProduct     String?
+  salePremiumCents Int?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  archivedAt      DateTime?
+
+  events LeadEvent[]
+  notes  LeadNote[]
+  tasks  Task[]
+  calls  Call[]
+
+  @@index([agencyId])
+  @@index([assignedToId])
+  @@index([status])
+  @@index([receivedAt])
+  @@unique([vendorId, externalLeadId])
+}
+
+model LeadEvent {
+  id        String   @id @default(uuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id])
+  type      String
+  fromStatus String?
+  toStatus  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([leadId])
+}
+
+model LeadNote {
+  id        String   @id @default(uuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id])
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([leadId])
+}
+
+model Task {
+  id           String     @id @default(uuid())
+  agencyId     String
+  agency       Agency     @relation(fields: [agencyId], references: [id])
+  leadId       String?
+  lead         Lead?      @relation(fields: [leadId], references: [id])
+  type         TaskType
+  title        String
+  description  String?
+  status       TaskStatus @default(OPEN)
+  priority     Int        @default(0)
+  dueAt        DateTime?
+  assignedToId String?
+  assignedTo   User?      @relation("TaskAssignee", fields: [assignedToId], references: [id])
+  createdById  String?
+  createdBy    User?      @relation("TaskCreatedBy", fields: [createdById], references: [id])
+  completedAt  DateTime?
+  outcome      String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([agencyId])
+  @@index([assignedToId])
+  @@index([status])
+  @@index([dueAt])
+}
+
+model Goal {
+  id         String   @id @default(uuid())
+  agencyId   String
+  agency     Agency   @relation(fields: [agencyId], references: [id])
+  userId     String?
+  metric     String
+  targetValue Int
+  periodType String
+  periodStart DateTime
+  periodEnd   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([agencyId])
+}
+
+model AuditEvent {
+  id            String   @id @default(uuid())
+  actorId       String?
+  actor         User?    @relation(fields: [actorId], references: [id])
+  actorRole     String?
+  agencyId      String?
+  agency        Agency?  @relation(fields: [agencyId], references: [id])
+  action        String
+  entityType    String
+  entityId      String?
+  before        Json?
+  after         Json?
+  metadata      Json?
+  correlationId String?
+  createdAt     DateTime @default(now())
+
+  @@index([agencyId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+// ======================================================================
+// YIELD TRANSFERS
+// ======================================================================
+// Telemarketers are Users with role=TELEMARKETER. This model holds their
+// TM-specific profile fields. Assignment to agencies is tracked separately
+// (TelemarketerAssignment) so history is never destroyed when reassigned.
+
+model TelemarketerProfile {
+  userId    String   @id
+  phone     String?
+  timezone  String   @default("America/New_York")
+  skills    String[] @default([])
+  products  String[] @default([])
+  notes     String?
+  status    TelemarketerStatus @default(INVITED)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model TelemarketerAssignment {
+  id            String    @id @default(uuid())
+  telemarketerId String
+  telemarketer  User      @relation("TMAssignments", fields: [telemarketerId], references: [id])
+  agencyId      String
+  agency        Agency    @relation(fields: [agencyId], references: [id])
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+  status        String    @default("ACTIVE") // ACTIVE | ENDED
+  assignedById  String?
+  notes         String?
+  createdAt     DateTime  @default(now())
+
+  @@index([telemarketerId])
+  @@index([agencyId])
+}
+
+model Transfer {
+  id                String   @id @default(uuid())
+  agencyId          String?
+  agency            Agency?  @relation(fields: [agencyId], references: [id])
+  customerId        String?
+  customer          Customer? @relation(fields: [customerId], references: [id])
+  createdByTMId     String
+  createdByTM       User     @relation("TransferCreatedByTM", fields: [createdByTMId], references: [id])
+  acceptedById      String?
+  acceptedBy        User?    @relation("TransferAcceptedBy", fields: [acceptedById], references: [id])
+
+  status            TransferStatus @default(LEAD_CAPTURED)
+  product           String
+  state             String?
+  firstName         String
+  lastName          String
+  phone             String?
+  email             String?
+  currentInsurance  String?
+  notes             String?
+  qualification     Json?
+
+  routingReason     String?
+  offeredAt         DateTime?
+  respondedAt       DateTime?
+  connectedAt       DateTime?
+  completedAt       DateTime?
+  rejectReason      String?
+
+  disposition       TransferDisposition?
+  dispositionAt     DateTime?
+  saleProduct       String?
+  salePremiumCents  Int?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  events            TransferEvent[]
+  creditRequests    CreditRequest[]
+  revenueEvents     RevenueEvent[]
+  costEvents        CostEvent[]
+
+  @@index([agencyId])
+  @@index([status])
+  @@index([createdByTMId])
+}
+
+model TransferEvent {
+  id         String   @id @default(uuid())
+  transferId String
+  transfer   Transfer @relation(fields: [transferId], references: [id])
+  fromStatus String?
+  toStatus   String
+  actorId    String?
+  reason     String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@index([transferId])
+}
+
+model CreditRequest {
+  id          String   @id @default(uuid())
+  transferId  String
+  transfer    Transfer @relation(fields: [transferId], references: [id])
+  requestedById String
+  reason      String
+  notes       String?
+  status      CreditRequestStatus @default(REQUESTED)
+  decidedById String?
+  decidedAt   DateTime?
+  decisionNotes String?
+  createdAt   DateTime @default(now())
+
+  @@index([transferId])
+}
+
+// ======================================================================
+// VENDOR LEAD API
+// ======================================================================
+
+model Vendor {
+  id           String       @id @default(uuid())
+  name         String
+  email        String
+  agencyId     String
+  agency       Agency       @relation(fields: [agencyId], references: [id])
+  product      String
+  status       VendorStatus @default(PENDING)
+  // What this vendor charges per lead, in integer cents. Null = not configured;
+  // no cost event is fabricated if unset — the UI will show INSUFFICIENT_DATA instead.
+  costPerLeadCents Int?
+  createdById  String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  credentials     VendorCredential[]
+  leads           Lead[]
+  apiTransactions ApiTransaction[]
+  costEvents      CostEvent[]
+
+  @@index([agencyId])
+}
+
+model VendorCredential {
+  id         String            @id @default(uuid())
+  vendorId   String
+  vendor     Vendor            @relation(fields: [vendorId], references: [id])
+  keyPrefix  String            @unique
+  secretHash String
+  status     CredentialStatus  @default(ACTIVE)
+  lastUsedAt DateTime?
+  createdAt  DateTime          @default(now())
+  revokedAt  DateTime?
+
+  @@index([vendorId])
+}
+
+model ApiTransaction {
+  id            String   @id @default(uuid())
+  vendorId      String?
+  vendor        Vendor?  @relation(fields: [vendorId], references: [id])
+  method        String
+  endpoint      String
+  statusCode    Int
+  latencyMs     Int
+  resultCode    String
+  leadId        String?
+  errorCode     String?
+  correlationId String?
+  // Raw payload can contain PII — access to this field must stay restricted;
+  // general log views should mask it (see routes/vendors.js maskPayload()).
+  rawPayload    Json?
+  createdAt     DateTime @default(now())
+
+  @@index([vendorId])
+  @@index([createdAt])
+}
+
+// ======================================================================
+// FINANCIAL LEDGER
+// ======================================================================
+// All money is stored in integer cents — never floating point.
+// Every event is ACTUAL (it was actually entered/derived from a real
+// transaction) — nothing here is ever a projection or estimate presented
+// as booked revenue. Where a fee/cost isn't configured, no event is
+// fabricated; the reporting layer shows INSUFFICIENT_DATA instead.
+
+model RevenueEvent {
+  id          String          @id @default(uuid())
+  agencyId    String?
+  agency      Agency?         @relation(fields: [agencyId], references: [id])
+  transferId  String?
+  transfer    Transfer?       @relation(fields: [transferId], references: [id])
+  category    RevenueCategory
+  amountCents Int
+  currency    String          @default("USD")
+  occurredAt  DateTime        @default(now())
+  notes       String?
+  createdById String?
+  createdAt   DateTime        @default(now())
+
+  @@index([agencyId])
+  @@index([occurredAt])
+}
+
+model CostEvent {
+  id             String       @id @default(uuid())
+  agencyId       String?
+  agency         Agency?      @relation(fields: [agencyId], references: [id])
+  vendorId       String?
+  vendor         Vendor?      @relation(fields: [vendorId], references: [id])
+  transferId     String?
+  transfer       Transfer?    @relation(fields: [transferId], references: [id])
+  category       CostCategory
+  amountCents    Int
+  currency       String       @default("USD")
+  occurredAt     DateTime     @default(now())
+  notes          String?
+  createdById    String?
+  createdAt      DateTime     @default(now())
+
+  @@index([agencyId])
+  @@index([vendorId])
+  @@index([occurredAt])
+}
+
+// ======================================================================
+// ED — CENTRAL INTELLIGENCE LAYER
+// ======================================================================
+// ED's factual context (goals, pace, counts, KPIs, priority) is always
+// computed deterministically from real rows — see lib/edContext.js.
+// The LLM is only ever used for language/summarization/coaching framing
+// on top of that pre-computed, real context — never to invent the numbers
+// themselves.
+
+model AiUsageLog {
+  id               String   @id @default(uuid())
+  feature          String   // e.g. "ed_chat"
+  agencyId         String?
+  userId           String?
+  model            String
+  inputTokens      Int
+  outputTokens     Int
+  // Stored in USD micros (1 micro = 1/1,000,000 of a dollar) rather than
+  // cents — a single chat call often costs a fraction of a cent, and cents
+  // would round nearly every row down to zero.
+  estimatedCostMicros Int
+  createdAt        DateTime @default(now())
+
+  @@index([agencyId])
+  @@index([createdAt])
+}
+
+model EdMessage {
+  id        String   @id @default(uuid())
+  userId    String
+  role      String   // "user" | "assistant"
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model SupportTicket {
+  id          String              @id @default(uuid())
+  agencyId    String?
+  userId      String
+  category    String
+  subject     String
+  description String
+  status      SupportTicketStatus @default(OPEN)
+  metadata    Json?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  @@index([agencyId])
+  @@index([status])
+}
+
+// ======================================================================
+// CALL INTELLIGENCE
+// ======================================================================
+// The analysis pipeline is source-agnostic per spec: a call can arrive via
+// manual upload today, and via browser extension / phone system / webhook
+// later, without changing anything downstream of "we have an audio file."
+
+model Call {
+  id             String     @id @default(uuid())
+  agencyId       String
+  agency         Agency     @relation(fields: [agencyId], references: [id])
+  uploadedById   String
+  uploadedBy     User       @relation("CallUploadedBy", fields: [uploadedById], references: [id])
+  leadId         String?
+  lead           Lead?      @relation(fields: [leadId], references: [id])
+  source         CallSource @default(MANUAL_UPLOAD)
+  filename       String
+  storageKey     String
+  mimeType       String?
+  fileSizeBytes  Int?
+  durationSeconds Int?
+  status         CallStatus @default(UPLOADED)
+  failureReason  String?
+  transcript     String?
+  transcriptProvider String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  analysis CallAnalysis?
+
+  @@index([agencyId])
+  @@index([uploadedById])
+  @@index([status])
+}
+
+model CallAnalysis {
+  id                     String   @id @default(uuid())
+  callId                 String   @unique
+  call                   Call     @relation(fields: [callId], references: [id])
+  summary                String
+  productsDiscussed      Json
+  objections             Json
+  buyingSignals          Json
+  missedOpportunities    Json
+  crossSellOpportunities Json
+  followUpCommitments    Json
+  nextSteps              Json
+  strengths              Json
+  coachingOpportunities  Json
+  overallScore           Int
+  dimensionScores        Json
+  reviewRecommended      Boolean  @default(false)
+  reviewReason           String?
+  aiModel                String
+  managerOverrideScore   Int?
+  managerComment         String?
+  createdAt              DateTime @default(now())
+
+  @@index([callId])
+}
+
+// ======================================================================
+// BILLING / ENTITLEMENTS
+// ======================================================================
+// Per spec: "Do not hardcode pricing assumptions into core logic. If payment
+// processor is not configured: billing UI may operate in admin/manual mode.
+// Never fake a payment." No payment processor is wired into this build —
+// Platform Owner assigns plans/subscriptions manually. The three entitlement
+// booleans already on Agency (crmEnabled/transfersEnabled/coachingEnabled)
+// are what routes actually check; a Plan just defines the default values a
+// subscription applies to those booleans when assigned.
+
+model Plan {
+  id               String       @id @default(uuid())
+  name             String
+  priceCents       Int
+  interval         PlanInterval @default(MONTHLY)
+  crmEnabled       Boolean      @default(true)
+  transfersEnabled Boolean      @default(false)
+  coachingEnabled  Boolean      @default(false)
+  isActive         Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  subscriptions AgencySubscription[]
+}
+
+model AgencySubscription {
+  id                 String             @id @default(uuid())
+  agencyId           String
+  agency             Agency             @relation(fields: [agencyId], references: [id])
+  planId             String
+  plan               Plan               @relation(fields: [planId], references: [id])
+  status             SubscriptionStatus @default(TRIALING)
+  trialEndsAt        DateTime?
+  currentPeriodStart DateTime           @default(now())
+  currentPeriodEnd   DateTime?
+  canceledAt         DateTime?
+  // Placeholder for a real payment processor's customer/subscription ID.
+  // Null in this build since no processor is configured — never fabricated.
+  externalCustomerId String?
+  assignedById       String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([agencyId])
+  @@index([status])
+}
+
+// ======================================================================
+// TRAINING / COACHING CURRICULUM
+// ======================================================================
+// Distinct from the Call Intelligence coaching loop (per-call scorecards).
+// This is structured curriculum: courses -> lessons -> optional quiz,
+// assigned to producers, with completion tracked per lesson.
+
+enum TrainingAssignmentStatus {
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+}
+
+model TrainingCourse {
+  id          String   @id @default(uuid())
+  title       String
+  description String?
+  // Loosely matched against a producer's weakest scoring dimension from real
+  // call analyses to power the (deterministic, non-fabricated) "recommended
+  // for you" surface — see lib/trainingRecommendation.js.
+  category    String?
+  createdById String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  lessons     TrainingLesson[]
+  assignments TrainingAssignment[]
+}
+
+model TrainingLesson {
+  id         String   @id @default(uuid())
+  courseId   String
+  course     TrainingCourse @relation(fields: [courseId], references: [id])
+  title      String
+  content    String
+  videoUrl   String?
+  orderIndex Int      @default(0)
+  // Optional quiz: [{ question, options: string[], correctIndex: number }]
+  quiz       Json?
+  createdAt  DateTime @default(now())
+
+  completions LessonCompletion[]
+
+  @@index([courseId])
+}
+
+model TrainingAssignment {
+  id           String                   @id @default(uuid())
+  courseId     String
+  course       TrainingCourse           @relation(fields: [courseId], references: [id])
+  userId       String
+  user         User                     @relation(fields: [userId], references: [id])
+  assignedById String?
+  dueAt        DateTime?
+  status       TrainingAssignmentStatus @default(ASSIGNED)
+  assignedAt   DateTime                 @default(now())
+  completedAt  DateTime?
+
+  lessonCompletions LessonCompletion[]
+
+  @@index([userId])
+  @@index([courseId])
+  @@unique([courseId, userId])
+}
+
+model LessonCompletion {
+  id           String              @id @default(uuid())
+  assignmentId String
+  assignment   TrainingAssignment  @relation(fields: [assignmentId], references: [id])
+  lessonId     String
+  lesson       TrainingLesson      @relation(fields: [lessonId], references: [id])
+  completedAt  DateTime            @default(now())
+  quizScorePercent Int?
+  quizAnswers  Json?
+
+  @@unique([assignmentId, lessonId])
+}
+
+// ======================================================================
+// NOTIFICATIONS
+// ======================================================================
+// Wired only into events that actually fire elsewhere in this codebase —
+// no notification type exists here for an event this build can't actually
+// produce (e.g. there is no scheduled job for task-overdue or transfer-
+// timeout detection yet, so those notification types are deliberately not
+// implemented rather than faked with a hook that never fires).
+
+enum NotificationSeverity {
+  INFO
+  ACTION
+  WARNING
+  CRITICAL
+}
+
+model Notification {
+  id                String               @id @default(uuid())
+  userId            String
+  agencyId          String?
+  type              String
+  severity          NotificationSeverity @default(INFO)
+  title             String
+  body              String?
+  relatedEntityType String?
+  relatedEntityId   String?
+  readAt            DateTime?
+  createdAt         DateTime             @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+}
+
+model NotificationPreference {
+  userId       String   @id
+  emailEnabled Boolean  @default(true)
+  // Types the user has muted from generating further notifications.
+  // CRITICAL-severity notifications ignore mutes — per spec, critical
+  // transfer alerts must not disappear into a generic list.
+  mutedTypes   String[] @default([])
+  updatedAt    DateTime @updatedAt
+}
+
+// ======================================================================
+// WINBACK & CROSS-SELL ENGINE
+// ======================================================================
+// CROSS_SELL opportunities are auto-detected from real data: when a lead or
+// transfer is dispositioned SOLD, the customer's product list updates, and
+// a gap against a simple complementary-product rule set creates a real
+// opportunity — never a fabricated guess.
+//
+// WINBACK opportunities are honestly NOT auto-detected in this build: there
+// is no policy/cancellation lifecycle tracked anywhere in this schema, so
+// there is no real signal to detect a lapse from. Winback opportunities are
+// created from real, manually-entered data (an agency user records that a
+// specific customer's policy lapsed, when, and at what premium) rather than
+// inventing an auto-detection rule with no real data behind it.
+
+enum OpportunityType {
+  WINBACK
+  CROSS_SELL
+}
+
+enum OpportunityStatus {
+  OPEN
+  ASSIGNED
+  ATTEMPTED
+  CONTACTED
+  QUOTED
+  WON
+  DECLINED
+  SNOOZED
+  INELIGIBLE
+}
+
+model Opportunity {
+  id               String            @id @default(uuid())
+  agencyId         String
+  agency           Agency            @relation(fields: [agencyId], references: [id])
+  customerId       String
+  customer         Customer          @relation(fields: [customerId], references: [id])
+  type             OpportunityType
+  status           OpportunityStatus @default(OPEN)
+  product          String
+  // Winback-specific fields — null for CROSS_SELL opportunities.
+  previousProduct     String?
+  previousPremiumCents Int?
+  lostAt              DateTime?
+  lostReason          String?
+  reason           String
+  priorityScore    Int               @default(0)
+  assignedToId     String?
+  wonPremiumCents  Int?
+  snoozeUntil      DateTime?
+  createdById      String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  events OpportunityEvent[]
+
+  @@index([agencyId])
+  @@index([customerId])
+  @@index([status])
+  @@index([type])
+}
+
+model OpportunityEvent {
+  id            String      @id @default(uuid())
+  opportunityId String
+  opportunity   Opportunity @relation(fields: [opportunityId], references: [id])
+  fromStatus    String?
+  toStatus      String
+  actorId       String?
+  reason        String?
+  createdAt     DateTime    @default(now())
+
+  @@index([opportunityId])
+}
+
+// ======================================================================
+// OWNER IMPERSONATION
+// ======================================================================
+// Deliberately NOT modeled with relation fields to User — kept as plain
+// scalar IDs and looked up separately, exactly per the lesson learned in
+// this project's schema-vs-query audit: fewer relations here means fewer
+// ways to introduce the same class of bug.
+//
+// Security design: the impersonation cookie is opaque (just this log's id).
+// The middleware only honors it if the REAL, currently-authenticated
+// session's user ID matches this log's platformOwnerId — so the cookie
+// value alone can never be forged into impersonating an arbitrary account;
+// it only ever re-attaches to whichever platform owner actually started it.
+// Sensitive Platform-Owner-only routes stay protected automatically: while
+// impersonating, req.user.role becomes the TARGET's role, so any route
+// still checking requireRole('PLATFORM_OWNER') correctly denies access —
+// exactly the spec's "sensitive operations require exiting impersonation."
+
+model ImpersonationLog {
+  id             String    @id @default(uuid())
+  platformOwnerId String
+  targetUserId   String
+  startedAt      DateTime  @default(now())
+  endedAt        DateTime?
+
+  @@index([platformOwnerId])
+  @@index([targetUserId])
+}
