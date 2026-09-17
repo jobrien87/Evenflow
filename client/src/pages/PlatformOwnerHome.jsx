@@ -13,6 +13,7 @@ export default function PlatformOwnerHome() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: '', ownerFirstName: '', ownerLastName: '', ownerEmail: '' });
   const [status, setStatus] = useState('');
+  const [inviteLink, setInviteLink] = useState('');
 
   useEffect(() => {
     refresh();
@@ -26,9 +27,13 @@ export default function PlatformOwnerHome() {
   async function submit(e) {
     e.preventDefault();
     setStatus('Creating…');
+    setInviteLink('');
     try {
       const res = await api.createAgency(form);
       setStatus(`Agency created. Invitation email: ${res.invitation.emailStatus}`);
+      if (res.invitation.emailStatus !== 'SENT' && res.invitation.acceptUrl) {
+        setInviteLink(res.invitation.acceptUrl);
+      }
       setForm({ name: '', ownerFirstName: '', ownerLastName: '', ownerEmail: '' });
       setShowForm(false);
       await refresh();
@@ -82,6 +87,13 @@ export default function PlatformOwnerHome() {
             </form>
           )}
           {status && <div style={s.status}>{status}</div>}
+          {inviteLink && (
+            <div style={s.linkBox}>
+              Email wasn't sent — share this activation link with the agency owner directly:
+              <br />
+              <a style={s.link} href={inviteLink} target="_blank" rel="noreferrer">{inviteLink}</a>
+            </div>
+          )}
 
           <div style={s.list}>
             {agencies.map((a) => (
@@ -115,6 +127,8 @@ const s = {
   input: { padding: '10px 12px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff' },
   submitButton: { padding: '10px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
   status: { color: '#00e5ff', marginBottom: 16, fontSize: 13 },
+  linkBox: { color: '#aaa', fontSize: 13, marginBottom: 16, background: '#111', border: '1px solid #222', borderRadius: 8, padding: 12 },
+  link: { color: '#00e5ff', wordBreak: 'break-all' },
   list: { display: 'flex', flexDirection: 'column', gap: 8 },
   row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#111', border: '1px solid #1a1a1a', borderRadius: 8, padding: 16 },
   rowTitle: { fontWeight: 600 },

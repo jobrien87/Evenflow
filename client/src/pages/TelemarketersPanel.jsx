@@ -8,6 +8,7 @@ export default function TelemarketersPanel() {
   const [form, setForm] = useState({ email: '', firstName: '', lastName: '' });
   const [assignAgency, setAssignAgency] = useState({});
   const [status, setStatus] = useState('');
+  const [inviteLink, setInviteLink] = useState('');
 
   useEffect(() => {
     load();
@@ -22,9 +23,13 @@ export default function TelemarketersPanel() {
   async function invite(e) {
     e.preventDefault();
     setStatus('Inviting…');
+    setInviteLink('');
     try {
       const res = await api.inviteTelemarketer(form);
       setStatus(`Invited. Email status: ${res.emailStatus}`);
+      if (res.emailStatus !== 'SENT' && res.acceptUrl) {
+        setInviteLink(res.acceptUrl);
+      }
       setForm({ email: '', firstName: '', lastName: '' });
       setShowInvite(false);
       await load();
@@ -65,6 +70,13 @@ export default function TelemarketersPanel() {
         </form>
       )}
       {status && <div style={s.status}>{status}</div>}
+      {inviteLink && (
+        <div style={s.linkBox}>
+          Email wasn't sent — share this activation link directly:
+          <br />
+          <a style={s.link} href={inviteLink} target="_blank" rel="noreferrer">{inviteLink}</a>
+        </div>
+      )}
 
       {tms.map((tm) => (
         <div key={tm.id} style={s.card}>
@@ -106,6 +118,8 @@ const s = {
   input: { padding: '10px 12px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff' },
   submitButton: { padding: '10px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
   status: { color: '#00e5ff', marginBottom: 12, fontSize: 13 },
+  linkBox: { color: '#aaa', fontSize: 13, marginBottom: 12, background: '#111', border: '1px solid #222', borderRadius: 8, padding: 12 },
+  link: { color: '#00e5ff', wordBreak: 'break-all' },
   card: { background: '#111', border: '1px solid #1a1a1a', borderRadius: 8, padding: 16, marginBottom: 10 },
   cardTop: { marginBottom: 10 },
   rowTitle: { fontWeight: 600, fontSize: 14 },

@@ -22,6 +22,7 @@ export default function AgencyOwnerHome() {
   const [form, setForm] = useState({ email: '', firstName: '', lastName: '', role: 'PRODUCER' });
   const [leadForm, setLeadForm] = useState({ firstName: '', lastName: '', phone: '', email: '', product: 'Auto', assignedToId: '' });
   const [status, setStatus] = useState('');
+  const [inviteLink, setInviteLink] = useState('');
   const [leadStatus, setLeadStatus] = useState('');
 
   useEffect(() => {
@@ -37,9 +38,13 @@ export default function AgencyOwnerHome() {
   async function invite(e) {
     e.preventDefault();
     setStatus('Sending invitation…');
+    setInviteLink('');
     try {
       const res = await api.inviteUser(form);
       setStatus(`Invited. Email status: ${res.emailStatus}`);
+      if (res.emailStatus !== 'SENT' && res.acceptUrl) {
+        setInviteLink(res.acceptUrl);
+      }
       setForm({ email: '', firstName: '', lastName: '', role: 'PRODUCER' });
       setShowInvite(false);
       await load();
@@ -128,6 +133,13 @@ export default function AgencyOwnerHome() {
               </form>
             )}
             {status && <div style={s.status}>{status}</div>}
+            {inviteLink && (
+              <div style={s.linkBox}>
+                Email wasn't sent — share this activation link directly:
+                <br />
+                <a style={s.link} href={inviteLink} target="_blank" rel="noreferrer">{inviteLink}</a>
+              </div>
+            )}
             {users.map((u) => (
               <div key={u.id} style={s.row}>
                 <div>
@@ -204,6 +216,8 @@ const s = {
   input: { padding: '10px 12px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff' },
   submitButton: { padding: '10px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
   status: { color: '#00e5ff', marginBottom: 12, fontSize: 13 },
+  linkBox: { color: '#aaa', fontSize: 13, marginBottom: 12, background: '#111', border: '1px solid #222', borderRadius: 8, padding: 12 },
+  link: { color: '#00e5ff', wordBreak: 'break-all' },
   row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#111', border: '1px solid #1a1a1a', borderRadius: 8, padding: 14, marginBottom: 8 },
   rowTitle: { fontWeight: 600, fontSize: 14 },
   rowSub: { color: '#666', fontSize: 12 },

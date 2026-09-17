@@ -108,6 +108,7 @@ router.post('/invite', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_O
       success: true,
       user: { id: user.id, email: user.email, role: user.role, status: user.status },
       emailStatus: emailResult.status,
+      acceptUrl: emailResult.acceptUrl,
     });
   } catch (err) {
     next(err);

@@ -103,7 +103,16 @@ router.post('/', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
     return res.status(201).json({
       success: true,
       agency,
-      invitation: { id: invitation.id, expiresAt: invitation.expiresAt, emailStatus: emailResult.status },
+      invitation: {
+        id: invitation.id,
+        expiresAt: invitation.expiresAt,
+        emailStatus: emailResult.status,
+        // Surfaced so the UI can show/copy the link directly when email
+        // isn't configured (or failed) — it was being computed and then
+        // silently discarded before this, with no way for the inviter to
+        // reach it short of reading server logs.
+        acceptUrl: emailResult.acceptUrl,
+      },
     });
   } catch (err) {
     next(err);

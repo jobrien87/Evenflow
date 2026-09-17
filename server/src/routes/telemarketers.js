@@ -100,7 +100,12 @@ router.post('/invite', requireRole('PLATFORM_OWNER'), async (req, res, next) => 
       correlationId: req.correlationId,
     });
 
-    return res.status(201).json({ success: true, telemarketer: { id: user.id, email: user.email }, emailStatus: emailResult.status });
+    return res.status(201).json({
+      success: true,
+      telemarketer: { id: user.id, email: user.email },
+      emailStatus: emailResult.status,
+      acceptUrl: emailResult.acceptUrl,
+    });
   } catch (err) {
     next(err);
   }
