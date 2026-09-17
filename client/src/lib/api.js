@@ -33,7 +33,6 @@ export const api = {
   createLead: (payload) => request('/leads', { method: 'POST', body: payload }),
   dispositionLead: (id, payload) => request(`/leads/${id}/disposition`, { method: 'POST', body: payload }),
 
-  tasks: (params = '') => request(`/tasks${params}`),
   completeTask: (id, payload) => request(`/tasks/${id}/complete`, { method: 'POST', body: payload }),
 
   agencies: () => request('/agencies'),
@@ -112,7 +111,6 @@ export const api = {
   cancelSubscription: (agencyId) => request(`/billing/agencies/${agencyId}/subscription/cancel`, { method: 'POST' }),
 
   trainingCourses: () => request('/training/courses'),
-  trainingCourseDetail: (id) => request(`/training/courses/${id}`),
   createTrainingCourse: (payload) => request('/training/courses', { method: 'POST', body: payload }),
   updateTrainingCourse: (id, payload) => request(`/training/courses/${id}`, { method: 'PATCH', body: payload }),
   addTrainingLesson: (courseId, payload) => request(`/training/courses/${courseId}/lessons`, { method: 'POST', body: payload }),

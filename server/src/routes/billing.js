@@ -57,7 +57,21 @@ router.post('/plans', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
   }
 });
 
-const updatePlanSchema = createPlanSchema.partial().extend({ isActive: z.boolean().optional() });
+// NOT derived via createPlanSchema.partial(): under Zod 4, .partial() on a
+// schema with .default() fields still fills in those defaults for omitted
+// keys (Zod 3 left them genuinely absent). That would make a PATCH that
+// only renames a plan silently reset crmEnabled/transfersEnabled/
+// coachingEnabled back to their create-time defaults. Defined independently
+// with plain .optional() (no .default()) so an omitted field stays omitted.
+const updatePlanSchema = z.object({
+  name: z.string().min(1).optional(),
+  priceCents: z.number().int().min(0).optional(),
+  interval: z.enum(['MONTHLY', 'ANNUAL']).optional(),
+  crmEnabled: z.boolean().optional(),
+  transfersEnabled: z.boolean().optional(),
+  coachingEnabled: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+});
 
 router.patch('/plans/:id', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
   try {
