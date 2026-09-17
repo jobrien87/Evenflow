@@ -5,6 +5,7 @@ const { prisma } = require('../lib/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { sendInvitationEmail } = require('../lib/email');
+const { reissueInvitation } = require('../lib/invitations');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -106,6 +107,33 @@ router.post('/invite', requireRole('PLATFORM_OWNER'), async (req, res, next) => 
       emailStatus: emailResult.status,
       acceptUrl: emailResult.acceptUrl,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Reissue + resend a still-pending TM invitation (new token, new 7-day expiry).
+router.post('/:id/resend-invite', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!target || target.role !== 'TELEMARKETER') return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (target.status === 'ACTIVE') {
+      return res.status(409).json({ success: false, error: 'ALREADY_ACTIVE', message: 'This telemarketer has already activated their account.' });
+    }
+
+    const rawToken = await prisma.$transaction((tx) =>
+      reissueInvitation(tx, { userId: target.id, email: target.email, role: 'TELEMARKETER', agencyId: null, invitedById: req.user.id })
+    );
+
+    const emailResult = await sendInvitationEmail({ to: target.email, role: 'TELEMARKETER', agencyName: 'Yield Marketing', token: rawToken });
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role,
+      action: 'telemarketer.invite_resent', entityType: 'User', entityId: target.id,
+      correlationId: req.correlationId,
+    });
+
+    return res.json({ success: true, emailStatus: emailResult.status, acceptUrl: emailResult.acceptUrl });
   } catch (err) {
     next(err);
   }

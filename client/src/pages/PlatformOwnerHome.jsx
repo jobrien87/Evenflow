@@ -24,6 +24,20 @@ export default function PlatformOwnerHome() {
     setAgencies(data.agencies);
   }
 
+  async function resendAgency(agencyId) {
+    setStatus('Resending…');
+    setInviteLink('');
+    try {
+      const res = await api.resendAgencyInvite(agencyId);
+      setStatus(`Invitation resent. Email status: ${res.emailStatus}`);
+      if (res.emailStatus !== 'SENT' && res.acceptUrl) {
+        setInviteLink(res.acceptUrl);
+      }
+    } catch (err) {
+      setStatus(err.data?.message || 'Failed to resend invitation.');
+    }
+  }
+
   async function submit(e) {
     e.preventDefault();
     setStatus('Creating…');
@@ -102,7 +116,12 @@ export default function PlatformOwnerHome() {
                   <div style={s.rowTitle}>{a.name}</div>
                   <div style={s.rowSub}>{a.status}</div>
                 </div>
-                <div style={s.statusBadge}>{a.status}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={s.statusBadge}>{a.status}</div>
+                  {a.status !== 'ACTIVE' && (
+                    <button style={s.resendButton} onClick={() => resendAgency(a.id)}>RESEND INVITE</button>
+                  )}
+                </div>
               </div>
             ))}
             {agencies.length === 0 && <div style={s.empty}>EvenFlow is ready. Invite your first agency.</div>}
@@ -134,5 +153,6 @@ const s = {
   rowTitle: { fontWeight: 600 },
   rowSub: { color: '#666', fontSize: 12 },
   statusBadge: { fontSize: 11, color: '#888', border: '1px solid #333', padding: '4px 8px', borderRadius: 4 },
+  resendButton: { background: 'transparent', border: '1px solid #333', color: '#00e5ff', padding: '4px 8px', borderRadius: 4, fontSize: 11, cursor: 'pointer' },
   empty: { color: '#666', fontStyle: 'italic' },
 };

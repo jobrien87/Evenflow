@@ -38,16 +38,19 @@ export const api = {
   agencies: () => request('/agencies'),
   createAgency: (payload) => request('/agencies', { method: 'POST', body: payload }),
   updateTransferSettings: (agencyId, payload) => request(`/agencies/${agencyId}/transfer-settings`, { method: 'PATCH', body: payload }),
+  resendAgencyInvite: (agencyId) => request(`/agencies/${agencyId}/resend-invite`, { method: 'POST' }),
 
   users: (params = '') => request(`/users${params}`),
   inviteUser: (payload) => request('/users/invite', { method: 'POST', body: payload }),
   deactivateUser: (userId) => request(`/users/${userId}/deactivate`, { method: 'POST' }),
+  resendUserInvite: (userId) => request(`/users/${userId}/resend-invite`, { method: 'POST' }),
 
   telemarketers: () => request('/telemarketers'),
   myAssignments: () => request('/telemarketers/me/assignments'),
   inviteTelemarketer: (payload) => request('/telemarketers/invite', { method: 'POST', body: payload }),
   assignTelemarketer: (payload) => request('/telemarketers/assign', { method: 'POST', body: payload }),
   endAssignment: (id) => request(`/telemarketers/assignments/${id}/end`, { method: 'POST' }),
+  resendTelemarketerInvite: (id) => request(`/telemarketers/${id}/resend-invite`, { method: 'POST' }),
 
   transfers: (params = '') => request(`/transfers${params}`),
   createTransfer: (payload) => request('/transfers', { method: 'POST', body: payload }),

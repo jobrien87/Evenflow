@@ -20,6 +20,20 @@ export default function TelemarketersPanel() {
     setAgencies(agencyData.agencies);
   }
 
+  async function resendTm(tmId) {
+    setStatus('Resending…');
+    setInviteLink('');
+    try {
+      const res = await api.resendTelemarketerInvite(tmId);
+      setStatus(`Invitation resent. Email status: ${res.emailStatus}`);
+      if (res.emailStatus !== 'SENT' && res.acceptUrl) {
+        setInviteLink(res.acceptUrl);
+      }
+    } catch (err) {
+      setStatus(err.data?.message || 'Failed to resend invitation.');
+    }
+  }
+
   async function invite(e) {
     e.preventDefault();
     setStatus('Inviting…');
@@ -85,6 +99,9 @@ export default function TelemarketersPanel() {
               <div style={s.rowTitle}>{tm.firstName} {tm.lastName}</div>
               <div style={s.rowSub}>{tm.email} · {tm.status}</div>
             </div>
+            {tm.status === 'INVITED' && (
+              <button style={s.resendButton} onClick={() => resendTm(tm.id)}>RESEND INVITE</button>
+            )}
           </div>
           <div style={s.assignedList}>
             {tm.telemarketerAssignments.length === 0 && <div style={s.empty}>No offices assigned yet.</div>}
@@ -121,7 +138,8 @@ const s = {
   linkBox: { color: '#aaa', fontSize: 13, marginBottom: 12, background: '#111', border: '1px solid #222', borderRadius: 8, padding: 12 },
   link: { color: '#00e5ff', wordBreak: 'break-all' },
   card: { background: '#111', border: '1px solid #1a1a1a', borderRadius: 8, padding: 16, marginBottom: 10 },
-  cardTop: { marginBottom: 10 },
+  cardTop: { marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  resendButton: { background: 'transparent', border: '1px solid #333', color: '#00e5ff', padding: '4px 8px', borderRadius: 4, fontSize: 11, cursor: 'pointer' },
   rowTitle: { fontWeight: 600, fontSize: 14 },
   rowSub: { color: '#666', fontSize: 12 },
   assignedList: { marginBottom: 10 },

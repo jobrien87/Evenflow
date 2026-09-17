@@ -35,6 +35,20 @@ export default function AgencyOwnerHome() {
     setUsers(userData.users);
   }
 
+  async function resendUser(userId) {
+    setStatus('Resending…');
+    setInviteLink('');
+    try {
+      const res = await api.resendUserInvite(userId);
+      setStatus(`Invitation resent. Email status: ${res.emailStatus}`);
+      if (res.emailStatus !== 'SENT' && res.acceptUrl) {
+        setInviteLink(res.acceptUrl);
+      }
+    } catch (err) {
+      setStatus(err.data?.message || 'Failed to resend invitation.');
+    }
+  }
+
   async function invite(e) {
     e.preventDefault();
     setStatus('Sending invitation…');
@@ -148,6 +162,9 @@ export default function AgencyOwnerHome() {
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <div style={s.badge}>{u.status}</div>
+                  {u.status === 'INVITED' && (
+                    <button style={s.resendButton} onClick={() => resendUser(u.id)}>RESEND INVITE</button>
+                  )}
                   {u.status !== 'DEACTIVATED' && (
                     <button style={s.deactivateButton} onClick={() => deactivate(u.id)}>DEACTIVATE</button>
                   )}
@@ -223,5 +240,6 @@ const s = {
   rowSub: { color: '#666', fontSize: 12 },
   badge: { fontSize: 11, color: '#888', border: '1px solid #333', padding: '4px 8px', borderRadius: 4 },
   deactivateButton: { fontSize: 10, color: '#ff4d4d', border: '1px solid #ff4d4d44', background: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer' },
+  resendButton: { fontSize: 10, color: '#00e5ff', border: '1px solid #333', background: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer' },
   empty: { color: '#666', fontStyle: 'italic' },
 };

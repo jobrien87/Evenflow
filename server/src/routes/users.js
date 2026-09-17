@@ -5,6 +5,7 @@ const { prisma } = require('../lib/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { sendInvitationEmail } = require('../lib/email');
+const { reissueInvitation } = require('../lib/invitations');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -110,6 +111,38 @@ router.post('/invite', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_O
       emailStatus: emailResult.status,
       acceptUrl: emailResult.acceptUrl,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Reissue + resend a still-pending invitation (new token, new 7-day expiry).
+router.post('/:userId/resend-invite', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const target = await prisma.user.findUnique({ where: { id: req.params.userId } });
+    if (!target) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (req.user.role !== 'PLATFORM_OWNER' && target.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    if (target.status === 'ACTIVE') {
+      return res.status(409).json({ success: false, error: 'ALREADY_ACTIVE', message: 'This user has already activated their account.' });
+    }
+
+    const agency = target.agencyId ? await prisma.agency.findUnique({ where: { id: target.agencyId } }) : null;
+
+    const rawToken = await prisma.$transaction((tx) =>
+      reissueInvitation(tx, { userId: target.id, email: target.email, role: target.role, agencyId: target.agencyId, invitedById: req.user.id })
+    );
+
+    const emailResult = await sendInvitationEmail({ to: target.email, role: target.role, agencyName: agency ? agency.name : 'EvenFlow', token: rawToken });
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: target.agencyId,
+      action: 'user.invite_resent', entityType: 'User', entityId: target.id,
+      correlationId: req.correlationId,
+    });
+
+    return res.json({ success: true, emailStatus: emailResult.status, acceptUrl: emailResult.acceptUrl });
   } catch (err) {
     next(err);
   }

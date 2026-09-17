@@ -5,6 +5,7 @@ const { prisma } = require('../lib/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { sendInvitationEmail } = require('../lib/email');
+const { reissueInvitation } = require('../lib/invitations');
 
 const router = express.Router();
 
@@ -114,6 +115,42 @@ router.post('/', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
         acceptUrl: emailResult.acceptUrl,
       },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Platform Owner only: reissue the owner's invitation (new token, new
+// 7-day expiry, old token invalidated) and resend/re-surface the link —
+// covers a lost email, an expired invite, or email simply not being
+// configured yet at the time the agency was first created.
+router.post('/:agencyId/resend-invite', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const agency = await prisma.agency.findUnique({ where: { id: req.params.agencyId } });
+    if (!agency) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+
+    const owner = await prisma.user.findFirst({
+      where: { agencyId: agency.id, role: 'AGENCY_OWNER' },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!owner) return res.status(404).json({ success: false, error: 'OWNER_NOT_FOUND' });
+    if (owner.status === 'ACTIVE') {
+      return res.status(409).json({ success: false, error: 'ALREADY_ACTIVE', message: 'This owner has already activated their account.' });
+    }
+
+    const rawToken = await prisma.$transaction((tx) =>
+      reissueInvitation(tx, { userId: owner.id, email: owner.email, role: 'AGENCY_OWNER', agencyId: agency.id, invitedById: req.user.id })
+    );
+
+    const emailResult = await sendInvitationEmail({ to: owner.email, role: 'AGENCY_OWNER', agencyName: agency.name, token: rawToken });
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: agency.id,
+      action: 'agency.invite_resent', entityType: 'Agency', entityId: agency.id,
+      correlationId: req.correlationId,
+    });
+
+    return res.json({ success: true, emailStatus: emailResult.status, acceptUrl: emailResult.acceptUrl });
   } catch (err) {
     next(err);
   }
