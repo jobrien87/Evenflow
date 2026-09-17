@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import FlowScoreCard from './FlowScoreCard';
 
 const PRODUCTS = ['Auto', 'Home', 'Life', 'Health'];
 
@@ -38,6 +39,10 @@ export default function TelemarketerHome() {
 
   return (
     <div style={s.wrap}>
+      <section style={s.section}>
+        <FlowScoreCard scope="me" />
+      </section>
+
       <section style={s.section}>
         <h3 style={s.h3}>ASSIGNED OFFICES</h3>
         {assignments === null ? (

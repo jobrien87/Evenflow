@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { useAuth } from '../lib/AuthContext';
+import FlowScoreCard from './FlowScoreCard';
 import TransfersPanel from './TransfersPanel';
 import VendorsPanel from './VendorsPanel';
 import FinancialsPanel from './FinancialsPanel';
@@ -13,6 +15,7 @@ import GoalsPanel from './GoalsPanel';
 import Customer360Modal from './Customer360Modal';
 
 export default function AgencyOwnerHome() {
+  const { user } = useAuth();
   const [tab, setTab] = useState('team');
   const [leads, setLeads] = useState([]);
   const [users, setUsers] = useState([]);
@@ -127,6 +130,10 @@ export default function AgencyOwnerHome() {
         <GoalsPanel />
       ) : (
         <>
+          <section style={s.section}>
+            <FlowScoreCard scope="agency" agencyId={user?.agencyId} title="AGENCY FLOW SCORE" />
+          </section>
+
           <section style={s.section}>
             <div style={s.headerRow}>
               <h3 style={s.h3}>TEAM ({users.length})</h3>

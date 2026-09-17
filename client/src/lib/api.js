@@ -76,6 +76,11 @@ export const api = {
   createRevenueEvent: (payload) => request('/financials/revenue-events', { method: 'POST', body: payload }),
   createCostEvent: (payload) => request('/financials/cost-events', { method: 'POST', body: payload }),
 
+  myFlowScore: () => request('/flow-score/me'),
+  userFlowScore: (userId) => request(`/flow-score/user/${userId}`),
+  agencyFlowScore: (agencyId) => request(`/flow-score/agency/${agencyId}`),
+  flowScoreHistory: (subjectType, subjectId) => request(`/flow-score/history?subjectType=${subjectType}&subjectId=${subjectId}`),
+
   edStatus: () => request('/ed/status'),
   edAsk: (message, humorLevel) => request('/ed/ask', { method: 'POST', body: { message, humorLevel } }),
   edHistory: () => request('/ed/history'),

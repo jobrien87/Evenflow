@@ -18,6 +18,11 @@ router.get('/', async (req, res, next) => {
       agencyId = req.query.agencyId || undefined;
     } else {
       agencyId = req.user.agencyId;
+      // A non-Platform-Owner with no agencyId (e.g. a Telemarketer, who
+      // isn't tied to one agency) must never fall through to an
+      // unscoped `where: {}` — that would leak every user platform-wide.
+      // Same pattern leads.js already uses for the equivalent case.
+      if (!agencyId) return res.json({ success: true, users: [] });
     }
     const users = await prisma.user.findMany({
       where: agencyId ? { agencyId } : {},

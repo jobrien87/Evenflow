@@ -10,6 +10,7 @@ const { recordTransferAcceptedRevenue, recordCreditApproved, recordTransferSaleR
 const { notifyAgencyOwners, notifyUser } = require('../lib/notifications');
 const { normalizePhone, normalizeEmail } = require('../lib/normalize');
 const { updateCustomerProductsAndDetectCrossSells } = require('../lib/opportunityEvents');
+const { computeTelemarketerScore, computeAgencyScore } = require('../lib/flowScore');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -391,6 +392,14 @@ router.post('/:id/disposition', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'P
         soldProduct: parsed.data.saleProduct,
       });
     }
+
+    // A disposition is a real downstream-quality signal for the telemarketer
+    // who sourced this transfer, and for the receiving agency — recompute
+    // now rather than on every dashboard view.
+    Promise.all([
+      computeTelemarketerScore(updated.createdByTMId),
+      updated.agencyId ? computeAgencyScore(updated.agencyId) : Promise.resolve(),
+    ]).catch((err) => console.error('[flowScore] recompute after transfer disposition failed', err.message));
 
     return res.json({ success: true, transfer: updated });
   } catch (err) {

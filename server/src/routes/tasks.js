@@ -3,6 +3,7 @@ const { z } = require('zod');
 const { prisma } = require('../lib/db');
 const { requireAuth, scopeAgencyId } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
+const { computeProducerScore } = require('../lib/flowScore');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -112,6 +113,12 @@ router.post('/:taskId/complete', async (req, res, next) => {
       after: { status: updated.status },
       correlationId: req.correlationId,
     });
+
+    if (updated.status === 'COMPLETED' && updated.assignedToId) {
+      computeProducerScore(updated.assignedToId).catch((err) =>
+        console.error('[flowScore] recompute after task completion failed', err.message)
+      );
+    }
 
     return res.json({ success: true, task: updated });
   } catch (err) {

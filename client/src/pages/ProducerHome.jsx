@@ -3,6 +3,7 @@ import { api } from '../lib/api';
 import CallsPanel from './CallsPanel';
 import TrainingPanel from './TrainingPanel';
 import OpportunitiesPanel from './OpportunitiesPanel';
+import FlowScoreCard from './FlowScoreCard';
 
 export default function ProducerHome() {
   const [tab, setTab] = useState('home');
@@ -108,6 +109,10 @@ export default function ProducerHome() {
         <button style={s.tab(false)} onClick={() => setTab('training')}>TRAINING</button>
         <button style={s.tab(false)} onClick={() => setTab('opportunities')}>WINBACKS/CROSS-SELL</button>
       </div>
+      <section style={s.section}>
+        <FlowScoreCard scope="me" />
+      </section>
+
       <section style={s.section}>
         <h3 style={s.h3}>YESTERDAY</h3>
         <div style={s.statsRow}>

@@ -14,6 +14,7 @@ const { transcribe } = require('../lib/transcriptionProvider');
 const { analyzeTranscript } = require('../lib/callAnalysis');
 const { estimateCostMicros } = require('../lib/aiCost');
 const { notifyUser } = require('../lib/notifications');
+const { computeProducerScore, computeAgencyScore } = require('../lib/flowScore');
 
 async function setStatus(callId, status, extra = {}) {
   return prisma.call.update({ where: { id: callId }, data: { status, ...extra } });
@@ -97,6 +98,14 @@ async function processCall(callId) {
     });
 
     await setStatus(callId, 'COMPLETE');
+
+    // A new scored call is exactly the kind of real state change that
+    // should move a Flow Score — recompute now rather than on every
+    // dashboard view (per spec: no synchronous recompute-on-every-click).
+    Promise.all([
+      computeProducerScore(call.uploadedById),
+      computeAgencyScore(call.agencyId),
+    ]).catch((err) => console.error('[flowScore] recompute after call analysis failed', err.message));
 
     await notifyUser({
       userId: call.uploadedById,

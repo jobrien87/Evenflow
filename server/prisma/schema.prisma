@@ -1065,3 +1065,53 @@ model ImpersonationLog {
   @@index([platformOwnerId])
   @@index([targetUserId])
 }
+
+// ======================================================================
+// FLOW SCORE
+// ======================================================================
+// Every component is computed from real rows already in this schema
+// (leads, tasks, transfers, call analyses) — never fabricated. A component
+// with zero underlying data points is excluded entirely (weights of the
+// remaining components are renormalized to still sum to 100), not defaulted
+// to some invented number. See lib/flowScore.js for the actual calculation.
+
+enum FlowScoreSubjectType {
+  USER
+  AGENCY
+}
+
+enum FlowScoreRole {
+  PRODUCER
+  TELEMARKETER
+  AGENCY
+}
+
+model FlowScoreWeightConfig {
+  id        String        @id @default(uuid())
+  role      FlowScoreRole
+  version   Int
+  // { componentKey: weight } — weights for an active config always sum to 100.
+  weights   Json
+  isActive  Boolean       @default(true)
+  createdAt DateTime      @default(now())
+
+  snapshots FlowScoreSnapshot[]
+
+  @@unique([role, version])
+  @@index([role, isActive])
+}
+
+model FlowScoreSnapshot {
+  id                 String               @id @default(uuid())
+  subjectType        FlowScoreSubjectType
+  subjectId          String
+  score              Int
+  // [{ key, label, value, weight, contribution, sampleSize, lowConfidence }]
+  components         Json
+  excludedComponents Json
+  weightConfigId     String
+  weightConfig       FlowScoreWeightConfig @relation(fields: [weightConfigId], references: [id])
+  computedAt         DateTime             @default(now())
+
+  @@index([subjectType, subjectId, computedAt])
+}

@@ -8,6 +8,7 @@ const { normalizePhone, normalizeEmail } = require('../lib/normalize');
 const { recordLeadSaleRevenue } = require('../lib/financialEvents');
 const { notifyUser } = require('../lib/notifications');
 const { updateCustomerProductsAndDetectCrossSells } = require('../lib/opportunityEvents');
+const { computeProducerScore, computeAgencyScore } = require('../lib/flowScore');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -260,10 +261,18 @@ router.post('/:leadId/disposition', async (req, res, next) => {
     if (parsed.data.status === 'SOLD' && updated.customerId && parsed.data.saleProduct) {
       await updateCustomerProductsAndDetectCrossSells({
         customerId: updated.customerId,
-        agencyId,
+        agencyId: lead.agencyId,
         soldProduct: parsed.data.saleProduct,
       });
     }
+
+    // A disposition changes real conversion/responsiveness signal —
+    // recompute the assigned producer's and agency's Flow Score now
+    // rather than on every dashboard view.
+    Promise.all([
+      updated.assignedToId ? computeProducerScore(updated.assignedToId) : Promise.resolve(),
+      computeAgencyScore(lead.agencyId),
+    ]).catch((err) => console.error('[flowScore] recompute after lead disposition failed', err.message));
 
     return res.json({ success: true, lead: updated });
   } catch (err) {
