@@ -74,16 +74,11 @@ it's the one role in the system with zero agency-level self-service.
 ## leads.js
 | Route | Role(s) | Tenant scoping | Notes |
 |---|---|---|---|
-| GET / | Any authenticated | `scopeAgencyId`; Producers implicitly further limited by UI to their own assignments (not server-enforced — see finding) | |
+| GET / | Any authenticated | `scopeAgencyId`; PRODUCER additionally forced to `assignedToId: req.user.id` in the where-clause | Correction: an earlier version of this doc claimed Producer-scoping wasn't server-enforced here — re-verified against the actual code (`leads.js:29`) and it is. |
+| GET /funnel | Any authenticated | `scopeAgencyId`; `scope=me` restricted to PRODUCER/TELEMARKETER | Added this session (Phase B) — real response-speed/contact/quote/close rates, never fabricated. |
 | POST / | Any authenticated | Caller's own agency | |
 | GET /:leadId | Any authenticated | Explicit `agencyId` match check | |
 | POST /:leadId/disposition | Any authenticated | Explicit `agencyId` match check | |
-
-**Finding**: `GET /leads` has no `requireRole` and no server-side check
-restricting a PRODUCER to only their own `assignedToId` — a Producer can
-list every lead in their own agency (not another agency's), just not
-necessarily only their own assignment. Confirm this is intended (visibility
-into teammates' leads) rather than an oversight.
 
 ## tasks.js
 | Route | Role(s) | Tenant scoping | Notes |

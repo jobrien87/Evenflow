@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import FlowScoreCard from './FlowScoreCard';
+import FunnelMetricsCard from './FunnelMetricsCard';
 import TransfersPanel from './TransfersPanel';
 import VendorsPanel from './VendorsPanel';
 import FinancialsPanel from './FinancialsPanel';
@@ -132,6 +133,10 @@ export default function AgencyOwnerHome() {
         <>
           <section style={s.section}>
             <FlowScoreCard scope="agency" agencyId={user?.agencyId} title="AGENCY FLOW SCORE" />
+          </section>
+
+          <section style={s.section}>
+            <FunnelMetricsCard scope="agency" title="AGENCY FUNNEL" />
           </section>
 
           <section style={s.section}>

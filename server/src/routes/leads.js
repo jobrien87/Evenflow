@@ -9,6 +9,7 @@ const { recordLeadSaleRevenue } = require('../lib/financialEvents');
 const { notifyUser } = require('../lib/notifications');
 const { updateCustomerProductsAndDetectCrossSells } = require('../lib/opportunityEvents');
 const { computeProducerScore, computeAgencyScore } = require('../lib/flowScore');
+const { computeFunnel } = require('../lib/funnelMetrics');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -153,6 +154,37 @@ router.post('/', async (req, res, next) => {
     }
 
     return res.status(201).json({ success: true, lead: result.lead, possibleDuplicate: result.isDuplicate });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Registered before /:leadId — "funnel" would otherwise be swallowed as a
+// leadId by that param route (same anti-shadowing pattern already used
+// elsewhere in this app, e.g. transfers.js's /credit-requests).
+router.get('/funnel', async (req, res, next) => {
+  try {
+    const agencyId = scopeAgencyId(req);
+    if (req.user.role !== 'PLATFORM_OWNER' && !agencyId) {
+      return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+    }
+    const scope = req.query.scope === 'me' ? 'me' : 'agency';
+    if (scope === 'me' && !['PRODUCER', 'TELEMARKETER'].includes(req.user.role)) {
+      return res.status(400).json({ success: false, error: 'NOT_APPLICABLE', message: 'scope=me applies to Producers.' });
+    }
+
+    const to = req.query.to ? new Date(req.query.to) : new Date();
+    const from = req.query.from ? new Date(req.query.from) : new Date(to.getFullYear(), to.getMonth(), 1);
+
+    const mine = scope === 'me' ? await computeFunnel({ agencyId, userId: req.user.id, from, to }) : null;
+    const agencyWide = await computeFunnel({ agencyId, from, to });
+
+    return res.json({
+      success: true,
+      period: { from: from.toISOString(), to: to.toISOString() },
+      mine,
+      agency: agencyWide,
+    });
   } catch (err) {
     next(err);
   }

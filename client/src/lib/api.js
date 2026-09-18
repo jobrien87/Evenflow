@@ -30,6 +30,7 @@ export const api = {
   startMyDay: () => request('/start-my-day'),
 
   leads: (params = '') => request(`/leads${params}`),
+  leadFunnel: (params = '') => request(`/leads/funnel${params}`),
   createLead: (payload) => request('/leads', { method: 'POST', body: payload }),
   dispositionLead: (id, payload) => request(`/leads/${id}/disposition`, { method: 'POST', body: payload }),
 

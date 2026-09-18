@@ -4,6 +4,7 @@ import CallsPanel from './CallsPanel';
 import TrainingPanel from './TrainingPanel';
 import OpportunitiesPanel from './OpportunitiesPanel';
 import FlowScoreCard from './FlowScoreCard';
+import FunnelMetricsCard from './FunnelMetricsCard';
 
 export default function ProducerHome() {
   const [tab, setTab] = useState('home');
@@ -111,6 +112,10 @@ export default function ProducerHome() {
       </div>
       <section style={s.section}>
         <FlowScoreCard scope="me" />
+      </section>
+
+      <section style={s.section}>
+        <FunnelMetricsCard scope="me" title="MY FUNNEL" />
       </section>
 
       <section style={s.section}>
