@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import ChatThread from './ChatThread';
 
 const DISPOSITIONS = ['CONTACTED', 'QUOTE_STARTED', 'QUOTED', 'SOLD', 'FOLLOW_UP', 'NOT_INTERESTED', 'BAD_CONTACT', 'DUPLICATE', 'NOT_ELIGIBLE', 'DISCONNECTED', 'OTHER'];
 
@@ -7,6 +8,7 @@ export default function TransfersPanel() {
   const [transfers, setTransfers] = useState([]);
   const [busyId, setBusyId] = useState(null);
   const [error, setError] = useState('');
+  const [discussTransfer, setDiscussTransfer] = useState(null);
 
   useEffect(() => {
     load();
@@ -62,6 +64,9 @@ export default function TransfersPanel() {
                 >
                   REJECT
                 </button>
+                <button style={s.smallButtonOutline} onClick={() => setDiscussTransfer(t)}>
+                  DISCUSS
+                </button>
               </div>
             </div>
           ))}
@@ -91,6 +96,9 @@ export default function TransfersPanel() {
                 {t.status === 'COMPLETED' && (
                   <DispositionForm transferId={t.id} onDone={load} />
                 )}
+                <button style={s.smallButtonOutline} onClick={() => setDiscussTransfer(t)}>
+                  DISCUSS
+                </button>
               </div>
             </div>
           ))}
@@ -108,11 +116,23 @@ export default function TransfersPanel() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={s.badge}>{t.status.replace(/_/g, ' ')}{t.disposition ? ` · ${t.disposition}` : ''}</div>
               {t.status === 'DISPOSITIONED' && <CreditRequestForm transferId={t.id} onDone={load} />}
+              <button style={s.smallButtonOutline} onClick={() => setDiscussTransfer(t)}>
+                DISCUSS
+              </button>
             </div>
           </div>
         ))}
         {rest.length === 0 && offered.length === 0 && active.length === 0 && <div style={s.empty}>No transfers yet.</div>}
       </section>
+
+      {discussTransfer && (
+        <ChatThread
+          entityType="TRANSFER"
+          entityId={discussTransfer.id}
+          title={`DISCUSS · ${discussTransfer.firstName} ${discussTransfer.lastName}`}
+          onClose={() => setDiscussTransfer(null)}
+        />
+      )}
     </div>
   );
 }

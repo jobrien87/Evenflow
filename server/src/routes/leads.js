@@ -24,9 +24,25 @@ router.get('/', async (req, res, next) => {
 
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const pageSize = Math.min(Math.max(parseInt(req.query.pageSize, 10) || 25, 1), 100);
+
+    // `stage` mirrors the exact groupings computeFunnel() uses, so a drill-down
+    // click from a funnel rate lands on precisely the leads behind that rate.
+    const STAGE_FILTERS = {
+      contacted: { firstContactAt: { not: null } },
+      quoted: { status: { in: ['QUOTE_STARTED', 'QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'] } },
+      sold: { status: 'SOLD' },
+    };
+
     const where = {
       ...(agencyId ? { agencyId } : {}),
       ...(req.query.status ? { status: req.query.status } : {}),
+      ...(STAGE_FILTERS[req.query.stage] || {}),
+      ...(req.query.from || req.query.to ? {
+        receivedAt: {
+          ...(req.query.from ? { gte: new Date(req.query.from) } : {}),
+          ...(req.query.to ? { lte: new Date(req.query.to) } : {}),
+        },
+      } : {}),
       ...(req.user.role === 'PRODUCER' ? { assignedToId: req.user.id } : {}),
       archivedAt: null,
     };

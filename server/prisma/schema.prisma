@@ -224,6 +224,8 @@ model User {
   transfersAccepted Transfer[]       @relation("TransferAcceptedBy")
   callsUploaded     Call[]           @relation("CallUploadedBy")
   trainingAssignments TrainingAssignment[]
+  conversationParticipants ConversationParticipant[]
+  messagesAuthored   Message[]
 
   @@index([agencyId])
   @@index([role])
@@ -295,6 +297,7 @@ model Agency {
   calls         Call[]
   subscriptions AgencySubscription[]
   opportunities Opportunity[]
+  conversations Conversation[]
 }
 
 model Customer {
@@ -1114,4 +1117,58 @@ model FlowScoreSnapshot {
   computedAt         DateTime             @default(now())
 
   @@index([subjectType, subjectId, computedAt])
+}
+
+// ======================================================================
+// CHAT
+// ======================================================================
+// Scoped to a specific real entity (a Transfer or a Lead) or a direct
+// conversation between users — never a generic global chatroom. No
+// websockets: this app has zero real-time infra anywhere else either
+// (same honest tradeoff already documented for the call-processing job),
+// so the client polls while a thread is open rather than adding new paid
+// infrastructure for it.
+
+enum ConversationEntityType {
+  LEAD
+  TRANSFER
+}
+
+model Conversation {
+  id                String                 @id @default(uuid())
+  agencyId          String
+  agency            Agency                 @relation(fields: [agencyId], references: [id])
+  relatedEntityType ConversationEntityType
+  relatedEntityId   String
+  createdAt         DateTime               @default(now())
+
+  participants ConversationParticipant[]
+  messages     Message[]
+
+  @@index([agencyId])
+  @@unique([relatedEntityType, relatedEntityId])
+}
+
+model ConversationParticipant {
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  userId         String
+  user           User         @relation(fields: [userId], references: [id])
+  lastReadAt     DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@id([conversationId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  authorId       String
+  author         User         @relation(fields: [authorId], references: [id])
+  content        String
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
 }

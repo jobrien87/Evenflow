@@ -146,6 +146,11 @@ export const api = {
   createGoal: (payload) => request('/goals', { method: 'POST', body: payload }),
   deleteGoal: (id) => request(`/goals/${id}`, { method: 'DELETE' }),
 
+  chatConversations: () => request('/chat/conversations'),
+  chatEntityConversation: (entityType, entityId) => request(`/chat/conversations/entity/${entityType}/${entityId}`),
+  chatMessages: (conversationId) => request(`/chat/conversations/${conversationId}/messages`),
+  postChatMessage: (conversationId, content) => request(`/chat/conversations/${conversationId}/messages`, { method: 'POST', body: { content } }),
+
   impersonationStatus: () => request('/impersonation/status'),
   startImpersonation: (targetUserId) => request('/impersonation/start', { method: 'POST', body: { targetUserId } }),
   endImpersonation: () => request('/impersonation/end', { method: 'POST' }),

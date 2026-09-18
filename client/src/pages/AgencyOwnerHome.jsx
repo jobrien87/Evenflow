@@ -28,15 +28,24 @@ export default function AgencyOwnerHome() {
   const [status, setStatus] = useState('');
   const [inviteLink, setInviteLink] = useState('');
   const [leadStatus, setLeadStatus] = useState('');
+  const [stageFilter, setStageFilter] = useState(null); // { stage, from, to } | null
 
   useEffect(() => {
     load();
-  }, []);
+  }, [stageFilter]);
 
   async function load() {
-    const [leadData, userData] = await Promise.all([api.leads(''), api.users('')]);
+    const leadParams = stageFilter
+      ? `?stage=${stageFilter.stage}&from=${stageFilter.from}&to=${stageFilter.to}`
+      : '';
+    const [leadData, userData] = await Promise.all([api.leads(leadParams), api.users('')]);
     setLeads(leadData.leads);
     setUsers(userData.users);
+  }
+
+  function selectFunnelStage(stage, range) {
+    setTab('team');
+    setStageFilter({ stage, ...range });
   }
 
   async function resendUser(userId) {
@@ -136,7 +145,7 @@ export default function AgencyOwnerHome() {
           </section>
 
           <section style={s.section}>
-            <FunnelMetricsCard scope="agency" title="AGENCY FUNNEL" />
+            <FunnelMetricsCard scope="agency" title="AGENCY FUNNEL" onSelectStage={selectFunnelStage} />
           </section>
 
           <section style={s.section}>
@@ -187,8 +196,13 @@ export default function AgencyOwnerHome() {
 
           <section style={s.section}>
             <div style={s.headerRow}>
-              <h3 style={s.h3}>LEADS ({leads.length})</h3>
-              <button style={s.smallButton} onClick={() => setShowAddLead(!showAddLead)}>+ ADD LEAD</button>
+              <h3 style={s.h3}>LEADS ({leads.length}){stageFilter ? ` · ${stageFilter.stage.toUpperCase()}` : ''}</h3>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {stageFilter && (
+                  <button style={s.smallButtonOutline} onClick={() => setStageFilter(null)}>CLEAR FILTER</button>
+                )}
+                <button style={s.smallButton} onClick={() => setShowAddLead(!showAddLead)}>+ ADD LEAD</button>
+              </div>
             </div>
             {showAddLead && (
               <form onSubmit={addLead} style={s.form}>
@@ -241,6 +255,7 @@ const s = {
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   h3: { color: '#888', fontSize: 12, letterSpacing: 2 },
   smallButton: { padding: '8px 14px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
+  smallButtonOutline: { padding: '8px 14px', background: 'transparent', border: '1px solid #333', color: '#aaa', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
   form: { display: 'flex', flexDirection: 'column', gap: 10, background: '#111', padding: 16, borderRadius: 8, marginBottom: 12, border: '1px solid #222' },
   input: { padding: '10px 12px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff' },
   submitButton: { padding: '10px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
