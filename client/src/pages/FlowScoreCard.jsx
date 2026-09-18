@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 // A real Flow Score card — reads a computed snapshot, never fabricates a
 // number. Shows an honest "not enough activity yet" state instead of a
 // fake score when nothing has been computed.
-export default function FlowScoreCard({ scope = 'me', agencyId, title = 'FLOW SCORE' }) {
+export default function FlowScoreCard({ scope = 'me', agencyId, title = 'FLOW SCORE', onViewReport }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
 
@@ -75,6 +75,10 @@ export default function FlowScoreCard({ scope = 'me', agencyId, title = 'FLOW SC
           Not yet factored in (no data yet): {explanation.excludedComponents.map((c) => c.label).join(', ')}
         </div>
       )}
+
+      {onViewReport && (
+        <button style={s.viewReportLink} onClick={onViewReport}>View full report →</button>
+      )}
     </div>
   );
 }
@@ -93,6 +97,7 @@ const s = {
   driverValuePositive: { color: '#4dff88', fontWeight: 700 },
   driverValueNegative: { color: '#ffb84d', fontWeight: 700 },
   excludedNote: { color: '#555', fontSize: 11, marginTop: 8, fontStyle: 'italic' },
+  viewReportLink: { marginTop: 12, background: 'none', border: 'none', color: '#00e5ff', fontSize: 12, cursor: 'pointer', padding: 0 },
   emptyState: { color: '#666', fontSize: 13, fontStyle: 'italic' },
   muted: { color: '#666', fontSize: 13 },
   error: { color: '#ff4d4d', fontSize: 13 },

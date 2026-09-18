@@ -5,6 +5,7 @@ import TrainingPanel from './TrainingPanel';
 import OpportunitiesPanel from './OpportunitiesPanel';
 import FlowScoreCard from './FlowScoreCard';
 import FunnelMetricsCard from './FunnelMetricsCard';
+import RunningReportPage from './RunningReportPage';
 
 export default function ProducerHome() {
   const [tab, setTab] = useState('home');
@@ -12,6 +13,7 @@ export default function ProducerHome() {
   const [queue, setQueue] = useState(null);
   const [started, setStarted] = useState(false);
   const [busyId, setBusyId] = useState(null);
+  const [showReport, setShowReport] = useState(false);
 
   useEffect(() => {
     load();
@@ -111,7 +113,7 @@ export default function ProducerHome() {
         <button style={s.tab(false)} onClick={() => setTab('opportunities')}>WINBACKS/CROSS-SELL</button>
       </div>
       <section style={s.section}>
-        <FlowScoreCard scope="me" />
+        <FlowScoreCard scope="me" onViewReport={() => setShowReport(true)} />
       </section>
 
       <section style={s.section}>
@@ -185,6 +187,14 @@ export default function ProducerHome() {
           </div>
         ))}
       </section>
+
+      {showReport && (
+        <div style={s.reportOverlay} onClick={() => setShowReport(false)}>
+          <div style={s.reportModal} onClick={(e) => e.stopPropagation()}>
+            <RunningReportPage scope="me" onClose={() => setShowReport(false)} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -322,4 +332,6 @@ const s = {
   }),
   queueTitle: { fontSize: 14 },
   queueSubtitle: { fontSize: 12, color: '#666' },
+  reportOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2500, padding: 20, overflowY: 'auto' },
+  reportModal: { background: '#000', border: '1px solid #333', borderRadius: 12, maxWidth: 680, width: '100%', maxHeight: '85vh', overflowY: 'auto' },
 };

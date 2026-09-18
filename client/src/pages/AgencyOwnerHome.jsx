@@ -14,6 +14,7 @@ import CoursesAdminPanel from './CoursesAdminPanel';
 import OpportunitiesPanel from './OpportunitiesPanel';
 import GoalsPanel from './GoalsPanel';
 import Customer360Modal from './Customer360Modal';
+import RunningReportPage from './RunningReportPage';
 
 export default function AgencyOwnerHome() {
   const { user } = useAuth();
@@ -29,6 +30,7 @@ export default function AgencyOwnerHome() {
   const [inviteLink, setInviteLink] = useState('');
   const [leadStatus, setLeadStatus] = useState('');
   const [stageFilter, setStageFilter] = useState(null); // { stage, from, to } | null
+  const [showReport, setShowReport] = useState(false);
 
   useEffect(() => {
     load();
@@ -141,7 +143,7 @@ export default function AgencyOwnerHome() {
       ) : (
         <>
           <section style={s.section}>
-            <FlowScoreCard scope="agency" agencyId={user?.agencyId} title="AGENCY FLOW SCORE" />
+            <FlowScoreCard scope="agency" agencyId={user?.agencyId} title="AGENCY FLOW SCORE" onViewReport={() => setShowReport(true)} />
           </section>
 
           <section style={s.section}>
@@ -240,6 +242,14 @@ export default function AgencyOwnerHome() {
       {selectedCustomerId && (
         <Customer360Modal customerId={selectedCustomerId} onClose={() => setSelectedCustomerId(null)} />
       )}
+
+      {showReport && (
+        <div style={s.reportOverlay} onClick={() => setShowReport(false)}>
+          <div style={s.reportModal} onClick={(e) => e.stopPropagation()}>
+            <RunningReportPage scope="agency" agencyId={user?.agencyId} onClose={() => setShowReport(false)} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -269,4 +279,6 @@ const s = {
   deactivateButton: { fontSize: 10, color: '#ff4d4d', border: '1px solid #ff4d4d44', background: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer' },
   resendButton: { fontSize: 10, color: '#00e5ff', border: '1px solid #333', background: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer' },
   empty: { color: '#666', fontStyle: 'italic' },
+  reportOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2500, padding: 20, overflowY: 'auto' },
+  reportModal: { background: '#000', border: '1px solid #333', borderRadius: 12, maxWidth: 680, width: '100%', maxHeight: '85vh', overflowY: 'auto' },
 };

@@ -146,6 +146,9 @@ export const api = {
   createGoal: (payload) => request('/goals', { method: 'POST', body: payload }),
   deleteGoal: (id) => request(`/goals/${id}`, { method: 'DELETE' }),
 
+  myRunningReport: () => request('/running-report/me'),
+  agencyRunningReport: (agencyId) => request(`/running-report/agency/${agencyId}`),
+
   chatConversations: () => request('/chat/conversations'),
   chatEntityConversation: (entityType, entityId) => request(`/chat/conversations/entity/${entityType}/${entityId}`),
   chatMessages: (conversationId) => request(`/chat/conversations/${conversationId}/messages`),
