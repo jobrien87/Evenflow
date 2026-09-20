@@ -78,6 +78,13 @@ export default function CallsPanel() {
     await load();
   }
 
+  async function submitTranscript(transcript) {
+    await api.submitCallTranscript(selectedCall.id, transcript);
+    const data = await api.callDetail(selectedCall.id);
+    setSelectedCall(data.call);
+    await load();
+  }
+
   return (
     <div style={s.wrap}>
       <section style={s.section}>
@@ -125,15 +132,26 @@ export default function CallsPanel() {
               Status: <span style={{ color: STATUS_COLOR[selectedCall.status] }}>{selectedCall.status}</span>
             </div>
 
+            <audio style={s.audioPlayer} controls crossOrigin="use-credentials" src={api.callAudioUrl(selectedCall.id)} />
+
             {selectedCall.status === 'FAILED' && (
               <div style={s.failureBox}>
                 {selectedCall.failureReason}
+                {!selectedCall.transcript && (
+                  <div style={s.failureHint}>You can also enter the transcript below by hand — analysis will run on it once submitted.</div>
+                )}
                 <button style={s.retryButtonFull} onClick={() => { retry(selectedCall.id); setSelectedCall(null); }}>RETRY PROCESSING</button>
               </div>
             )}
 
             {['UPLOADED', 'QUEUED', 'TRANSCRIBING', 'TRANSCRIBED', 'ANALYZING'].includes(selectedCall.status) && (
               <div style={s.progressBox}>Processing… this updates automatically every few seconds.</div>
+            )}
+
+            {!selectedCall.transcript ? (
+              <TranscriptEntry onSubmit={submitTranscript} />
+            ) : (
+              <Section title="Full Transcript" content={<pre style={s.transcript}>{selectedCall.transcript}</pre>} />
             )}
 
             {selectedCall.analysis && (
@@ -162,16 +180,54 @@ export default function CallsPanel() {
                 <Section title="Objections" content={<ObjectionsList items={selectedCall.analysis.objections} />} />
                 <Section title="Cross-Sell Opportunities" content={<List items={selectedCall.analysis.crossSellOpportunities} />} />
                 <Section title="Next Steps" content={<List items={selectedCall.analysis.nextSteps} />} />
-
-                {selectedCall.transcript && (
-                  <Section title="Full Transcript" content={<pre style={s.transcript}>{selectedCall.transcript}</pre>} />
-                )}
               </div>
             )}
           </div>
         </div>
       )}
     </div>
+  );
+}
+
+function TranscriptEntry({ onSubmit }) {
+  const [transcript, setTranscript] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submit() {
+    if (!transcript.trim()) return;
+    setBusy(true);
+    setError('');
+    try {
+      await onSubmit(transcript.trim());
+    } catch (err) {
+      setError(err.data?.message || 'Failed to save transcript.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Section
+      title="Transcript"
+      content={
+        <div>
+          <div style={s.transcriptHint}>
+            No automatic transcription is configured for this environment — paste or type the real transcript below to run real analysis on it.
+          </div>
+          <textarea
+            style={s.transcriptInput}
+            placeholder="Paste the call transcript here…"
+            value={transcript}
+            onChange={(e) => setTranscript(e.target.value)}
+          />
+          {error && <div style={s.error}>{error}</div>}
+          <button style={s.submitButton} disabled={busy || !transcript.trim()} onClick={submit}>
+            {busy ? 'Submitting…' : 'SUBMIT TRANSCRIPT & ANALYZE'}
+          </button>
+        </div>
+      }
+    />
   );
 }
 
@@ -296,8 +352,13 @@ const s = {
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: 20 },
   modal: { background: 'var(--bg-elevated)', border: '1px solid var(--border-strong)', borderRadius: 12, padding: 24, maxWidth: 640, width: '100%', maxHeight: '85vh', overflowY: 'auto' },
   closeButton: { padding: '6px 12px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, cursor: 'pointer', fontSize: 11 },
-  statusLine: { color: 'var(--text-secondary)', fontSize: 13, marginBottom: 16 },
+  statusLine: { color: 'var(--text-secondary)', fontSize: 13, marginBottom: 12 },
+  audioPlayer: { width: '100%', marginBottom: 16 },
   failureBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 14, borderRadius: 8, fontSize: 13, marginBottom: 16 },
+  failureHint: { color: 'var(--text-secondary)', fontSize: 12, marginTop: 8, lineHeight: 1.5 },
+  transcriptHint: { color: 'var(--text-muted)', fontSize: 12, marginBottom: 8, lineHeight: 1.5 },
+  transcriptInput: { width: '100%', minHeight: 160, padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, boxSizing: 'border-box', resize: 'vertical', marginBottom: 8 },
+  submitButton: { padding: '10px 16px', background: 'var(--accent-gradient)', color: 'var(--accent-on)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
   retryButtonFull: { display: 'block', marginTop: 10, padding: '8px 14px', background: 'var(--danger)', color: 'var(--accent-on)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
   progressBox: { background: 'var(--warning-soft)', border: '1px solid rgba(255, 184, 77, 0.4)', color: 'var(--warning)', padding: 14, borderRadius: 8, fontSize: 13 },
   analysisBlock: { color: 'var(--text-primary)' },

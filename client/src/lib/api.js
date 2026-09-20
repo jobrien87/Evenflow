@@ -95,6 +95,10 @@ export const api = {
   calls: (params = '') => request(`/calls${params}`),
   callDetail: (id) => request(`/calls/${id}`),
   retryCall: (id) => request(`/calls/${id}/retry`, { method: 'POST' }),
+  submitCallTranscript: (id, transcript) => request(`/calls/${id}/transcript`, { method: 'PATCH', body: { transcript } }),
+  // Not a JSON call — used directly as an <audio crossOrigin="use-credentials" src=...>
+  // so the session cookie rides along even when client/server are on separate origins.
+  callAudioUrl: (id) => `${BASE}/calls/${id}/audio`,
   reviewCall: (id, payload) => request(`/calls/${id}/review`, { method: 'POST', body: payload }),
   uploadCall: async (file, leadId) => {
     const formData = new FormData();

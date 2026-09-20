@@ -20,6 +20,89 @@ async function setStatus(callId, status, extra = {}) {
   return prisma.call.update({ where: { id: callId }, data: { status, ...extra } });
 }
 
+// Shared by the automatic pipeline (after a real transcription result) and
+// the manual-transcript route (after a human pastes one in) — one real
+// analysis step, never two divergent implementations of it.
+async function runAnalysis(callId) {
+  const call = await prisma.call.findUnique({ where: { id: callId } });
+  if (!call) return;
+
+  await setStatus(callId, 'ANALYZING');
+
+  let analysisResult;
+  try {
+    analysisResult = await analyzeTranscript(call.transcript);
+  } catch (err) {
+    await setStatus(callId, 'FAILED', {
+      failureReason: `Call analysis failed: ${err.message}. The transcript is preserved and this can be retried.`,
+    });
+    return;
+  }
+
+  if (!analysisResult.available) {
+    await setStatus(callId, 'FAILED', {
+      failureReason: 'AI analysis service is not configured. The transcript is preserved and this can be retried once a provider is connected.',
+    });
+    return;
+  }
+
+  const a = analysisResult.analysis;
+  await prisma.callAnalysis.create({
+    data: {
+      callId,
+      summary: a.summary,
+      productsDiscussed: a.products_discussed,
+      objections: a.objections,
+      buyingSignals: a.buying_signals,
+      missedOpportunities: a.missed_opportunities,
+      crossSellOpportunities: a.cross_sell_opportunities,
+      followUpCommitments: a.follow_up_commitments,
+      nextSteps: a.next_steps,
+      strengths: a.strengths,
+      coachingOpportunities: a.coaching_opportunities,
+      overallScore: a.overall_score,
+      dimensionScores: a.dimension_scores,
+      reviewRecommended: a.review_recommended,
+      reviewReason: a.review_reason || null,
+      aiModel: analysisResult.model,
+    },
+  });
+
+  const estimatedCostMicros = estimateCostMicros(analysisResult.model, analysisResult.inputTokens, analysisResult.outputTokens);
+  await prisma.aiUsageLog.create({
+    data: {
+      feature: 'call_analysis',
+      agencyId: call.agencyId,
+      userId: call.uploadedById,
+      model: analysisResult.model,
+      inputTokens: analysisResult.inputTokens,
+      outputTokens: analysisResult.outputTokens,
+      estimatedCostMicros,
+    },
+  });
+
+  await setStatus(callId, 'COMPLETE');
+
+  // A new scored call is exactly the kind of real state change that
+  // should move a Flow Score — recompute now rather than on every
+  // dashboard view (per spec: no synchronous recompute-on-every-click).
+  Promise.all([
+    computeProducerScore(call.uploadedById),
+    computeAgencyScore(call.agencyId),
+  ]).catch((err) => console.error('[flowScore] recompute after call analysis failed', err.message));
+
+  await notifyUser({
+    userId: call.uploadedById,
+    agencyId: call.agencyId,
+    type: 'call.analysis_complete',
+    severity: 'INFO',
+    title: 'Call analysis ready',
+    body: `${call.filename} — score ${a.overall_score}/100`,
+    relatedEntityType: 'Call',
+    relatedEntityId: callId,
+  }).catch((err) => console.error('[notifications] call.analysis_complete failed', err.message));
+}
+
 async function processCall(callId) {
   try {
     await setStatus(callId, 'QUEUED');
@@ -33,7 +116,7 @@ async function processCall(callId) {
 
     if (!transcriptionResult.available) {
       await setStatus(callId, 'FAILED', {
-        failureReason: 'Transcription service is not configured. The recording is safely stored and can be retried once a provider is connected.',
+        failureReason: 'Transcription service is not configured. The recording is safely stored and can be retried once a provider is connected, or a transcript can be entered manually.',
       });
       return;
     }
@@ -43,80 +126,7 @@ async function processCall(callId) {
       transcriptProvider: transcriptionResult.provider,
     });
 
-    await setStatus(callId, 'ANALYZING');
-
-    let analysisResult;
-    try {
-      analysisResult = await analyzeTranscript(transcriptionResult.transcript);
-    } catch (err) {
-      await setStatus(callId, 'FAILED', {
-        failureReason: `Call analysis failed: ${err.message}. The transcript is preserved and this can be retried.`,
-      });
-      return;
-    }
-
-    if (!analysisResult.available) {
-      await setStatus(callId, 'FAILED', {
-        failureReason: 'AI analysis service is not configured. The transcript is preserved and this can be retried once a provider is connected.',
-      });
-      return;
-    }
-
-    const a = analysisResult.analysis;
-    await prisma.callAnalysis.create({
-      data: {
-        callId,
-        summary: a.summary,
-        productsDiscussed: a.products_discussed,
-        objections: a.objections,
-        buyingSignals: a.buying_signals,
-        missedOpportunities: a.missed_opportunities,
-        crossSellOpportunities: a.cross_sell_opportunities,
-        followUpCommitments: a.follow_up_commitments,
-        nextSteps: a.next_steps,
-        strengths: a.strengths,
-        coachingOpportunities: a.coaching_opportunities,
-        overallScore: a.overall_score,
-        dimensionScores: a.dimension_scores,
-        reviewRecommended: a.review_recommended,
-        reviewReason: a.review_reason || null,
-        aiModel: analysisResult.model,
-      },
-    });
-
-    const estimatedCostMicros = estimateCostMicros(analysisResult.model, analysisResult.inputTokens, analysisResult.outputTokens);
-    await prisma.aiUsageLog.create({
-      data: {
-        feature: 'call_analysis',
-        agencyId: call.agencyId,
-        userId: call.uploadedById,
-        model: analysisResult.model,
-        inputTokens: analysisResult.inputTokens,
-        outputTokens: analysisResult.outputTokens,
-        estimatedCostMicros,
-      },
-    });
-
-    await setStatus(callId, 'COMPLETE');
-
-    // A new scored call is exactly the kind of real state change that
-    // should move a Flow Score — recompute now rather than on every
-    // dashboard view (per spec: no synchronous recompute-on-every-click).
-    Promise.all([
-      computeProducerScore(call.uploadedById),
-      computeAgencyScore(call.agencyId),
-    ]).catch((err) => console.error('[flowScore] recompute after call analysis failed', err.message));
-
-    await notifyUser({
-      userId: call.uploadedById,
-      agencyId: call.agencyId,
-      type: 'call.analysis_complete',
-      severity: 'INFO',
-      title: 'Call analysis ready',
-      body: `${call.filename} — score ${a.overall_score}/100`,
-      relatedEntityType: 'Call',
-      relatedEntityId: callId,
-    }).catch((err) => console.error('[notifications] call.analysis_complete failed', err.message));
+    await runAnalysis(callId);
   } catch (err) {
     console.error(`[callProcessing] unexpected failure for call ${callId}`, err);
     await setStatus(callId, 'FAILED', {
@@ -131,4 +141,10 @@ function enqueueCallProcessing(callId) {
   });
 }
 
-module.exports = { enqueueCallProcessing, processCall };
+function enqueueAnalysis(callId) {
+  setImmediate(() => {
+    runAnalysis(callId).catch((err) => console.error('[callProcessing] analysis fatal', err));
+  });
+}
+
+module.exports = { enqueueCallProcessing, enqueueAnalysis, processCall, runAnalysis };

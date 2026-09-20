@@ -6,7 +6,8 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { save, storageHealth } = require('../lib/storage');
 const { validateAudioUpload } = require('../lib/fileValidation');
-const { enqueueCallProcessing } = require('../jobs/callProcessing');
+const { enqueueCallProcessing, enqueueAnalysis } = require('../jobs/callProcessing');
+const { read } = require('../lib/storage');
 const { requireModuleEnabled } = require('../lib/entitlements');
 
 const router = express.Router();
@@ -57,6 +58,65 @@ router.get('/:id', async (req, res, next) => {
       return res.status(403).json({ success: false, error: 'FORBIDDEN' });
     }
     return res.json({ success: true, call });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/:id/audio', async (req, res, next) => {
+  try {
+    const call = await prisma.call.findUnique({ where: { id: req.params.id } });
+    if (!call) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (req.user.role !== 'PLATFORM_OWNER' && call.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    const buffer = await read(call.storageKey);
+    res.set('Content-Type', call.mimeType || 'application/octet-stream');
+    res.set('Content-Disposition', `inline; filename="${call.filename}"`);
+    return res.send(buffer);
+  } catch (err) {
+    next(err);
+  }
+});
+
+const transcriptSchema = z.object({ transcript: z.string().trim().min(1).max(50000) });
+
+// Manual transcript entry — no transcription provider is configured in
+// this environment (see lib/transcriptionProvider.js). This is the real,
+// honest alternative for that case: a human enters the real transcript,
+// then the same real analyzeTranscript() step the automatic pipeline uses
+// runs on it. Only usable before a transcript already exists — once one
+// does (auto or manual), this isn't an edit endpoint.
+router.patch('/:id/transcript', requireRole('PRODUCER', 'AGENCY_MANAGER', 'AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const parsed = transcriptSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+
+    const call = await prisma.call.findUnique({ where: { id: req.params.id } });
+    if (!call) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (req.user.role !== 'PLATFORM_OWNER' && call.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    if (call.transcript) {
+      return res.status(409).json({ success: false, error: 'TRANSCRIPT_EXISTS', message: 'This call already has a transcript.' });
+    }
+
+    const updated = await prisma.call.update({
+      where: { id: call.id },
+      data: { transcript: parsed.data.transcript, transcriptProvider: 'manual', status: 'TRANSCRIBED', failureReason: null },
+    });
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: call.agencyId,
+      action: 'call.transcript_entered_manually', entityType: 'Call', entityId: call.id,
+      correlationId: req.correlationId,
+    });
+
+    enqueueAnalysis(call.id);
+
+    return res.json({ success: true, call: updated });
   } catch (err) {
     next(err);
   }
