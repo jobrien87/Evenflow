@@ -56,7 +56,7 @@ export default function AgencySettingsPanel() {
     }
   }
 
-  if (!agency || !form) return <div style={{ color: '#666' }}>Loading…</div>;
+  if (!agency || !form) return <div style={{ color: 'var(--text-muted)' }}>Loading…</div>;
 
   return (
     <div style={s.wrap}>
@@ -123,18 +123,18 @@ export default function AgencySettingsPanel() {
 
 const s = {
   wrap: { maxWidth: 480 },
-  h3: { color: '#888', fontSize: 12, letterSpacing: 2, marginBottom: 8 },
-  helpText: { color: '#666', fontSize: 12, marginBottom: 16, lineHeight: 1.5 },
-  form: { display: 'flex', flexDirection: 'column', gap: 16, background: '#111', padding: 20, borderRadius: 8, border: '1px solid #222' },
-  toggleRow: { display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: '#fff', cursor: 'pointer' },
+  h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2, marginBottom: 8 },
+  helpText: { color: 'var(--text-muted)', fontSize: 12, marginBottom: 16, lineHeight: 1.5 },
+  form: { display: 'flex', flexDirection: 'column', gap: 16, background: 'var(--bg-elevated)', padding: 20, borderRadius: 8, border: '1px solid var(--border-hairline)' },
+  toggleRow: { display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--text-primary)', cursor: 'pointer' },
   fieldGroup: { display: 'flex', flexDirection: 'column', gap: 6 },
-  label: { color: '#999', fontSize: 12 },
-  input: { padding: '10px 12px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff' },
+  label: { color: 'var(--text-secondary)', fontSize: 12 },
+  input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },
   chipRow: { display: 'flex', gap: 8, flexWrap: 'wrap' },
   chip: (active) => ({
-    padding: '6px 12px', borderRadius: 6, border: active ? 'none' : '1px solid #333', cursor: 'pointer', fontSize: 12,
-    background: active ? '#00e5ff' : 'transparent', color: active ? '#000' : '#aaa', fontWeight: active ? 700 : 400,
+    padding: '6px 12px', borderRadius: 6, border: active ? 'none' : '1px solid var(--border-strong)', cursor: 'pointer', fontSize: 12,
+    background: active ? 'var(--accent)' : 'transparent', color: active ? 'var(--accent-on)' : 'var(--text-secondary)', fontWeight: active ? 700 : 400,
   }),
-  saveButton: { padding: '12px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
-  status: { color: '#00e5ff', marginTop: 12, fontSize: 13 },
+  saveButton: { padding: '12px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
+  status: { color: 'var(--accent)', marginTop: 12, fontSize: 13 },
 };

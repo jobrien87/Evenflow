@@ -3,8 +3,8 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 
 const STATUS_COLOR = {
-  UPLOADED: '#888', QUEUED: '#888', TRANSCRIBING: '#ffb84d', TRANSCRIBED: '#ffb84d',
-  ANALYZING: '#ffb84d', COMPLETE: '#00e5ff', FAILED: '#ff4d4d',
+  UPLOADED: 'var(--text-secondary)', QUEUED: 'var(--text-secondary)', TRANSCRIBING: 'var(--warning)', TRANSCRIBED: 'var(--warning)',
+  ANALYZING: 'var(--warning)', COMPLETE: 'var(--accent)', FAILED: 'var(--danger)',
 };
 
 export default function CallsPanel() {
@@ -97,7 +97,7 @@ export default function CallsPanel() {
           <div style={s.empty}>No calls yet. Upload your first recorded sales call to receive transcription and coaching.</div>
         )}
         {calls.map((c) => (
-          <div key={c.id} style={s.row} onClick={() => viewCall(c.id)}>
+          <div key={c.id} style={s.row} className="ui-row-stack" onClick={() => viewCall(c.id)}>
             <div>
               <div style={s.rowTitle}>{c.filename}</div>
               <div style={s.rowSub}>{c.uploadedBy.firstName} {c.uploadedBy.lastName} · {new Date(c.createdAt).toLocaleString()}</div>
@@ -199,7 +199,7 @@ function ObjectionsList({ items }) {
     <div>
       {items.map((o, i) => (
         <div key={i} style={s.objectionRow}>
-          <div style={{ color: o.handled_well ? '#00e5ff' : '#ff4d4d', fontWeight: 700, fontSize: 12 }}>
+          <div style={{ color: o.handled_well ? 'var(--accent)' : 'var(--danger)', fontWeight: 700, fontSize: 12 }}>
             {o.objection} {o.handled_well ? '(handled well)' : '(needs work)'}
           </div>
           <div style={s.objectionNote}>{o.note}</div>
@@ -270,52 +270,52 @@ function ManagerReviewForm({ analysis, onSubmit }) {
 }
 
 const s = {
-  notEntitledBox: { background: '#1a1610', border: '1px solid #ffb84d55', color: '#ffb84d', padding: 20, borderRadius: 8, fontSize: 13, lineHeight: 1.6 },
-  reviewForm: { background: '#0d0d0d', border: '1px solid #222', borderRadius: 8, padding: 14, marginBottom: 18 },
-  reviewHint: { color: '#666', fontSize: 11, marginBottom: 10, lineHeight: 1.4 },
+  notEntitledBox: { background: 'var(--warning-soft)', border: '1px solid rgba(255, 184, 77, 0.4)', color: 'var(--warning)', padding: 20, borderRadius: 8, fontSize: 13, lineHeight: 1.6 },
+  reviewForm: { background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 14, marginBottom: 18 },
+  reviewHint: { color: 'var(--text-muted)', fontSize: 11, marginBottom: 10, lineHeight: 1.4 },
   reviewRow: { display: 'flex', gap: 8 },
-  reviewScoreInput: { width: 90, padding: '8px 10px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff', fontSize: 13 },
-  reviewCommentInput: { flex: 1, padding: '8px 10px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff', fontSize: 13 },
-  reviewSaveButton: { padding: '8px 14px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
+  reviewScoreInput: { width: 90, padding: '8px 10px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 13 },
+  reviewCommentInput: { flex: 1, padding: '8px 10px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 13 },
+  reviewSaveButton: { padding: '8px 14px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
   wrap: {},
   section: { marginBottom: 28 },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  h3: { color: '#888', fontSize: 12, letterSpacing: 2 },
-  uploadBox: { background: '#111', border: '1px dashed #333', borderRadius: 8, padding: 20 },
-  fileInput: { color: '#fff', fontSize: 13 },
-  uploading: { color: '#00e5ff', fontSize: 12, marginTop: 8 },
-  error: { color: '#ff4d4d', fontSize: 12, marginTop: 8 },
-  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#111', border: '1px solid #1a1a1a', borderRadius: 8, padding: 14, marginBottom: 8, cursor: 'pointer' },
+  h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2 },
+  uploadBox: { background: 'var(--bg-elevated)', border: '1px dashed var(--border-strong)', borderRadius: 8, padding: 20 },
+  fileInput: { color: 'var(--text-primary)', fontSize: 13 },
+  uploading: { color: 'var(--accent)', fontSize: 12, marginTop: 8 },
+  error: { color: 'var(--danger)', fontSize: 12, marginTop: 8 },
+  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 14, marginBottom: 8, cursor: 'pointer' },
   rowTitle: { fontWeight: 600, fontSize: 14 },
-  rowSub: { color: '#666', fontSize: 12 },
-  scoreBadge: { background: '#0d1a1a', color: '#00e5ff', fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 4 },
-  statusBadge: (status) => ({ fontSize: 11, color: STATUS_COLOR[status] || '#888', border: `1px solid ${STATUS_COLOR[status] || '#888'}44`, padding: '4px 8px', borderRadius: 4 }),
-  retryButton: { fontSize: 10, color: '#ff4d4d', border: '1px solid #ff4d4d44', background: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer' },
-  empty: { color: '#666', fontStyle: 'italic', fontSize: 13 },
-  emptySmall: { color: '#555', fontStyle: 'italic', fontSize: 12 },
+  rowSub: { color: 'var(--text-muted)', fontSize: 12 },
+  scoreBadge: { background: 'var(--accent-gradient-soft)', color: 'var(--accent)', fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 4 },
+  statusBadge: (status) => ({ fontSize: 11, color: STATUS_COLOR[status] || 'var(--text-secondary)', border: `1px solid ${STATUS_COLOR[status] || 'var(--text-secondary)'}44`, padding: '4px 8px', borderRadius: 4 }),
+  retryButton: { fontSize: 10, color: 'var(--danger)', border: '1px solid rgba(255, 77, 94, 0.4)', background: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer' },
+  empty: { color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 13 },
+  emptySmall: { color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 12 },
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: 20 },
-  modal: { background: '#111', border: '1px solid #333', borderRadius: 12, padding: 24, maxWidth: 640, width: '100%', maxHeight: '85vh', overflowY: 'auto' },
-  closeButton: { padding: '6px 12px', background: 'transparent', border: '1px solid #333', color: '#aaa', borderRadius: 6, cursor: 'pointer', fontSize: 11 },
-  statusLine: { color: '#aaa', fontSize: 13, marginBottom: 16 },
-  failureBox: { background: '#1a0d0d', border: '1px solid #ff4d4d55', color: '#ff4d4d', padding: 14, borderRadius: 8, fontSize: 13, marginBottom: 16 },
-  retryButtonFull: { display: 'block', marginTop: 10, padding: '8px 14px', background: '#ff4d4d', color: '#000', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
-  progressBox: { background: '#1a1610', border: '1px solid #ffb84d55', color: '#ffb84d', padding: 14, borderRadius: 8, fontSize: 13 },
-  analysisBlock: { color: '#fff' },
+  modal: { background: 'var(--bg-elevated)', border: '1px solid var(--border-strong)', borderRadius: 12, padding: 24, maxWidth: 640, width: '100%', maxHeight: '85vh', overflowY: 'auto' },
+  closeButton: { padding: '6px 12px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, cursor: 'pointer', fontSize: 11 },
+  statusLine: { color: 'var(--text-secondary)', fontSize: 13, marginBottom: 16 },
+  failureBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 14, borderRadius: 8, fontSize: 13, marginBottom: 16 },
+  retryButtonFull: { display: 'block', marginTop: 10, padding: '8px 14px', background: 'var(--danger)', color: 'var(--accent-on)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
+  progressBox: { background: 'var(--warning-soft)', border: '1px solid rgba(255, 184, 77, 0.4)', color: 'var(--warning)', padding: 14, borderRadius: 8, fontSize: 13 },
+  analysisBlock: { color: 'var(--text-primary)' },
   overallScoreRow: { display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 16 },
-  overallScoreValue: { fontSize: 36, fontWeight: 800, color: '#00e5ff' },
-  overallScoreLabel: { fontSize: 11, color: '#888', letterSpacing: 1 },
-  overrideNote: { fontSize: 11, color: '#ffb84d', marginLeft: 'auto' },
-  reviewFlag: { background: '#1a1610', border: '1px solid #ffb84d55', color: '#ffb84d', padding: 10, borderRadius: 6, fontSize: 12, marginBottom: 16 },
+  overallScoreValue: { fontSize: 36, fontWeight: 800, color: 'var(--accent)' },
+  overallScoreLabel: { fontSize: 11, color: 'var(--text-secondary)', letterSpacing: 1 },
+  overrideNote: { fontSize: 11, color: 'var(--warning)', marginLeft: 'auto' },
+  reviewFlag: { background: 'var(--warning-soft)', border: '1px solid rgba(255, 184, 77, 0.4)', color: 'var(--warning)', padding: 10, borderRadius: 6, fontSize: 12, marginBottom: 16 },
   analysisSection: { marginBottom: 18 },
-  analysisSectionTitle: { fontSize: 11, color: '#666', letterSpacing: 1, marginBottom: 6, textTransform: 'uppercase' },
-  text: { color: '#ccc', fontSize: 13, lineHeight: 1.6, margin: 0 },
+  analysisSectionTitle: { fontSize: 11, color: 'var(--text-muted)', letterSpacing: 1, marginBottom: 6, textTransform: 'uppercase' },
+  text: { color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6, margin: 0 },
   list: { margin: 0, paddingLeft: 18 },
-  listItem: { color: '#ccc', fontSize: 13, marginBottom: 4 },
-  objectionRow: { marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #1a1a1a' },
-  objectionNote: { color: '#888', fontSize: 12, marginTop: 3 },
+  listItem: { color: 'var(--text-secondary)', fontSize: 13, marginBottom: 4 },
+  objectionRow: { marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid var(--border-hairline)' },
+  objectionNote: { color: 'var(--text-secondary)', fontSize: 12, marginTop: 3 },
   scoreGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 },
-  scoreCell: { background: '#0d0d0d', border: '1px solid #1a1a1a', borderRadius: 6, padding: 8, textAlign: 'center' },
-  scoreCellValue: { fontSize: 16, fontWeight: 700, color: '#00e5ff' },
-  scoreCellLabel: { fontSize: 9, color: '#666', marginTop: 2 },
-  transcript: { background: '#000', border: '1px solid #222', borderRadius: 6, padding: 12, fontSize: 12, color: '#aaa', whiteSpace: 'pre-wrap', maxHeight: 240, overflowY: 'auto' },
+  scoreCell: { background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 6, padding: 8, textAlign: 'center' },
+  scoreCellValue: { fontSize: 16, fontWeight: 700, color: 'var(--accent)' },
+  scoreCellLabel: { fontSize: 9, color: 'var(--text-muted)', marginTop: 2 },
+  transcript: { background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 6, padding: 12, fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', maxHeight: 240, overflowY: 'auto' },
 };

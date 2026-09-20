@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
+import { Button } from '../ui';
 
 export default function Login() {
   const { login } = useAuth();
@@ -34,9 +35,9 @@ export default function Login() {
           <label style={styles.label}>Password</label>
           <input style={styles.input} type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
           {error && <div style={styles.error}>{error}</div>}
-          <button style={styles.button} disabled={busy} type="submit">
+          <Button style={{ width: '100%', marginTop: 24 }} disabled={busy} type="submit">
             {busy ? 'Signing in…' : 'Sign In'}
-          </button>
+          </Button>
         </form>
       </div>
     </div>
@@ -44,11 +45,13 @@ export default function Login() {
 }
 
 const styles = {
-  wrap: { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0a0a0a' },
-  card: { width: 360, padding: 32, background: '#111', border: '1px solid #222', borderRadius: 12 },
-  logo: { color: '#fff', letterSpacing: 4, fontSize: 22, marginBottom: 24, textAlign: 'center' },
-  label: { color: '#999', fontSize: 12, display: 'block', marginBottom: 6, marginTop: 14 },
-  input: { width: '100%', padding: '10px 12px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff', fontSize: 14 },
-  button: { width: '100%', marginTop: 24, padding: '12px', background: '#00e5ff', color: '#000', fontWeight: 700, border: 'none', borderRadius: 6, cursor: 'pointer' },
-  error: { color: '#ff4d4d', fontSize: 13, marginTop: 12 },
+  wrap: { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)' },
+  card: { width: 360, padding: 32, background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 12 },
+  logo: {
+    fontFamily: 'var(--font-display)', fontWeight: 700, letterSpacing: 3, fontSize: 24, marginBottom: 24, textAlign: 'center',
+    backgroundImage: 'var(--accent-gradient)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',
+  },
+  label: { color: 'var(--text-secondary)', fontSize: 12, display: 'block', marginBottom: 6, marginTop: 14 },
+  input: { width: '100%', padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 14 },
+  error: { color: 'var(--danger)', fontSize: 13, marginTop: 12 },
 };

@@ -78,15 +78,15 @@ export default function ImpersonationBar() {
 
 const s = {
   banner: {
-    background: '#ff4d4d', color: '#000', padding: '8px 20px', fontSize: 13, fontWeight: 700,
+    background: 'var(--danger)', color: 'var(--text-primary)', padding: '8px 20px', fontSize: 13, fontWeight: 700,
     display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'center',
   },
-  exitButton: { padding: '4px 12px', background: '#000', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 700 },
-  viewAsBar: { display: 'flex', justifyContent: 'flex-end', padding: '6px 20px 0', background: '#0a0a0a' },
+  exitButton: { padding: '4px 12px', background: 'rgba(0,0,0,0.3)', color: 'var(--text-primary)', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 11, fontWeight: 700 },
+  viewAsBar: { display: 'flex', justifyContent: 'flex-end', padding: '6px 20px 0', background: 'var(--bg)' },
   viewAsWrap: { position: 'relative' },
-  viewAsToggle: { background: 'transparent', border: '1px solid #333', color: '#aaa', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 11 },
-  searchPanel: { position: 'absolute', top: '100%', right: 0, marginTop: 6, width: 260, background: '#111', border: '1px solid #333', borderRadius: 8, padding: 10, zIndex: 1500 },
-  searchInput: { width: '100%', padding: '8px 10px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff', fontSize: 12, boxSizing: 'border-box' },
-  resultRow: { padding: '8px 6px', color: '#ccc', fontSize: 13, cursor: 'pointer', borderBottom: '1px solid #1a1a1a' },
-  resultRole: { color: '#666', fontSize: 11 },
+  viewAsToggle: { background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 11 },
+  searchPanel: { position: 'absolute', top: '100%', right: 0, marginTop: 6, width: 260, background: 'var(--bg-elevated)', border: '1px solid var(--border-strong)', borderRadius: 8, padding: 10, zIndex: 'var(--z-drawer)' },
+  searchInput: { width: '100%', padding: '8px 10px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, boxSizing: 'border-box' },
+  resultRow: { padding: '8px 6px', color: 'var(--text-secondary)', fontSize: 13, cursor: 'pointer', borderBottom: '1px solid var(--border-hairline)' },
+  resultRole: { color: 'var(--text-muted)', fontSize: 11 },
 };

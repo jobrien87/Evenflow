@@ -59,7 +59,7 @@ export default function SupportPanel() {
       {status && <div style={s.status}>{status}</div>}
 
       {tickets.map((t) => (
-        <div key={t.id} style={s.row}>
+        <div key={t.id} style={s.row} className="ui-row-stack">
           <div style={{ flex: 1 }}>
             <div style={s.rowTitle}>{t.subject}</div>
             <div style={s.rowSub}>{t.category.replace(/_/g, ' ')} · {new Date(t.createdAt).toLocaleString()}</div>
@@ -86,17 +86,17 @@ export default function SupportPanel() {
 const s = {
   wrap: {},
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  h3: { color: '#888', fontSize: 12, letterSpacing: 2 },
-  smallButton: { padding: '8px 14px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
-  form: { display: 'flex', flexDirection: 'column', gap: 10, background: '#111', padding: 16, borderRadius: 8, marginBottom: 12, border: '1px solid #222' },
-  input: { padding: '10px 12px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff' },
-  submitButton: { padding: '10px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
-  status: { color: '#00e5ff', marginBottom: 12, fontSize: 13 },
-  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', background: '#111', border: '1px solid #1a1a1a', borderRadius: 8, padding: 14, marginBottom: 8, gap: 12 },
+  h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2 },
+  smallButton: { padding: '8px 14px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
+  form: { display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg-elevated)', padding: 16, borderRadius: 8, marginBottom: 12, border: '1px solid var(--border-hairline)' },
+  input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },
+  submitButton: { padding: '10px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
+  status: { color: 'var(--accent)', marginBottom: 12, fontSize: 13 },
+  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 14, marginBottom: 8, gap: 12 },
   rowTitle: { fontWeight: 600, fontSize: 14 },
-  rowSub: { color: '#666', fontSize: 11, marginTop: 2 },
-  description: { color: '#aaa', fontSize: 12, marginTop: 6 },
-  badge: { fontSize: 11, color: '#888', border: '1px solid #333', padding: '4px 8px', borderRadius: 4, whiteSpace: 'nowrap' },
-  miniInput: { padding: '6px 8px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff', fontSize: 11 },
-  empty: { color: '#666', fontStyle: 'italic' },
+  rowSub: { color: 'var(--text-muted)', fontSize: 11, marginTop: 2 },
+  description: { color: 'var(--text-secondary)', fontSize: 12, marginTop: 6 },
+  badge: { fontSize: 11, color: 'var(--text-secondary)', border: '1px solid var(--border-strong)', padding: '4px 8px', borderRadius: 4, whiteSpace: 'nowrap' },
+  miniInput: { padding: '6px 8px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 11 },
+  empty: { color: 'var(--text-muted)', fontStyle: 'italic' },
 };

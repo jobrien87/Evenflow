@@ -1,0 +1,241 @@
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { api } from '../lib/api';
+import { useAuth } from '../lib/AuthContext';
+import FlowScoreCard from './FlowScoreCard';
+import FunnelMetricsCard from './FunnelMetricsCard';
+import Customer360Modal from './Customer360Modal';
+import RunningReportPage from './RunningReportPage';
+
+export default function AgencyOwnerDashboard() {
+  const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [leads, setLeads] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [selectedCustomerId, setSelectedCustomerId] = useState(null);
+  const [showInvite, setShowInvite] = useState(false);
+  const [showAddLead, setShowAddLead] = useState(false);
+  const [form, setForm] = useState({ email: '', firstName: '', lastName: '', role: 'PRODUCER' });
+  const [leadForm, setLeadForm] = useState({ firstName: '', lastName: '', phone: '', email: '', product: 'Auto', assignedToId: '' });
+  const [status, setStatus] = useState('');
+  const [inviteLink, setInviteLink] = useState('');
+  const [leadStatus, setLeadStatus] = useState('');
+  const [showReport, setShowReport] = useState(false);
+
+  // The funnel drill-down's filter lives in the URL (not component state)
+  // so it's shareable and survives the back button.
+  const stage = searchParams.get('stage');
+  const from = searchParams.get('from');
+  const to = searchParams.get('to');
+  const stageFilter = stage && from && to ? { stage, from, to } : null;
+
+  useEffect(() => {
+    load();
+  }, [stage, from, to]);
+
+  async function load() {
+    const leadParams = stageFilter
+      ? `?stage=${stageFilter.stage}&from=${stageFilter.from}&to=${stageFilter.to}`
+      : '';
+    const [leadData, userData] = await Promise.all([api.leads(leadParams), api.users('')]);
+    setLeads(leadData.leads);
+    setUsers(userData.users);
+  }
+
+  function selectFunnelStage(stageKey, range) {
+    setSearchParams({ stage: stageKey, from: range.from, to: range.to });
+  }
+
+  function clearStageFilter() {
+    setSearchParams({});
+  }
+
+  async function resendUser(userId) {
+    setStatus('Resending…');
+    setInviteLink('');
+    try {
+      const res = await api.resendUserInvite(userId);
+      setStatus(`Invitation resent. Email status: ${res.emailStatus}`);
+      if (res.emailStatus !== 'SENT' && res.acceptUrl) {
+        setInviteLink(res.acceptUrl);
+      }
+    } catch (err) {
+      setStatus(err.data?.message || 'Failed to resend invitation.');
+    }
+  }
+
+  async function invite(e) {
+    e.preventDefault();
+    setStatus('Sending invitation…');
+    setInviteLink('');
+    try {
+      const res = await api.inviteUser(form);
+      setStatus(`Invited. Email status: ${res.emailStatus}`);
+      if (res.emailStatus !== 'SENT' && res.acceptUrl) {
+        setInviteLink(res.acceptUrl);
+      }
+      setForm({ email: '', firstName: '', lastName: '', role: 'PRODUCER' });
+      setShowInvite(false);
+      await load();
+    } catch (err) {
+      setStatus(err.data?.message || 'Failed to invite.');
+    }
+  }
+
+  async function deactivate(userId) {
+    if (!confirm('Deactivate this user? Their history and attribution stay intact, but they will not be able to log in.')) return;
+    await api.deactivateUser(userId);
+    await load();
+  }
+
+  async function addLead(e) {
+    e.preventDefault();
+    setLeadStatus('Creating…');
+    try {
+      await api.createLead(leadForm);
+      setLeadStatus('Lead created.');
+      setLeadForm({ firstName: '', lastName: '', phone: '', email: '', product: 'Auto', assignedToId: '' });
+      setShowAddLead(false);
+      await load();
+    } catch (err) {
+      setLeadStatus(err.data?.message || 'Failed to create lead.');
+    }
+  }
+
+  const producers = users.filter((u) => u.role === 'PRODUCER' && u.status === 'ACTIVE');
+
+  return (
+    <div style={s.wrap}>
+      <section style={s.section}>
+        <FlowScoreCard scope="agency" agencyId={user?.agencyId} title="AGENCY FLOW SCORE" onViewReport={() => setShowReport(true)} />
+      </section>
+
+      <section style={s.section}>
+        <FunnelMetricsCard scope="agency" title="AGENCY FUNNEL" onSelectStage={selectFunnelStage} />
+      </section>
+
+      <section style={s.section}>
+        <div style={s.headerRow}>
+          <h3 style={s.h3}>TEAM ({users.length})</h3>
+          <button style={s.smallButton} onClick={() => setShowInvite(!showInvite)}>
+            + INVITE PRODUCER
+          </button>
+        </div>
+        {showInvite && (
+          <form onSubmit={invite} style={s.form}>
+            <input style={s.input} placeholder="First name" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} required />
+            <input style={s.input} placeholder="Last name" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} required />
+            <input style={s.input} type="email" placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
+            <select style={s.input} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+              <option value="PRODUCER">Producer</option>
+              <option value="AGENCY_MANAGER">Manager</option>
+            </select>
+            <button style={s.submitButton} type="submit">Send Invitation</button>
+          </form>
+        )}
+        {status && <div style={s.status}>{status}</div>}
+        {inviteLink && (
+          <div style={s.linkBox}>
+            Email wasn't sent — share this activation link directly:
+            <br />
+            <a style={s.link} href={inviteLink} target="_blank" rel="noreferrer">{inviteLink}</a>
+          </div>
+        )}
+        {users.map((u) => (
+          <div key={u.id} style={s.row} className="ui-row-stack">
+            <div>
+              <div style={s.rowTitle}>{u.firstName} {u.lastName}</div>
+              <div style={s.rowSub}>{u.email} · {u.role}</div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={s.badge}>{u.status}</div>
+              {u.status === 'INVITED' && (
+                <button style={s.resendButton} onClick={() => resendUser(u.id)}>RESEND INVITE</button>
+              )}
+              {u.status !== 'DEACTIVATED' && (
+                <button style={s.deactivateButton} onClick={() => deactivate(u.id)}>DEACTIVATE</button>
+              )}
+            </div>
+          </div>
+        ))}
+      </section>
+
+      <section style={s.section}>
+        <div style={s.headerRow}>
+          <h3 style={s.h3}>LEADS ({leads.length}){stageFilter ? ` · ${stageFilter.stage.toUpperCase()}` : ''}</h3>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {stageFilter && (
+              <button style={s.smallButtonOutline} onClick={clearStageFilter}>CLEAR FILTER</button>
+            )}
+            <button style={s.smallButton} onClick={() => setShowAddLead(!showAddLead)}>+ ADD LEAD</button>
+          </div>
+        </div>
+        {showAddLead && (
+          <form onSubmit={addLead} style={s.form}>
+            <input style={s.input} placeholder="First name" value={leadForm.firstName} onChange={(e) => setLeadForm({ ...leadForm, firstName: e.target.value })} required />
+            <input style={s.input} placeholder="Last name" value={leadForm.lastName} onChange={(e) => setLeadForm({ ...leadForm, lastName: e.target.value })} required />
+            <input style={s.input} placeholder="Phone" value={leadForm.phone} onChange={(e) => setLeadForm({ ...leadForm, phone: e.target.value })} />
+            <input style={s.input} type="email" placeholder="Email (optional)" value={leadForm.email} onChange={(e) => setLeadForm({ ...leadForm, email: e.target.value })} />
+            <select style={s.input} value={leadForm.product} onChange={(e) => setLeadForm({ ...leadForm, product: e.target.value })}>
+              <option>Auto</option><option>Home</option><option>Life</option><option>Health</option>
+            </select>
+            <select style={s.input} value={leadForm.assignedToId} onChange={(e) => setLeadForm({ ...leadForm, assignedToId: e.target.value })}>
+              <option value="">Unassigned</option>
+              {producers.map((p) => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
+            </select>
+            <button style={s.submitButton} type="submit">Create Lead</button>
+          </form>
+        )}
+        {leadStatus && <div style={s.status}>{leadStatus}</div>}
+        {leads.map((l) => (
+          <div key={l.id} style={s.row} className="ui-row-stack" onClick={() => l.customer && setSelectedCustomerId(l.customerId)}>
+            <div>
+              <div style={{ ...s.rowTitle, cursor: l.customer ? 'pointer' : 'default', textDecoration: l.customer ? 'underline' : 'none' }}>
+                {l.customer ? `${l.customer.firstName} ${l.customer.lastName}` : 'Lead'}
+              </div>
+              <div style={s.rowSub}>{l.product || l.source} · {l.assignedTo ? `${l.assignedTo.firstName} ${l.assignedTo.lastName}` : 'Unassigned'}</div>
+            </div>
+            <div style={s.badge}>{l.status}</div>
+          </div>
+        ))}
+        {leads.length === 0 && <div style={s.empty}>No leads yet.</div>}
+      </section>
+
+      {selectedCustomerId && (
+        <Customer360Modal customerId={selectedCustomerId} onClose={() => setSelectedCustomerId(null)} />
+      )}
+
+      {showReport && (
+        <div style={s.reportOverlay} onClick={() => setShowReport(false)}>
+          <div style={s.reportModal} onClick={(e) => e.stopPropagation()}>
+            <RunningReportPage scope="agency" agencyId={user?.agencyId} onClose={() => setShowReport(false)} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const s = {
+  wrap: { color: 'var(--text-primary)' },
+  section: { marginBottom: 32 },
+  headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2 },
+  smallButton: { padding: '8px 14px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
+  smallButtonOutline: { padding: '8px 14px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
+  form: { display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg-elevated)', padding: 16, borderRadius: 8, marginBottom: 12, border: '1px solid var(--border-hairline)' },
+  input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },
+  submitButton: { padding: '10px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
+  status: { color: 'var(--accent)', marginBottom: 12, fontSize: 13 },
+  linkBox: { color: 'var(--text-secondary)', fontSize: 13, marginBottom: 12, background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 12 },
+  link: { color: 'var(--accent)', wordBreak: 'break-all' },
+  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 14, marginBottom: 8 },
+  rowTitle: { fontWeight: 600, fontSize: 14 },
+  rowSub: { color: 'var(--text-muted)', fontSize: 12 },
+  badge: { fontSize: 11, color: 'var(--text-secondary)', border: '1px solid var(--border-strong)', padding: '4px 8px', borderRadius: 4 },
+  deactivateButton: { fontSize: 10, color: 'var(--danger)', border: '1px solid rgba(255, 77, 94, 0.4)', background: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer' },
+  resendButton: { fontSize: 10, color: 'var(--accent)', border: '1px solid var(--border-strong)', background: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer' },
+  empty: { color: 'var(--text-muted)', fontStyle: 'italic' },
+  reportOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2500, padding: 20, overflowY: 'auto' },
+  reportModal: { background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 12, maxWidth: 680, width: '100%', maxHeight: '85vh', overflowY: 'auto' },
+};

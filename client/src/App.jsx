@@ -1,56 +1,43 @@
-import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './lib/AuthContext';
+import { basePathForRole } from './layout/navConfig';
+import RoleGate from './layout/RoleGate';
+import AppLayout from './layout/AppLayout';
 import Login from './pages/Login';
 import AcceptInvitation from './pages/AcceptInvitation';
-import ProducerHome from './pages/ProducerHome';
-import AgencyOwnerHome from './pages/AgencyOwnerHome';
-import PlatformOwnerHome from './pages/PlatformOwnerHome';
-import TelemarketerHome from './pages/TelemarketerHome';
-import EdWidget from './pages/EdWidget';
-import NotificationBell from './pages/NotificationBell';
-import ImpersonationBar from './pages/ImpersonationBar';
 
-function Shell({ children }) {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
-  return (
-    <div style={{ minHeight: '100vh', background: '#0a0a0a' }}>
-      <ImpersonationBar />
-      <div style={styles.nav}>
-        <span style={styles.logo}>EVENFLOW</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <NotificationBell />
-          <span style={styles.userLabel}>{user?.firstName} · {user?.role.replace('_', ' ')}</span>
-          <button
-            style={styles.logoutButton}
-            onClick={async () => {
-              await logout();
-              navigate('/login');
-            }}
-          >
-            Log out
-          </button>
-        </div>
-      </div>
-      {children}
-      <EdWidget />
-    </div>
-  );
-}
+import ProducerDashboard from './pages/ProducerDashboard';
+import CallsPanel from './pages/CallsPanel';
+import TrainingPanel from './pages/TrainingPanel';
+import OpportunitiesPanel from './pages/OpportunitiesPanel';
 
-function RequireAuth({ children }) {
+import AgencyOwnerDashboard from './pages/AgencyOwnerDashboard';
+import TransfersPanel from './pages/TransfersPanel';
+import VendorsPanel from './pages/VendorsPanel';
+import FinancialsPanel from './pages/FinancialsPanel';
+import AgencySettingsPanel from './pages/AgencySettingsPanel';
+import SupportPanel from './pages/SupportPanel';
+import AgencyBillingPanel from './pages/AgencyBillingPanel';
+import CoursesAdminPanel from './pages/CoursesAdminPanel';
+import GoalsPanel from './pages/GoalsPanel';
+
+import AgenciesPanel from './pages/AgenciesPanel';
+import TelemarketersPanel from './pages/TelemarketersPanel';
+import CreditRequestsPanel from './pages/CreditRequestsPanel';
+import BillingPanel from './pages/BillingPanel';
+
+import TelemarketerDashboard from './pages/TelemarketerDashboard';
+
+function RequireAuth() {
   const { user, loading } = useAuth();
   if (loading) return <div style={{ color: '#fff', padding: 40 }}>Loading…</div>;
   if (!user) return <Navigate to="/login" replace />;
-  return <Shell>{children}</Shell>;
+  return <AppLayout />;
 }
 
-function HomeRouter() {
+function RoleRedirect() {
   const { user } = useAuth();
-  if (user.role === 'PLATFORM_OWNER') return <PlatformOwnerHome />;
-  if (user.role === 'AGENCY_OWNER' || user.role === 'AGENCY_MANAGER') return <AgencyOwnerHome />;
-  if (user.role === 'TELEMARKETER') return <TelemarketerHome />;
-  return <ProducerHome />;
+  return <Navigate to={basePathForRole(user?.role)} replace />;
 }
 
 export default function App() {
@@ -58,21 +45,45 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/accept-invitation" element={<AcceptInvitation />} />
-      <Route
-        path="/"
-        element={
-          <RequireAuth>
-            <HomeRouter />
-          </RequireAuth>
-        }
-      />
+
+      <Route element={<RequireAuth />}>
+        <Route index element={<RoleRedirect />} />
+
+        <Route element={<RoleGate allow={['PRODUCER']} />}>
+          <Route path="producer" element={<ProducerDashboard />} />
+          <Route path="producer/coaching" element={<CallsPanel />} />
+          <Route path="producer/training" element={<TrainingPanel />} />
+          <Route path="producer/opportunities" element={<OpportunitiesPanel />} />
+        </Route>
+
+        <Route element={<RoleGate allow={['AGENCY_OWNER', 'AGENCY_MANAGER']} />}>
+          <Route path="agency" element={<AgencyOwnerDashboard />} />
+          <Route path="agency/transfers" element={<TransfersPanel />} />
+          <Route path="agency/vendors" element={<VendorsPanel />} />
+          <Route path="agency/financials" element={<FinancialsPanel />} />
+          <Route path="agency/settings" element={<AgencySettingsPanel />} />
+          <Route path="agency/support" element={<SupportPanel />} />
+          <Route path="agency/coaching" element={<CallsPanel />} />
+          <Route path="agency/billing" element={<AgencyBillingPanel />} />
+          <Route path="agency/training" element={<CoursesAdminPanel />} />
+          <Route path="agency/opportunities" element={<OpportunitiesPanel />} />
+          <Route path="agency/goals" element={<GoalsPanel />} />
+        </Route>
+
+        <Route element={<RoleGate allow={['PLATFORM_OWNER']} />}>
+          <Route path="platform" element={<AgenciesPanel />} />
+          <Route path="platform/telemarketers" element={<TelemarketersPanel />} />
+          <Route path="platform/financials" element={<FinancialsPanel />} />
+          <Route path="platform/credits" element={<CreditRequestsPanel />} />
+          <Route path="platform/support" element={<SupportPanel />} />
+          <Route path="platform/billing" element={<BillingPanel />} />
+          <Route path="platform/training" element={<CoursesAdminPanel />} />
+        </Route>
+
+        <Route element={<RoleGate allow={['TELEMARKETER']} />}>
+          <Route path="telemarketer" element={<TelemarketerDashboard />} />
+        </Route>
+      </Route>
     </Routes>
   );
 }
-
-const styles = {
-  nav: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid #1a1a1a' },
-  logo: { color: '#00e5ff', fontWeight: 800, letterSpacing: 2 },
-  userLabel: { color: '#888', fontSize: 12 },
-  logoutButton: { background: 'transparent', border: '1px solid #333', color: '#aaa', padding: '6px 12px', borderRadius: 6, cursor: 'pointer', fontSize: 12 },
-};

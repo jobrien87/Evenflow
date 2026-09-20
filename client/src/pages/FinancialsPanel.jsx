@@ -49,7 +49,7 @@ export default function FinancialsPanel() {
     }
   }
 
-  if (!summary) return <div style={{ color: '#666' }}>Loading…</div>;
+  if (!summary) return <div style={{ color: 'var(--text-muted)' }}>Loading…</div>;
 
   return (
     <div style={s.wrap}>
@@ -116,7 +116,7 @@ export default function FinancialsPanel() {
         {summary.revenueByCategory.map((r) => (
           <div key={r.category} style={s.catRow}>
             <span>{r.category.replace(/_/g, ' ')}</span>
-            <span style={{ color: '#00e5ff' }}>${r.amount.toLocaleString()}</span>
+            <span style={{ color: 'var(--accent)' }}>${r.amount.toLocaleString()}</span>
           </div>
         ))}
       </section>
@@ -127,7 +127,7 @@ export default function FinancialsPanel() {
         {summary.costByCategory.map((c) => (
           <div key={c.category} style={s.catRow}>
             <span>{c.category.replace(/_/g, ' ')}</span>
-            <span style={{ color: '#ff4d4d' }}>${c.amount.toLocaleString()}</span>
+            <span style={{ color: 'var(--danger)' }}>${c.amount.toLocaleString()}</span>
           </div>
         ))}
       </section>
@@ -167,7 +167,7 @@ export default function FinancialsPanel() {
 function Stat({ label, value, highlight, muted }) {
   return (
     <div style={s.stat}>
-      <div style={{ ...s.statValue, color: muted ? '#666' : highlight === false ? '#ff4d4d' : highlight ? '#00e5ff' : '#fff', fontSize: muted ? 14 : 24 }}>
+      <div style={{ ...s.statValue, color: muted ? 'var(--text-muted)' : highlight === false ? 'var(--danger)' : highlight ? 'var(--accent)' : 'var(--text-primary)', fontSize: muted ? 14 : 24 }}>
         {value}
       </div>
       <div style={s.statLabel}>{label}</div>
@@ -177,32 +177,32 @@ function Stat({ label, value, highlight, muted }) {
 
 const s = {
   wrap: {},
-  periodLabel: { color: '#666', fontSize: 12, marginBottom: 16 },
+  periodLabel: { color: 'var(--text-muted)', fontSize: 12, marginBottom: 16 },
   statsRow: { display: 'flex', gap: 16, marginBottom: 16 },
-  stat: { background: '#111', border: '1px solid #222', borderRadius: 8, padding: 16, flex: 1, textAlign: 'center' },
+  stat: { background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 16, flex: 1, textAlign: 'center' },
   statValue: { fontSize: 24, fontWeight: 700 },
-  statLabel: { fontSize: 11, color: '#888', marginTop: 4 },
-  reasonNote: { color: '#ffb84d', fontSize: 12, marginBottom: 20, fontStyle: 'italic' },
+  statLabel: { fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 },
+  reasonNote: { color: 'var(--warning)', fontSize: 12, marginBottom: 20, fontStyle: 'italic' },
   section: { marginBottom: 28 },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-  h3: { color: '#888', fontSize: 12, letterSpacing: 2 },
-  smallButton: { padding: '8px 14px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
-  form: { display: 'flex', flexDirection: 'column', gap: 10, background: '#111', padding: 16, borderRadius: 8, border: '1px solid #222' },
+  h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2 },
+  smallButton: { padding: '8px 14px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
+  form: { display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg-elevated)', padding: 16, borderRadius: 8, border: '1px solid var(--border-hairline)' },
   toggleRow: { display: 'flex', gap: 8 },
   miniTab: (active) => ({
-    flex: 1, padding: '8px', borderRadius: 6, border: '1px solid #333', cursor: 'pointer', fontSize: 11, fontWeight: 700,
-    background: active ? '#00e5ff' : 'transparent', color: active ? '#000' : '#aaa',
+    flex: 1, padding: '8px', borderRadius: 6, border: '1px solid var(--border-strong)', cursor: 'pointer', fontSize: 11, fontWeight: 700,
+    background: active ? 'var(--accent)' : 'transparent', color: active ? 'var(--accent-on)' : 'var(--text-secondary)',
   }),
-  input: { padding: '10px 12px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff' },
-  submitButton: { padding: '10px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
-  status: { color: '#00e5ff', fontSize: 12 },
-  catRow: { display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #1a1a1a', fontSize: 13 },
-  vendorRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#111', border: '1px solid #1a1a1a', borderRadius: 8, padding: 12, marginBottom: 8 },
+  input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },
+  submitButton: { padding: '10px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
+  status: { color: 'var(--accent)', fontSize: 12 },
+  catRow: { display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border-hairline)', fontSize: 13 },
+  vendorRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 12, marginBottom: 8 },
   rowTitle: { fontWeight: 600, fontSize: 13 },
-  rowSub: { color: '#666', fontSize: 11 },
-  costPer: { color: '#00e5ff', fontSize: 13, fontWeight: 600 },
-  empty: { color: '#666', fontStyle: 'italic', fontSize: 13 },
-  aiUsageBox: { background: '#111', border: '1px solid #222', borderRadius: 8, padding: 16 },
-  aiUsageRow: { display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 13, color: '#ccc' },
-  aiUsageNote: { color: '#666', fontSize: 11, marginTop: 8, fontStyle: 'italic' },
+  rowSub: { color: 'var(--text-muted)', fontSize: 11 },
+  costPer: { color: 'var(--accent)', fontSize: 13, fontWeight: 600 },
+  empty: { color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 13 },
+  aiUsageBox: { background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 16 },
+  aiUsageRow: { display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 13, color: 'var(--text-secondary)' },
+  aiUsageNote: { color: 'var(--text-muted)', fontSize: 11, marginTop: 8, fontStyle: 'italic' },
 };

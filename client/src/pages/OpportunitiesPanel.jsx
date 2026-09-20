@@ -105,7 +105,7 @@ export default function OpportunitiesPanel() {
 
       <section>
         {opportunities.map((o) => (
-          <div key={o.id} style={s.row}>
+          <div key={o.id} style={s.row} className="ui-row-stack">
             <div>
               <div style={s.rowTitle}>
                 {o.customer.firstName} {o.customer.lastName}
@@ -156,29 +156,29 @@ const s = {
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 },
   tabRow: { display: 'flex', gap: 8 },
   tab: (active) => ({
-    padding: '8px 14px', borderRadius: 6, border: '1px solid #333', cursor: 'pointer', fontSize: 11, fontWeight: 700,
-    background: active ? '#00e5ff' : 'transparent', color: active ? '#000' : '#aaa',
+    padding: '8px 14px', borderRadius: 6, border: '1px solid var(--border-strong)', cursor: 'pointer', fontSize: 11, fontWeight: 700,
+    background: active ? 'var(--accent)' : 'transparent', color: active ? 'var(--accent-on)' : 'var(--text-secondary)',
   }),
-  smallButton: { padding: '8px 14px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
-  form: { display: 'flex', flexDirection: 'column', gap: 10, background: '#111', padding: 16, borderRadius: 8, marginBottom: 16, border: '1px solid #222' },
-  hint: { color: '#666', fontSize: 12, lineHeight: 1.5 },
-  input: { padding: '10px 12px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff', width: '100%', boxSizing: 'border-box' },
-  searchResults: { position: 'absolute', top: '100%', left: 0, right: 0, background: '#000', border: '1px solid #333', borderRadius: 6, zIndex: 10, maxHeight: 160, overflowY: 'auto' },
-  searchResultRow: { padding: '8px 12px', color: '#ccc', fontSize: 13, cursor: 'pointer', borderBottom: '1px solid #1a1a1a' },
-  submitButton: { padding: '10px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
-  status: { color: '#00e5ff', fontSize: 12 },
-  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#111', border: '1px solid #1a1a1a', borderRadius: 8, padding: 14, marginBottom: 8, flexWrap: 'wrap', gap: 10 },
-  rowTitle: { fontWeight: 600, fontSize: 14, color: '#fff', display: 'flex', alignItems: 'center', gap: 8 },
+  smallButton: { padding: '8px 14px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
+  form: { display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg-elevated)', padding: 16, borderRadius: 8, marginBottom: 16, border: '1px solid var(--border-hairline)' },
+  hint: { color: 'var(--text-muted)', fontSize: 12, lineHeight: 1.5 },
+  input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', width: '100%', boxSizing: 'border-box' },
+  searchResults: { position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, zIndex: 10, maxHeight: 160, overflowY: 'auto' },
+  searchResultRow: { padding: '8px 12px', color: 'var(--text-secondary)', fontSize: 13, cursor: 'pointer', borderBottom: '1px solid var(--border-hairline)' },
+  submitButton: { padding: '10px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
+  status: { color: 'var(--accent)', fontSize: 12 },
+  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 14, marginBottom: 8, flexWrap: 'wrap', gap: 10 },
+  rowTitle: { fontWeight: 600, fontSize: 14, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 },
   typeTag: (type) => ({
     fontSize: 9, padding: '2px 6px', borderRadius: 4,
-    color: type === 'WINBACK' ? '#ffb84d' : '#00e5ff', border: `1px solid ${type === 'WINBACK' ? '#ffb84d44' : '#00e5ff44'}`,
+    color: type === 'WINBACK' ? 'var(--warning)' : 'var(--accent)', border: `1px solid ${type === 'WINBACK' ? 'rgba(255, 184, 77, 0.4)' : 'var(--border-accent)'}`,
   }),
-  rowSub: { color: '#666', fontSize: 12, marginTop: 2 },
+  rowSub: { color: 'var(--text-muted)', fontSize: 12, marginTop: 2 },
   actionsRow: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' },
-  badge: { fontSize: 11, color: '#888', border: '1px solid #333', padding: '4px 8px', borderRadius: 4 },
-  actionButton: { padding: '6px 10px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 11 },
-  wonButton: { padding: '6px 10px', background: '#00ff88', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 11 },
-  declineButton: { padding: '6px 10px', background: 'transparent', border: '1px solid #ff4d4d', color: '#ff4d4d', borderRadius: 6, cursor: 'pointer', fontSize: 11 },
-  miniInput: { padding: '6px 8px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff', fontSize: 12, width: 90 },
-  empty: { color: '#666', fontStyle: 'italic', fontSize: 13 },
+  badge: { fontSize: 11, color: 'var(--text-secondary)', border: '1px solid var(--border-strong)', padding: '4px 8px', borderRadius: 4 },
+  actionButton: { padding: '6px 10px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 11 },
+  wonButton: { padding: '6px 10px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 11 },
+  declineButton: { padding: '6px 10px', background: 'transparent', border: '1px solid var(--danger)', color: 'var(--danger)', borderRadius: 6, cursor: 'pointer', fontSize: 11 },
+  miniInput: { padding: '6px 8px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, width: 90 },
+  empty: { color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 13 },
 };

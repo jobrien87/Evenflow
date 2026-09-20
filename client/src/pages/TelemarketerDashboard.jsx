@@ -4,7 +4,7 @@ import FlowScoreCard from './FlowScoreCard';
 
 const PRODUCTS = ['Auto', 'Home', 'Life', 'Health'];
 
-export default function TelemarketerHome() {
+export default function TelemarketerDashboard() {
   const [transfers, setTransfers] = useState([]);
   const [assignments, setAssignments] = useState(null);
   const [form, setForm] = useState({ product: 'Auto', state: '', firstName: '', lastName: '', phone: '', notes: '' });
@@ -84,7 +84,7 @@ export default function TelemarketerHome() {
         {result && (
           <div style={s.resultBox}>
             {result.error ? (
-              <span style={{ color: '#ff4d4d' }}>{result.error}</span>
+              <span style={{ color: 'var(--danger)' }}>{result.error}</span>
             ) : (
               <>
                 <div style={s.resultStatus(result.status)}>{result.status.replace(/_/g, ' ')}</div>
@@ -98,7 +98,7 @@ export default function TelemarketerHome() {
       <section style={s.section}>
         <h3 style={s.h3}>MY RECENT TRANSFERS</h3>
         {transfers.map((t) => (
-          <div key={t.id} style={s.row}>
+          <div key={t.id} style={s.row} className="ui-row-stack">
             <div>
               <div style={s.rowTitle}>{t.firstName} {t.lastName} · {t.product} · {t.state}</div>
               <div style={s.rowSub}>{new Date(t.createdAt).toLocaleString()}</div>
@@ -113,31 +113,31 @@ export default function TelemarketerHome() {
 }
 
 const bandColor = (status) => {
-  if (['OFFERED', 'ACCEPTED', 'CONNECTED', 'COMPLETED', 'DISPOSITIONED'].includes(status)) return '#00e5ff';
-  if (['NO_ELIGIBLE_DESTINATION', 'REJECTED', 'MISSED', 'FAILED', 'CANCELLED'].includes(status)) return '#ff4d4d';
-  return '#ffb84d';
+  if (['OFFERED', 'ACCEPTED', 'CONNECTED', 'COMPLETED', 'DISPOSITIONED'].includes(status)) return 'var(--accent)';
+  if (['NO_ELIGIBLE_DESTINATION', 'REJECTED', 'MISSED', 'FAILED', 'CANCELLED'].includes(status)) return 'var(--danger)';
+  return 'var(--warning)';
 };
 
 const s = {
-  wrap: { color: '#fff', maxWidth: 640, margin: '0 auto', padding: 24 },
+  wrap: { color: 'var(--text-primary)' },
   section: { marginBottom: 32 },
-  h3: { color: '#888', fontSize: 12, letterSpacing: 2, marginBottom: 12 },
-  noAssignmentBanner: { background: '#1a1610', border: '1px solid #ffb84d55', color: '#ffb84d', padding: 14, borderRadius: 8, fontSize: 13, lineHeight: 1.5 },
+  h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2, marginBottom: 12 },
+  noAssignmentBanner: { background: 'var(--warning-soft)', border: '1px solid rgba(255, 184, 77, 0.4)', color: 'var(--warning)', padding: 14, borderRadius: 8, fontSize: 13, lineHeight: 1.5 },
   officesRow: { display: 'flex', gap: 8, flexWrap: 'wrap' },
   officeChip: (healthy) => ({
     padding: '8px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600,
-    background: healthy ? '#0d1a1a' : '#1a1610', color: healthy ? '#00e5ff' : '#ffb84d',
-    border: `1px solid ${healthy ? '#00e5ff44' : '#ffb84d44'}`,
+    background: healthy ? 'var(--accent-gradient-soft)' : 'var(--warning-soft)', color: healthy ? 'var(--accent)' : 'var(--warning)',
+    border: `1px solid ${healthy ? 'var(--border-accent)' : 'rgba(255, 184, 77, 0.4)'}`,
   }),
-  form: { display: 'flex', flexDirection: 'column', gap: 10, background: '#111', padding: 20, borderRadius: 8, border: '1px solid #222' },
-  input: { padding: '10px 12px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff' },
-  submitButton: { padding: '12px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
-  resultBox: { marginTop: 12, padding: 14, background: '#0d0d0d', border: '1px solid #222', borderRadius: 8 },
+  form: { display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg-elevated)', padding: 20, borderRadius: 8, border: '1px solid var(--border-hairline)' },
+  input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },
+  submitButton: { padding: '12px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
+  resultBox: { marginTop: 12, padding: 14, background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 8 },
   resultStatus: (status) => ({ fontWeight: 700, color: bandColor(status) }),
-  resultReason: { color: '#888', fontSize: 12, marginTop: 4 },
-  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#111', border: '1px solid #1a1a1a', borderRadius: 8, padding: 14, marginBottom: 8 },
+  resultReason: { color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 },
+  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 14, marginBottom: 8 },
   rowTitle: { fontWeight: 600, fontSize: 14 },
-  rowSub: { color: '#666', fontSize: 12 },
+  rowSub: { color: 'var(--text-muted)', fontSize: 12 },
   badge: (status) => ({ fontSize: 11, color: bandColor(status), border: `1px solid ${bandColor(status)}44`, padding: '4px 8px', borderRadius: 4 }),
-  empty: { color: '#666', fontStyle: 'italic' },
+  empty: { color: 'var(--text-muted)', fontStyle: 'italic' },
 };

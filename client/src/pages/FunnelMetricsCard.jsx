@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { Card, SectionHeader, Button, StatTile, EmptyState } from '../ui';
 
 const PERIODS = [
   { key: 'month', label: 'This month', from: () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); } },
@@ -9,13 +10,14 @@ const PERIODS = [
 
 function Rate({ label, value, sampleSize, onClick }) {
   const clickable = onClick && sampleSize > 0;
+  const sub = sampleSize === 0 ? 'no data yet' : sampleSize < 3 ? `limited data (${sampleSize})` : null;
   return (
-    <div style={s.rate(clickable)} onClick={clickable ? onClick : undefined}>
-      <div style={s.rateValue}>{value === null ? '—' : `${value}%`}</div>
-      <div style={s.rateLabel}>{label}</div>
-      {sampleSize < 3 && sampleSize > 0 && <div style={s.lowSample}>limited data ({sampleSize})</div>}
-      {sampleSize === 0 && <div style={s.lowSample}>no data yet</div>}
-    </div>
+    <StatTile
+      label={label}
+      value={value === null ? '—' : `${value}%`}
+      sub={sub}
+      onClick={clickable ? onClick : undefined}
+    />
   );
 }
 
@@ -46,26 +48,29 @@ export default function FunnelMetricsCard({ scope = 'me', title = 'FUNNEL', onSe
     }
   }
 
-  if (error) return <div style={s.card}><div style={s.error}>{error}</div></div>;
-  if (!data) return <div style={s.card}><div style={s.muted}>Loading…</div></div>;
+  if (error) return <Card><div style={s.error}>{error}</div></Card>;
+  if (!data) return <Card><div style={s.muted}>Loading…</div></Card>;
 
   const primary = scope === 'me' ? data.mine : data.agency;
   const comparison = scope === 'me' ? data.agency : null;
 
   return (
-    <div style={s.card}>
-      <div style={s.headerRow}>
-        <div style={s.label}>{title}</div>
-        <div style={s.periodRow}>
-          {PERIODS.map((p) => (
-            <button key={p.key} style={s.periodButton(p.key === periodKey)} onClick={() => setPeriodKey(p.key)}>
-              {p.label}
-            </button>
-          ))}
-        </div>
-      </div>
+    <Card>
+      <SectionHeader
+        right={
+          <div style={s.periodRow}>
+            {PERIODS.map((p) => (
+              <Button key={p.key} size="sm" variant={p.key === periodKey ? 'primary' : 'secondary'} onClick={() => setPeriodKey(p.key)}>
+                {p.label}
+              </Button>
+            ))}
+          </div>
+        }
+      >
+        {title}
+      </SectionHeader>
       {!primary || primary.totalLeads === 0 ? (
-        <div style={s.emptyState}>No leads in this period yet.</div>
+        <EmptyState description="No leads in this period yet." />
       ) : (
         <>
           <div style={s.ratesRow}>
@@ -81,26 +86,14 @@ export default function FunnelMetricsCard({ scope = 'me', title = 'FUNNEL', onSe
           )}
         </>
       )}
-    </div>
+    </Card>
   );
 }
 
 const s = {
-  card: { background: '#111', border: '1px solid #222', borderRadius: 10, padding: 20 },
-  headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 },
-  label: { color: '#888', fontSize: 12, fontWeight: 700, letterSpacing: 1 },
   periodRow: { display: 'flex', gap: 6 },
-  periodButton: (active) => ({
-    padding: '4px 10px', borderRadius: 4, border: '1px solid #333', cursor: 'pointer', fontSize: 11, fontWeight: 700,
-    background: active ? '#00e5ff' : 'transparent', color: active ? '#000' : '#888',
-  }),
   ratesRow: { display: 'flex', gap: 20, flexWrap: 'wrap' },
-  rate: (clickable) => ({ minWidth: 100, cursor: clickable ? 'pointer' : 'default' }),
-  rateValue: { color: '#00e5ff', fontSize: 24, fontWeight: 800 },
-  rateLabel: { color: '#888', fontSize: 11, marginTop: 2 },
-  lowSample: { color: '#555', fontSize: 10, fontStyle: 'italic', marginTop: 2 },
-  comparisonNote: { color: '#666', fontSize: 12, marginTop: 14, borderTop: '1px solid #1a1a1a', paddingTop: 10 },
-  emptyState: { color: '#666', fontSize: 13, fontStyle: 'italic' },
-  muted: { color: '#666', fontSize: 13 },
-  error: { color: '#ff4d4d', fontSize: 13 },
+  comparisonNote: { color: 'var(--text-muted)', fontSize: 12, marginTop: 14, borderTop: '1px solid var(--border-hairline)', paddingTop: 10 },
+  muted: { color: 'var(--text-muted)', fontSize: 13 },
+  error: { color: 'var(--danger)', fontSize: 13 },
 };

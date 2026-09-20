@@ -40,11 +40,11 @@ export default function AcceptInvitation() {
 }
 
 const s = {
-  wrap: { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0a0a0a' },
-  card: { width: 380, padding: 32, background: '#111', border: '1px solid #222', borderRadius: 12, color: '#fff' },
+  wrap: { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)' },
+  card: { width: 380, padding: 32, background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 12, color: 'var(--text-primary)' },
   h2: { fontWeight: 500, fontSize: 18, marginBottom: 16 },
-  label: { color: '#999', fontSize: 12, display: 'block', marginBottom: 6 },
-  input: { width: '100%', padding: '10px 12px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff', marginBottom: 16 },
-  button: { width: '100%', padding: '12px', background: '#00e5ff', color: '#000', fontWeight: 700, border: 'none', borderRadius: 6, cursor: 'pointer' },
-  message: { color: '#00e5ff', fontSize: 13, marginTop: 12 },
+  label: { color: 'var(--text-secondary)', fontSize: 12, display: 'block', marginBottom: 6 },
+  input: { width: '100%', padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', marginBottom: 16 },
+  button: { width: '100%', padding: '12px', background: 'var(--accent)', color: 'var(--accent-on)', fontWeight: 700, border: 'none', borderRadius: 6, cursor: 'pointer' },
+  message: { color: 'var(--accent)', fontSize: 13, marginTop: 12 },
 };

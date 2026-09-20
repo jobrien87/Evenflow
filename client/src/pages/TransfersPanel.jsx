@@ -77,7 +77,7 @@ export default function TransfersPanel() {
         <section style={s.section}>
           <h3 style={s.h3}>ACTIVE</h3>
           {active.map((t) => (
-            <div key={t.id} style={s.row}>
+            <div key={t.id} style={s.row} className="ui-row-stack">
               <div>
                 <div style={s.rowTitle}>{t.firstName} {t.lastName}</div>
                 <div style={s.rowSub}>{t.product} · {t.state} · {t.status}</div>
@@ -108,7 +108,7 @@ export default function TransfersPanel() {
       <section style={s.section}>
         <h3 style={s.h3}>ALL TRANSFERS ({rest.length})</h3>
         {rest.map((t) => (
-          <div key={t.id} style={s.row}>
+          <div key={t.id} style={s.row} className="ui-row-stack">
             <div>
               <div style={s.rowTitle}>{t.firstName} {t.lastName}</div>
               <div style={s.rowSub}>{t.product} · {t.state}</div>
@@ -174,7 +174,7 @@ function CreditRequestForm({ transferId, onDone }) {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
 
-  if (done) return <span style={{ fontSize: 11, color: '#ffb84d' }}>Credit requested</span>;
+  if (done) return <span style={{ fontSize: 11, color: 'var(--warning)' }}>Credit requested</span>;
 
   if (!open) {
     return (
@@ -206,21 +206,21 @@ function CreditRequestForm({ transferId, onDone }) {
 const s = {
   wrap: {},
   section: { marginBottom: 24 },
-  h3: { color: '#888', fontSize: 12, letterSpacing: 2, marginBottom: 12 },
-  error: { color: '#ff4d4d', marginBottom: 12, fontSize: 13 },
-  alertCard: { background: '#1a0d0d', border: '1px solid #ff4d4d55', borderRadius: 10, padding: 16, marginBottom: 10 },
+  h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2, marginBottom: 12 },
+  error: { color: 'var(--danger)', marginBottom: 12, fontSize: 13 },
+  alertCard: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', borderRadius: 10, padding: 16, marginBottom: 10 },
   alertTitle: { fontWeight: 700, fontSize: 18 },
-  alertSub: { color: '#aaa', fontSize: 13, marginTop: 2 },
-  alertNotes: { color: '#888', fontSize: 12, marginTop: 6, fontStyle: 'italic' },
+  alertSub: { color: 'var(--text-secondary)', fontSize: 13, marginTop: 2 },
+  alertNotes: { color: 'var(--text-secondary)', fontSize: 12, marginTop: 6, fontStyle: 'italic' },
   actionsRow: { display: 'flex', gap: 8, marginTop: 12 },
-  acceptButton: { flex: 1, padding: '10px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
-  rejectButton: { padding: '10px 16px', background: 'transparent', border: '1px solid #ff4d4d', color: '#ff4d4d', borderRadius: 6, cursor: 'pointer' },
-  smallButton: { padding: '6px 12px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
-  smallButtonOutline: { padding: '6px 12px', background: 'transparent', border: '1px solid #333', color: '#aaa', borderRadius: 6, cursor: 'pointer', fontSize: 11 },
-  miniInput: { padding: '6px 8px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff', fontSize: 12 },
-  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#111', border: '1px solid #1a1a1a', borderRadius: 8, padding: 14, marginBottom: 8 },
+  acceptButton: { flex: 1, padding: '10px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
+  rejectButton: { padding: '10px 16px', background: 'transparent', border: '1px solid var(--danger)', color: 'var(--danger)', borderRadius: 6, cursor: 'pointer' },
+  smallButton: { padding: '6px 12px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
+  smallButtonOutline: { padding: '6px 12px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, cursor: 'pointer', fontSize: 11 },
+  miniInput: { padding: '6px 8px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 },
+  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 14, marginBottom: 8 },
   rowTitle: { fontWeight: 600, fontSize: 14 },
-  rowSub: { color: '#666', fontSize: 12 },
-  badge: { fontSize: 11, color: '#888', border: '1px solid #333', padding: '4px 8px', borderRadius: 4 },
-  empty: { color: '#666', fontStyle: 'italic' },
+  rowSub: { color: 'var(--text-muted)', fontSize: 12 },
+  badge: { fontSize: 11, color: 'var(--text-secondary)', border: '1px solid var(--border-strong)', padding: '4px 8px', borderRadius: 4 },
+  empty: { color: 'var(--text-muted)', fontStyle: 'italic' },
 };

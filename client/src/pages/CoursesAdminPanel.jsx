@@ -12,6 +12,7 @@ export default function CoursesAdminPanel() {
   const [lessonDrafts, setLessonDrafts] = useState({});
   const [assignForm, setAssignForm] = useState({ courseId: '', userId: '' });
   const [status, setStatus] = useState('');
+  const [notEntitled, setNotEntitled] = useState(false);
 
   const isPlatformOwner = user.role === 'PLATFORM_OWNER';
 
@@ -20,12 +21,27 @@ export default function CoursesAdminPanel() {
   }, []);
 
   async function load() {
-    const promises = [api.trainingCourses(), api.teamTrainingAssignments()];
-    if (!isPlatformOwner) promises.push(api.users(''));
-    const results = await Promise.all(promises);
-    setCourses(results[0].courses);
-    setTeamAssignments(results[1].assignments);
-    if (!isPlatformOwner) setUsers(results[2].users.filter((u) => u.role === 'PRODUCER'));
+    try {
+      const promises = [api.trainingCourses(), api.teamTrainingAssignments()];
+      if (!isPlatformOwner) promises.push(api.users(''));
+      const results = await Promise.all(promises);
+      setCourses(results[0].courses);
+      setTeamAssignments(results[1].assignments);
+      if (!isPlatformOwner) setUsers(results[2].users.filter((u) => u.role === 'PRODUCER'));
+      setNotEntitled(false);
+    } catch (err) {
+      if (err.data?.error === 'MODULE_NOT_ENTITLED') {
+        setNotEntitled(true);
+      }
+    }
+  }
+
+  if (notEntitled) {
+    return (
+      <div style={s.notEntitledBox}>
+        Training isn't included on your current plan. Check the Billing tab, or ask your platform contact to enable it.
+      </div>
+    );
   }
 
   async function createCourse(e) {
@@ -172,7 +188,7 @@ export default function CoursesAdminPanel() {
       <section style={s.section}>
         <h3 style={s.h3}>TEAM PROGRESS ({teamAssignments.length})</h3>
         {teamAssignments.map((a) => (
-          <div key={a.id} style={s.row}>
+          <div key={a.id} style={s.row} className="ui-row-stack">
             <div>
               <div style={s.rowTitle}>{a.user ? `${a.user.firstName} ${a.user.lastName}` : 'Unknown'} — {a.course.title}</div>
               <div style={s.rowSub}>{a.progress.completed}/{a.progress.total} lessons</div>
@@ -188,32 +204,33 @@ export default function CoursesAdminPanel() {
 
 const s = {
   wrap: {},
+  notEntitledBox: { background: 'var(--warning-soft)', border: '1px solid rgba(255, 184, 77, 0.4)', color: 'var(--warning)', padding: 20, borderRadius: 8, fontSize: 13, lineHeight: 1.6 },
   section: { marginBottom: 28 },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  h3: { color: '#888', fontSize: 12, letterSpacing: 2 },
-  smallButton: { padding: '8px 14px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
-  smallButtonOutline: { padding: '6px 12px', background: 'transparent', border: '1px solid #333', color: '#aaa', borderRadius: 6, cursor: 'pointer', fontSize: 11, marginRight: 8 },
-  form: { display: 'flex', flexDirection: 'column', gap: 10, background: '#111', padding: 16, borderRadius: 8, marginBottom: 12, border: '1px solid #222' },
-  input: { padding: '10px 12px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff', width: '100%', boxSizing: 'border-box' },
-  submitButton: { padding: '10px 16px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
-  status: { color: '#00e5ff', fontSize: 12 },
-  courseCard: { background: '#111', border: '1px solid #222', borderRadius: 8, padding: 16, marginBottom: 12 },
-  courseTitle: { color: '#fff', fontWeight: 700, fontSize: 15 },
-  categoryTag: { fontSize: 10, color: '#00e5ff', border: '1px solid #00e5ff44', padding: '2px 6px', borderRadius: 4, marginLeft: 8 },
-  lessonCount: { color: '#666', fontSize: 12, marginTop: 4, marginBottom: 8 },
-  lessonChip: { color: '#aaa', fontSize: 12, padding: '4px 0' },
-  lessonForm: { marginTop: 12, paddingTop: 12, borderTop: '1px solid #1a1a1a', display: 'flex', flexDirection: 'column', gap: 8 },
-  quizDraft: { background: '#0d0d0d', border: '1px solid #1a1a1a', borderRadius: 6, padding: 10, display: 'flex', flexDirection: 'column', gap: 6 },
+  h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2 },
+  smallButton: { padding: '8px 14px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
+  smallButtonOutline: { padding: '6px 12px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, cursor: 'pointer', fontSize: 11, marginRight: 8 },
+  form: { display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg-elevated)', padding: 16, borderRadius: 8, marginBottom: 12, border: '1px solid var(--border-hairline)' },
+  input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', width: '100%', boxSizing: 'border-box' },
+  submitButton: { padding: '10px 16px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
+  status: { color: 'var(--accent)', fontSize: 12 },
+  courseCard: { background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 16, marginBottom: 12 },
+  courseTitle: { color: 'var(--text-primary)', fontWeight: 700, fontSize: 15 },
+  categoryTag: { fontSize: 10, color: 'var(--accent)', border: '1px solid var(--border-accent)', padding: '2px 6px', borderRadius: 4, marginLeft: 8 },
+  lessonCount: { color: 'var(--text-muted)', fontSize: 12, marginTop: 4, marginBottom: 8 },
+  lessonChip: { color: 'var(--text-secondary)', fontSize: 12, padding: '4px 0' },
+  lessonForm: { marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border-hairline)', display: 'flex', flexDirection: 'column', gap: 8 },
+  quizDraft: { background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 6, padding: 10, display: 'flex', flexDirection: 'column', gap: 6 },
   optionRow: { display: 'flex', alignItems: 'center', gap: 8 },
-  optionInput: { flex: 1, padding: '6px 10px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff', fontSize: 12 },
-  assignForm: { display: 'flex', flexDirection: 'column', gap: 10, background: '#111', padding: 16, borderRadius: 8, border: '1px solid #222' },
-  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#111', border: '1px solid #1a1a1a', borderRadius: 8, padding: 14, marginBottom: 8 },
-  rowTitle: { fontWeight: 600, fontSize: 14, color: '#fff' },
-  rowSub: { color: '#666', fontSize: 12 },
+  optionInput: { flex: 1, padding: '6px 10px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 },
+  assignForm: { display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg-elevated)', padding: 16, borderRadius: 8, border: '1px solid var(--border-hairline)' },
+  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 14, marginBottom: 8 },
+  rowTitle: { fontWeight: 600, fontSize: 14, color: 'var(--text-primary)' },
+  rowSub: { color: 'var(--text-muted)', fontSize: 12 },
   badge: (status) => ({
     fontSize: 11, padding: '4px 8px', borderRadius: 4,
-    color: status === 'COMPLETED' ? '#00e5ff' : status === 'IN_PROGRESS' ? '#ffb84d' : '#888',
-    border: `1px solid ${status === 'COMPLETED' ? '#00e5ff44' : status === 'IN_PROGRESS' ? '#ffb84d44' : '#333'}`,
+    color: status === 'COMPLETED' ? 'var(--accent)' : status === 'IN_PROGRESS' ? 'var(--warning)' : 'var(--text-secondary)',
+    border: `1px solid ${status === 'COMPLETED' ? 'var(--border-accent)' : status === 'IN_PROGRESS' ? 'rgba(255, 184, 77, 0.4)' : 'var(--border-strong)'}`,
   }),
-  empty: { color: '#666', fontStyle: 'italic', fontSize: 13 },
+  empty: { color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 13 },
 };

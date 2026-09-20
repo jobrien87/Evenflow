@@ -1,14 +1,10 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import CallsPanel from './CallsPanel';
-import TrainingPanel from './TrainingPanel';
-import OpportunitiesPanel from './OpportunitiesPanel';
 import FlowScoreCard from './FlowScoreCard';
 import FunnelMetricsCard from './FunnelMetricsCard';
 import RunningReportPage from './RunningReportPage';
 
-export default function ProducerHome() {
-  const [tab, setTab] = useState('home');
+export default function ProducerDashboard() {
   const [recap, setRecap] = useState(null);
   const [queue, setQueue] = useState(null);
   const [started, setStarted] = useState(false);
@@ -41,57 +37,9 @@ export default function ProducerHome() {
     }
   }
 
-  if (tab === 'coaching') {
-    return (
-      <div style={s.wrap}>
-        <div style={s.tabRow}>
-          <button style={s.tab(false)} onClick={() => setTab('home')}>HOME</button>
-          <button style={s.tab(true)} onClick={() => setTab('coaching')}>COACHING</button>
-          <button style={s.tab(false)} onClick={() => setTab('training')}>TRAINING</button>
-          <button style={s.tab(false)} onClick={() => setTab('opportunities')}>WINBACKS/CROSS-SELL</button>
-        </div>
-        <CallsPanel />
-      </div>
-    );
-  }
-
-  if (tab === 'training') {
-    return (
-      <div style={s.wrap}>
-        <div style={s.tabRow}>
-          <button style={s.tab(false)} onClick={() => setTab('home')}>HOME</button>
-          <button style={s.tab(false)} onClick={() => setTab('coaching')}>COACHING</button>
-          <button style={s.tab(true)} onClick={() => setTab('training')}>TRAINING</button>
-          <button style={s.tab(false)} onClick={() => setTab('opportunities')}>WINBACKS/CROSS-SELL</button>
-        </div>
-        <TrainingPanel />
-      </div>
-    );
-  }
-
-  if (tab === 'opportunities') {
-    return (
-      <div style={s.wrap}>
-        <div style={s.tabRow}>
-          <button style={s.tab(false)} onClick={() => setTab('home')}>HOME</button>
-          <button style={s.tab(false)} onClick={() => setTab('coaching')}>COACHING</button>
-          <button style={s.tab(false)} onClick={() => setTab('training')}>TRAINING</button>
-          <button style={s.tab(true)} onClick={() => setTab('opportunities')}>WINBACKS/CROSS-SELL</button>
-        </div>
-        <OpportunitiesPanel />
-      </div>
-    );
-  }
-
   if (!started) {
     return (
       <div style={s.center}>
-        <div style={s.tabRow}>
-          <button style={s.tab(true)} onClick={() => setTab('home')}>HOME</button>
-          <button style={s.tab(false)} onClick={() => setTab('coaching')}>COACHING</button>
-          <button style={s.tab(false)} onClick={() => setTab('training')}>TRAINING</button>
-          <button style={s.tab(false)} onClick={() => setTab('opportunities')}>WINBACKS/CROSS-SELL</button>
-        </div>
         <h2 style={s.h2}>Ready when you are.</h2>
         <button style={s.bigButton} onClick={() => setStarted(true)}>
           START MY DAY ⚡
@@ -106,12 +54,6 @@ export default function ProducerHome() {
 
   return (
     <div style={s.wrap}>
-      <div style={s.tabRow}>
-        <button style={s.tab(true)} onClick={() => setTab('home')}>HOME</button>
-        <button style={s.tab(false)} onClick={() => setTab('coaching')}>COACHING</button>
-        <button style={s.tab(false)} onClick={() => setTab('training')}>TRAINING</button>
-        <button style={s.tab(false)} onClick={() => setTab('opportunities')}>WINBACKS/CROSS-SELL</button>
-      </div>
       <section style={s.section}>
         <FlowScoreCard scope="me" onViewReport={() => setShowReport(true)} />
       </section>
@@ -287,22 +229,17 @@ function SoldRow({ item, busy, onSold }) {
 }
 
 const s = {
-  tabRow: { display: 'flex', gap: 8, marginBottom: 20 },
-  tab: (active) => ({
-    padding: '8px 16px', borderRadius: 6, border: '1px solid #333', cursor: 'pointer', fontSize: 12, fontWeight: 700,
-    background: active ? '#00e5ff' : 'transparent', color: active ? '#000' : '#aaa',
-  }),
-  center: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '80vh', gap: 24 },
-  h2: { color: '#fff', fontWeight: 400 },
-  bigButton: { padding: '20px 48px', fontSize: 20, fontWeight: 800, background: '#00e5ff', border: 'none', borderRadius: 8, cursor: 'pointer' },
-  wrap: { color: '#fff', maxWidth: 640, margin: '0 auto', padding: 24 },
+  center: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '70vh', gap: 24 },
+  h2: { color: 'var(--text-primary)', fontWeight: 400 },
+  bigButton: { padding: '20px 48px', fontSize: 20, fontWeight: 800, background: 'var(--accent)', border: 'none', borderRadius: 8, cursor: 'pointer' },
+  wrap: { color: 'var(--text-primary)' },
   section: { marginBottom: 32 },
-  h3: { color: '#888', fontSize: 12, letterSpacing: 2, marginBottom: 12 },
+  h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2, marginBottom: 12 },
   statsRow: { display: 'flex', gap: 16 },
-  stat: { background: '#111', border: '1px solid #222', borderRadius: 8, padding: 16, flex: 1, textAlign: 'center' },
+  stat: { background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 16, flex: 1, textAlign: 'center' },
   statValue: { fontSize: 28, fontWeight: 700 },
-  statLabel: { fontSize: 11, color: '#888', marginTop: 4 },
-  nextCard: { background: '#111', border: '1px solid #00e5ff44', borderRadius: 12, padding: 20 },
+  statLabel: { fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 },
+  nextCard: { background: 'var(--bg-elevated)', border: '1px solid var(--border-accent)', borderRadius: 12, padding: 20 },
   priorityBadge: (band) => ({
     display: 'inline-block',
     fontSize: 11,
@@ -310,28 +247,28 @@ const s = {
     padding: '4px 10px',
     borderRadius: 4,
     marginBottom: 10,
-    background: band === 'HIGH' ? '#ff4d4d22' : band === 'MEDIUM' ? '#ffb84d22' : '#33333322',
-    color: band === 'HIGH' ? '#ff4d4d' : band === 'MEDIUM' ? '#ffb84d' : '#aaa',
+    background: band === 'HIGH' ? 'var(--danger-soft)' : band === 'MEDIUM' ? 'var(--warning-soft)' : 'var(--bg-hover)',
+    color: band === 'HIGH' ? 'var(--danger)' : band === 'MEDIUM' ? 'var(--warning)' : 'var(--text-secondary)',
   }),
   nextTitle: { fontSize: 22, fontWeight: 700 },
-  nextSubtitle: { color: '#aaa', marginTop: 2 },
-  nextReason: { color: '#666', fontSize: 13, marginTop: 8 },
+  nextSubtitle: { color: 'var(--text-secondary)', marginTop: 2 },
+  nextReason: { color: 'var(--text-muted)', fontSize: 13, marginTop: 8 },
   actionsRow: { display: 'flex', gap: 10, marginTop: 16 },
-  actionButton: { flex: 1, padding: '12px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
-  skipButton: { padding: '12px 20px', background: 'transparent', border: '1px solid #333', color: '#aaa', borderRadius: 6, cursor: 'pointer' },
-  soldToggle: { background: 'none', border: 'none', color: '#666', fontSize: 12, marginTop: 10, cursor: 'pointer', textDecoration: 'underline' },
+  actionButton: { flex: 1, padding: '12px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
+  skipButton: { padding: '12px 20px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, cursor: 'pointer' },
+  soldToggle: { background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 12, marginTop: 10, cursor: 'pointer', textDecoration: 'underline' },
   soldRow: { display: 'flex', gap: 8, marginTop: 10 },
-  soldInput: { flex: 1, padding: '8px 10px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff', fontSize: 13 },
-  soldButton: { padding: '8px 14px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
-  empty: { color: '#666', fontStyle: 'italic' },
-  queueRow: { display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid #1a1a1a' },
+  soldInput: { flex: 1, padding: '8px 10px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 13 },
+  soldButton: { padding: '8px 14px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
+  empty: { color: 'var(--text-muted)', fontStyle: 'italic' },
+  queueRow: { display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--border-hairline)' },
   queueBand: (band) => ({
     width: 24, height: 24, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700,
-    background: band === 'HIGH' ? '#ff4d4d22' : band === 'MEDIUM' ? '#ffb84d22' : '#222',
-    color: band === 'HIGH' ? '#ff4d4d' : band === 'MEDIUM' ? '#ffb84d' : '#888',
+    background: band === 'HIGH' ? 'var(--danger-soft)' : band === 'MEDIUM' ? 'var(--warning-soft)' : 'var(--bg-hover)',
+    color: band === 'HIGH' ? 'var(--danger)' : band === 'MEDIUM' ? 'var(--warning)' : 'var(--text-secondary)',
   }),
   queueTitle: { fontSize: 14 },
-  queueSubtitle: { fontSize: 12, color: '#666' },
+  queueSubtitle: { fontSize: 12, color: 'var(--text-muted)' },
   reportOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2500, padding: 20, overflowY: 'auto' },
-  reportModal: { background: '#000', border: '1px solid #333', borderRadius: 12, maxWidth: 680, width: '100%', maxHeight: '85vh', overflowY: 'auto' },
+  reportModal: { background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 12, maxWidth: 680, width: '100%', maxHeight: '85vh', overflowY: 'auto' },
 };

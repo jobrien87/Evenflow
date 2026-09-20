@@ -92,7 +92,7 @@ export default function GoalsPanel() {
       )}
 
       {goals.map((g) => (
-        <div key={g.id} style={s.row}>
+        <div key={g.id} style={s.row} className="ui-row-stack">
           <div>
             <div style={s.rowTitle}>{g.userId ? users.find((u) => u.id === g.userId)?.firstName || 'Producer' : 'Agency-wide'} — {g.metric.replace('_', ' ')}</div>
             <div style={s.rowSub}>Target {g.targetValue} · {new Date(g.periodStart).toLocaleDateString()} – {new Date(g.periodEnd).toLocaleDateString()}</div>
@@ -108,16 +108,16 @@ export default function GoalsPanel() {
 const s = {
   wrap: {},
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  h3: { color: '#888', fontSize: 12, letterSpacing: 2 },
-  smallButton: { padding: '8px 14px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
-  form: { display: 'flex', flexDirection: 'column', gap: 10, background: '#111', padding: 16, borderRadius: 8, marginBottom: 12, border: '1px solid #222' },
-  input: { padding: '10px 12px', background: '#000', border: '1px solid #333', borderRadius: 6, color: '#fff', width: '100%', boxSizing: 'border-box' },
+  h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2 },
+  smallButton: { padding: '8px 14px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
+  form: { display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg-elevated)', padding: 16, borderRadius: 8, marginBottom: 12, border: '1px solid var(--border-hairline)' },
+  input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', width: '100%', boxSizing: 'border-box' },
   dateRow: { display: 'flex', gap: 8 },
-  submitButton: { padding: '10px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
-  status: { color: '#00e5ff', fontSize: 12 },
-  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#111', border: '1px solid #1a1a1a', borderRadius: 8, padding: 14, marginBottom: 8 },
-  rowTitle: { fontWeight: 600, fontSize: 14, color: '#fff' },
-  rowSub: { color: '#666', fontSize: 12 },
-  deleteButton: { fontSize: 10, color: '#ff4d4d', border: '1px solid #ff4d4d44', background: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer' },
-  empty: { color: '#666', fontStyle: 'italic', fontSize: 13 },
+  submitButton: { padding: '10px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
+  status: { color: 'var(--accent)', fontSize: 12 },
+  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 14, marginBottom: 8 },
+  rowTitle: { fontWeight: 600, fontSize: 14, color: 'var(--text-primary)' },
+  rowSub: { color: 'var(--text-muted)', fontSize: 12 },
+  deleteButton: { fontSize: 10, color: 'var(--danger)', border: '1px solid rgba(255, 77, 94, 0.4)', background: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer' },
+  empty: { color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 13 },
 };

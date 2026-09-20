@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
+import { severityTone, TONE_COLORS } from '../ui';
 
-const SEVERITY_COLOR = { INFO: '#888', ACTION: '#00e5ff', WARNING: '#ffb84d', CRITICAL: '#ff4d4d' };
+const severityDotColor = (severity) => TONE_COLORS[severityTone(severity)].fg;
 
 export default function NotificationBell() {
   const [open, setOpen] = useState(false);
@@ -122,29 +123,29 @@ export default function NotificationBell() {
 
 const s = {
   wrap: { position: 'relative' },
-  bellButton: { position: 'relative', background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', padding: 4 },
+  bellButton: { position: 'relative', background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', padding: 4, color: 'var(--text-secondary)' },
   badge: (critical) => ({
-    position: 'absolute', top: -2, right: -2, background: critical ? '#ff4d4d' : '#00e5ff', color: '#000',
+    position: 'absolute', top: -2, right: -2, background: critical ? 'var(--danger)' : 'var(--accent-gradient)', color: critical ? 'var(--text-primary)' : 'var(--accent-on)',
     fontSize: 10, fontWeight: 700, borderRadius: '50%', width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center',
   }),
   panel: {
-    position: 'absolute', top: 32, right: 0, width: 320, maxHeight: 420, background: '#111', border: '1px solid #222',
-    borderRadius: 10, overflow: 'hidden', zIndex: 1500, boxShadow: '0 8px 24px rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column',
+    position: 'absolute', top: 32, right: 0, width: 320, maxHeight: 420, background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)',
+    borderRadius: 'var(--radius-md)', overflow: 'hidden', zIndex: 'var(--z-drawer)', boxShadow: 'var(--shadow-card)', display: 'flex', flexDirection: 'column',
   },
-  panelHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid #222', color: '#fff', fontSize: 13, fontWeight: 600 },
-  linkButton: { background: 'none', border: 'none', color: '#00e5ff', fontSize: 11, cursor: 'pointer', marginLeft: 10 },
+  panelHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid var(--border-hairline)', color: 'var(--text-primary)', fontSize: 13, fontWeight: 600 },
+  linkButton: { background: 'none', border: 'none', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', marginLeft: 10 },
   list: { overflowY: 'auto', maxHeight: 360 },
-  empty: { color: '#666', fontSize: 12, fontStyle: 'italic', padding: 20, textAlign: 'center' },
+  empty: { color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic', padding: 20, textAlign: 'center' },
   item: (readAt, severity) => ({
-    display: 'flex', gap: 10, padding: '10px 14px', borderBottom: '1px solid #1a1a1a',
-    background: !readAt && severity === 'CRITICAL' ? '#1a0d0d' : !readAt ? '#0d1414' : 'transparent',
+    display: 'flex', gap: 10, padding: '10px 14px', borderBottom: '1px solid var(--border-hairline)',
+    background: !readAt && severity === 'CRITICAL' ? 'var(--danger-soft)' : !readAt ? 'var(--accent-gradient-soft)' : 'transparent',
     cursor: readAt ? 'default' : 'pointer',
   }),
-  itemDot: (severity) => ({ width: 8, height: 8, borderRadius: '50%', marginTop: 4, flexShrink: 0, background: SEVERITY_COLOR[severity] || '#888' }),
-  itemTitle: { color: '#fff', fontSize: 13, fontWeight: 600 },
-  itemBody: { color: '#aaa', fontSize: 12, marginTop: 2 },
-  itemTime: { color: '#555', fontSize: 10, marginTop: 4 },
+  itemDot: (severity) => ({ width: 8, height: 8, borderRadius: '50%', marginTop: 4, flexShrink: 0, background: severityDotColor(severity) }),
+  itemTitle: { color: 'var(--text-primary)', fontSize: 13, fontWeight: 600 },
+  itemBody: { color: 'var(--text-secondary)', fontSize: 12, marginTop: 2 },
+  itemTime: { color: 'var(--text-muted)', fontSize: 10, marginTop: 4 },
   prefsView: {},
-  prefRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '14px', color: '#ccc', fontSize: 13 },
-  prefsNote: { color: '#666', fontSize: 11, padding: '0 14px 14px', lineHeight: 1.5 },
+  prefRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '14px', color: 'var(--text-secondary)', fontSize: 13 },
+  prefsNote: { color: 'var(--text-muted)', fontSize: 11, padding: '0 14px 14px', lineHeight: 1.5 },
 };

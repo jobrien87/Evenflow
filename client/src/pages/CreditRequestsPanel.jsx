@@ -53,7 +53,7 @@ export default function CreditRequestsPanel() {
       <section style={s.section}>
         <h3 style={s.h3}>DECIDED ({decided.length})</h3>
         {decided.map((r) => (
-          <div key={r.id} style={s.row}>
+          <div key={r.id} style={s.row} className="ui-row-stack">
             <div>
               <div style={s.rowTitle}>{r.transfer.firstName} {r.transfer.lastName}</div>
               <div style={s.rowSub}>{r.reason}</div>
@@ -70,20 +70,20 @@ export default function CreditRequestsPanel() {
 const s = {
   wrap: {},
   section: { marginBottom: 28 },
-  h3: { color: '#888', fontSize: 12, letterSpacing: 2, marginBottom: 12 },
-  card: { background: '#111', border: '1px solid #222', borderRadius: 8, padding: 16, marginBottom: 10 },
+  h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2, marginBottom: 12 },
+  card: { background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 16, marginBottom: 10 },
   cardTitle: { fontWeight: 700, fontSize: 15 },
-  reason: { color: '#aaa', fontSize: 13, marginTop: 6 },
-  meta: { color: '#666', fontSize: 11, marginTop: 6 },
+  reason: { color: 'var(--text-secondary)', fontSize: 13, marginTop: 6 },
+  meta: { color: 'var(--text-muted)', fontSize: 11, marginTop: 6 },
   actionsRow: { display: 'flex', gap: 8, marginTop: 12 },
-  approveButton: { flex: 1, padding: '8px', background: '#00e5ff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
-  denyButton: { padding: '8px 14px', background: 'transparent', border: '1px solid #ff4d4d', color: '#ff4d4d', borderRadius: 6, cursor: 'pointer', fontSize: 12 },
-  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#111', border: '1px solid #1a1a1a', borderRadius: 8, padding: 14, marginBottom: 8 },
+  approveButton: { flex: 1, padding: '8px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
+  denyButton: { padding: '8px 14px', background: 'transparent', border: '1px solid var(--danger)', color: 'var(--danger)', borderRadius: 6, cursor: 'pointer', fontSize: 12 },
+  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 14, marginBottom: 8 },
   rowTitle: { fontWeight: 600, fontSize: 14 },
-  rowSub: { color: '#666', fontSize: 12 },
+  rowSub: { color: 'var(--text-muted)', fontSize: 12 },
   badge: (status) => ({
-    fontSize: 11, padding: '4px 8px', borderRadius: 4, border: '1px solid #333',
-    color: status === 'APPROVED' ? '#00e5ff' : status === 'DENIED' ? '#ff4d4d' : '#888',
+    fontSize: 11, padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border-strong)',
+    color: status === 'APPROVED' ? 'var(--accent)' : status === 'DENIED' ? 'var(--danger)' : 'var(--text-secondary)',
   }),
-  empty: { color: '#666', fontStyle: 'italic' },
+  empty: { color: 'var(--text-muted)', fontStyle: 'italic' },
 };
