@@ -197,4 +197,4 @@ async function assembleAgencyReport(agencyId) {
   return { agencyId, flowScore, funnel, goals, roster };
 }
 
-module.exports = { assembleProducerReport, assembleAgencyReport };
+module.exports = { assembleProducerReport, assembleAgencyReport, computeGoalActual, goalsWithProgress };

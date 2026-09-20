@@ -148,7 +148,9 @@ export const api = {
 
   goals: (params = '') => request(`/goals${params}`),
   createGoal: (payload) => request('/goals', { method: 'POST', body: payload }),
+  updateGoal: (id, payload) => request(`/goals/${id}`, { method: 'PATCH', body: payload }),
   deleteGoal: (id) => request(`/goals/${id}`, { method: 'DELETE' }),
+  parseGoal: (text) => request('/goals/parse', { method: 'POST', body: { text } }),
 
   myRunningReport: () => request('/running-report/me'),
   agencyRunningReport: (agencyId) => request(`/running-report/agency/${agencyId}`),

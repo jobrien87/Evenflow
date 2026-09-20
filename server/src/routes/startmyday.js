@@ -1,6 +1,7 @@
 const express = require('express');
 const { prisma } = require('../lib/db');
 const { requireAuth, scopeAgencyId } = require('../middleware/auth');
+const { computeGoalActual } = require('../lib/runningReport');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -36,14 +37,9 @@ router.get('/', async (req, res, next) => {
           lead: { assignedToId: userId, ...(agencyId ? { agencyId } : {}) },
         },
       }),
-      prisma.leadEvent.count({
-        where: {
-          type: 'lead.disposition',
-          toStatus: 'SOLD',
-          createdAt: { gte: monthStart, lte: monthEnd },
-          lead: { assignedToId: userId, ...(agencyId ? { agencyId } : {}) },
-        },
-      }),
+      // Same real "sales this month" math runningReport.js's goal-progress
+      // computation uses — one source of truth, not a second reimplementation.
+      computeGoalActual({ metric: 'sales', userId, agencyId, periodStart: monthStart, periodEnd: monthEnd }),
       prisma.goal.findFirst({
         where: {
           userId,

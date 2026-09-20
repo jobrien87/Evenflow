@@ -433,8 +433,12 @@ model Goal {
   periodStart DateTime
   periodEnd   DateTime
   createdAt   DateTime @default(now())
+  // Set the first time live progress reaches 100% — gates the one-time
+  // celebration moment in the UI so it never fires twice for the same goal.
+  completedAt DateTime?
 
   @@index([agencyId])
+  @@index([userId])
 }
 
 model AuditEvent {

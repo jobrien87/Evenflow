@@ -1,5 +1,6 @@
 const { prisma } = require('./db');
 const { computeProfitability, computeROI } = require('./financialCalc');
+const { computeGoalActual } = require('./runningReport');
 
 // Everything in here is plain arithmetic against real rows — per spec,
 // "ED should use deterministic database calculations for goals, pace,
@@ -14,9 +15,10 @@ async function buildProducerContext(user) {
   const [openLeads, openTasks, monthlySales, goal] = await Promise.all([
     prisma.lead.count({ where: { assignedToId: user.id, status: { in: ['NEW', 'ASSIGNED', 'ATTEMPTED', 'CONTACTED', 'FOLLOW_UP'] } } }),
     prisma.task.count({ where: { assignedToId: user.id, status: { in: ['OPEN', 'IN_PROGRESS'] } } }),
-    prisma.leadEvent.count({
-      where: { type: 'lead.disposition', toStatus: 'SOLD', createdAt: { gte: monthStart, lte: monthEnd }, lead: { assignedToId: user.id } },
-    }),
+    // Same real "sales this month" count runningReport.js's goal-progress
+    // math uses — one source of truth for what "actual" means, whether or
+    // not a Goal row happens to exist.
+    computeGoalActual({ metric: 'sales', userId: user.id, agencyId: user.agencyId, periodStart: monthStart, periodEnd: monthEnd }),
     prisma.goal.findFirst({ where: { userId: user.id, metric: 'sales', periodStart: { lte: now }, periodEnd: { gte: now } } }),
   ]);
 
