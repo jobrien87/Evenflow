@@ -471,8 +471,11 @@ router.post('/credit-requests/:creditId/decide', requireRole('PLATFORM_OWNER'), 
       severity: 'ACTION',
       title: `Credit request ${parsed.data.decision.toLowerCase()}`,
       body: `Transfer for ${credit.transfer.firstName} ${credit.transfer.lastName}`,
-      relatedEntityType: 'CreditRequest',
-      relatedEntityId: credit.id,
+      // A CreditRequest has no visible row of its own anywhere in the UI —
+      // the real, navigable entity this notification is about is its
+      // transfer, so point there rather than at an id nothing can display.
+      relatedEntityType: 'Transfer',
+      relatedEntityId: credit.transfer.id,
     });
 
     return res.json({ success: true, status: newStatus });

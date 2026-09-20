@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import ChatThread from './ChatThread';
 
@@ -9,12 +10,28 @@ export default function TransfersPanel() {
   const [busyId, setBusyId] = useState(null);
   const [error, setError] = useState('');
   const [discussTransfer, setDiscussTransfer] = useState(null);
+  const [searchParams] = useSearchParams();
+  const highlightId = searchParams.get('highlight');
+  const handledHighlightRef = useRef(false);
 
   useEffect(() => {
     load();
     const interval = setInterval(load, 8000); // near-real-time refresh for offered transfers
     return () => clearInterval(interval);
   }, []);
+
+  // Destination side of notification deep-linking: scroll to and highlight
+  // the specific transfer a notification pointed at, opening the chat
+  // thread directly for a "new message" notification instead of making the
+  // person hunt for the row and click DISCUSS themselves.
+  useEffect(() => {
+    if (!highlightId || handledHighlightRef.current || transfers.length === 0) return;
+    const match = transfers.find((t) => t.id === highlightId);
+    if (!match) return;
+    handledHighlightRef.current = true;
+    document.getElementById(`transfer-${highlightId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (searchParams.get('action') === 'chat') setDiscussTransfer(match);
+  }, [highlightId, transfers, searchParams]);
 
   async function load() {
     const data = await api.transfers();
@@ -46,7 +63,7 @@ export default function TransfersPanel() {
         <section style={s.section}>
           <h3 style={s.h3}>TRANSFER ALERT{offered.length > 1 ? 'S' : ''}</h3>
           {offered.map((t) => (
-            <div key={t.id} style={s.alertCard}>
+            <div key={t.id} id={`transfer-${t.id}`} style={t.id === highlightId ? { ...s.alertCard, ...s.rowHighlighted } : s.alertCard}>
               <div style={s.alertTitle}>{t.firstName} {t.lastName}</div>
               <div style={s.alertSub}>{t.product} · {t.state} · {t.createdByTM?.firstName} {t.createdByTM?.lastName}</div>
               {t.notes && <div style={s.alertNotes}>{t.notes}</div>}
@@ -77,7 +94,7 @@ export default function TransfersPanel() {
         <section style={s.section}>
           <h3 style={s.h3}>ACTIVE</h3>
           {active.map((t) => (
-            <div key={t.id} style={s.row} className="ui-row-stack">
+            <div key={t.id} id={`transfer-${t.id}`} style={t.id === highlightId ? { ...s.row, ...s.rowHighlighted } : s.row} className="ui-row-stack">
               <div>
                 <div style={s.rowTitle}>{t.firstName} {t.lastName}</div>
                 <div style={s.rowSub}>{t.product} · {t.state} · {t.status}</div>
@@ -108,7 +125,7 @@ export default function TransfersPanel() {
       <section style={s.section}>
         <h3 style={s.h3}>ALL TRANSFERS ({rest.length})</h3>
         {rest.map((t) => (
-          <div key={t.id} style={s.row} className="ui-row-stack">
+          <div key={t.id} id={`transfer-${t.id}`} style={t.id === highlightId ? { ...s.row, ...s.rowHighlighted } : s.row} className="ui-row-stack">
             <div>
               <div style={s.rowTitle}>{t.firstName} {t.lastName}</div>
               <div style={s.rowSub}>{t.product} · {t.state}</div>
@@ -208,6 +225,9 @@ const s = {
   section: { marginBottom: 24 },
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2, marginBottom: 12 },
   error: { color: 'var(--danger)', marginBottom: 12, fontSize: 13 },
+  // The destination side of notification deep-linking — briefly draws the
+  // eye to whichever transfer a notification pointed at.
+  rowHighlighted: { outline: '2px solid var(--accent)', boxShadow: 'var(--shadow-glow-accent)', borderRadius: 'var(--radius-md)' },
   alertCard: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', borderRadius: 10, padding: 16, marginBottom: 10 },
   alertTitle: { fontWeight: 700, fontSize: 18 },
   alertSub: { color: 'var(--text-secondary)', fontSize: 13, marginTop: 2 },

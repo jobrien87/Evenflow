@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 
 export default function VendorsPanel() {
@@ -9,10 +10,21 @@ export default function VendorsPanel() {
   const [selectedVendor, setSelectedVendor] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [instructionsVendor, setInstructionsVendor] = useState(null);
+  const [searchParams] = useSearchParams();
+  const highlightId = searchParams.get('highlight');
+  const handledHighlightRef = useRef(false);
 
   useEffect(() => {
     load();
   }, []);
+
+  // Destination side of notification deep-linking.
+  useEffect(() => {
+    if (!highlightId || handledHighlightRef.current || vendors.length === 0) return;
+    if (!vendors.some((v) => v.id === highlightId)) return;
+    handledHighlightRef.current = true;
+    document.getElementById(`vendor-${highlightId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [highlightId, vendors]);
 
   async function load() {
     const data = await api.vendors();
@@ -100,7 +112,7 @@ export default function VendorsPanel() {
       )}
 
       {vendors.map((v) => (
-        <div key={v.id} style={s.row} className="ui-row-stack">
+        <div key={v.id} id={`vendor-${v.id}`} style={v.id === highlightId ? { ...s.row, ...s.rowHighlighted } : s.row} className="ui-row-stack">
           <div style={{ flex: 1 }}>
             <div style={s.rowTitle}>{v.name} · {v.product}</div>
             <div style={s.rowSub}>{v.email}</div>
@@ -166,6 +178,7 @@ const s = {
   wrap: {},
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2 },
+  rowHighlighted: { outline: '2px solid var(--accent)', boxShadow: 'var(--shadow-glow-accent)', borderRadius: 'var(--radius-md)' },
   button: { padding: '10px 16px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
   form: { display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg-elevated)', padding: 16, borderRadius: 8, marginBottom: 16, border: '1px solid var(--border-hairline)' },
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },

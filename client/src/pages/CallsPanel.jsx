@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 
@@ -15,12 +16,25 @@ export default function CallsPanel() {
   const [selectedCall, setSelectedCall] = useState(null);
   const [notEntitled, setNotEntitled] = useState(false);
   const fileInputRef = useRef(null);
+  const [searchParams] = useSearchParams();
+  const highlightId = searchParams.get('highlight');
+  const handledHighlightRef = useRef(false);
 
   useEffect(() => {
     load();
     const interval = setInterval(load, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  // Destination side of notification deep-linking — a call notification
+  // (e.g. analysis complete) opens straight into that call's detail view.
+  useEffect(() => {
+    if (!highlightId || handledHighlightRef.current || calls.length === 0) return;
+    if (!calls.some((c) => c.id === highlightId)) return;
+    handledHighlightRef.current = true;
+    document.getElementById(`call-${highlightId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    viewCall(highlightId);
+  }, [highlightId, calls]);
 
   async function load() {
     try {
@@ -104,7 +118,13 @@ export default function CallsPanel() {
           <div style={s.empty}>No calls yet. Upload your first recorded sales call to receive transcription and coaching.</div>
         )}
         {calls.map((c) => (
-          <div key={c.id} style={s.row} className="ui-row-stack" onClick={() => viewCall(c.id)}>
+          <div
+            key={c.id}
+            id={`call-${c.id}`}
+            style={c.id === highlightId ? { ...s.row, ...s.rowHighlighted } : s.row}
+            className="ui-row-stack"
+            onClick={() => viewCall(c.id)}
+          >
             <div>
               <div style={s.rowTitle}>{c.filename}</div>
               <div style={s.rowSub}>{c.uploadedBy.firstName} {c.uploadedBy.lastName} · {new Date(c.createdAt).toLocaleString()}</div>
@@ -327,6 +347,7 @@ function ManagerReviewForm({ analysis, onSubmit }) {
 
 const s = {
   notEntitledBox: { background: 'var(--warning-soft)', border: '1px solid rgba(255, 184, 77, 0.4)', color: 'var(--warning)', padding: 20, borderRadius: 8, fontSize: 13, lineHeight: 1.6 },
+  rowHighlighted: { outline: '2px solid var(--accent)', boxShadow: 'var(--shadow-glow-accent)', borderRadius: 'var(--radius-md)' },
   reviewForm: { background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 14, marginBottom: 18 },
   reviewHint: { color: 'var(--text-muted)', fontSize: 11, marginBottom: 10, lineHeight: 1.4 },
   reviewRow: { display: 'flex', gap: 8 },

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 
 export default function TrainingPanel() {
@@ -6,10 +7,24 @@ export default function TrainingPanel() {
   const [recommended, setRecommended] = useState(null);
   const [notEntitled, setNotEntitled] = useState(false);
   const [openCourse, setOpenCourse] = useState(null);
+  const [searchParams] = useSearchParams();
+  const highlightId = searchParams.get('highlight');
+  const handledHighlightRef = useRef(false);
 
   useEffect(() => {
     load();
   }, []);
+
+  // Destination side of notification deep-linking — a training-assignment
+  // notification opens straight into that course instead of leaving the
+  // person to find it in the list themselves.
+  useEffect(() => {
+    if (!highlightId || handledHighlightRef.current || assignments.length === 0) return;
+    const match = assignments.find((a) => a.id === highlightId);
+    if (!match) return;
+    handledHighlightRef.current = true;
+    setOpenCourse(match);
+  }, [highlightId, assignments]);
 
   async function load() {
     try {

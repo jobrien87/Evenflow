@@ -4,14 +4,20 @@ import { api } from '../lib/api';
 export default function CreditRequestsPanel() {
   const [requests, setRequests] = useState([]);
   const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     load();
   }, []);
 
   async function load() {
-    const data = await api.creditRequests();
-    setRequests(data.creditRequests);
+    setError('');
+    try {
+      const data = await api.creditRequests();
+      setRequests(data.creditRequests);
+    } catch (err) {
+      setError(err.data?.message || 'Could not load credit requests.');
+    }
   }
 
   async function decide(id, decision) {
@@ -30,6 +36,7 @@ export default function CreditRequestsPanel() {
 
   return (
     <div style={s.wrap}>
+      {error && <div style={s.error}>{error}</div>}
       <section style={s.section}>
         <h3 style={s.h3}>PENDING CREDIT REQUESTS ({pending.length})</h3>
         {pending.map((r) => (
@@ -70,6 +77,7 @@ export default function CreditRequestsPanel() {
 const s = {
   wrap: {},
   section: { marginBottom: 28 },
+  error: { color: 'var(--danger)', marginBottom: 12, fontSize: 13 },
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2, marginBottom: 12 },
   card: { background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 16, marginBottom: 10 },
   cardTitle: { fontWeight: 700, fontSize: 15 },

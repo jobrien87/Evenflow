@@ -31,7 +31,7 @@ export default function Sidebar() {
 
       <div style={s.bottom}>
         <div style={s.bellRow}>
-          <NotificationBell />
+          <NotificationBell openUpward />
           <span style={s.userLabel}>
             {user?.firstName} · {user?.role.replace('_', ' ')}
           </span>

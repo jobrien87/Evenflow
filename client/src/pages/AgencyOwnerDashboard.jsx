@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
@@ -28,10 +28,21 @@ export default function AgencyOwnerDashboard() {
   const from = searchParams.get('from');
   const to = searchParams.get('to');
   const stageFilter = stage && from && to ? { stage, from, to } : null;
+  const highlightId = searchParams.get('highlight');
+  const handledHighlightRef = useRef(false);
 
   useEffect(() => {
     load();
   }, [stage, from, to]);
+
+  // Destination side of notification deep-linking: scroll to and highlight
+  // whichever lead a "new lead" notification pointed at.
+  useEffect(() => {
+    if (!highlightId || handledHighlightRef.current || leads.length === 0) return;
+    if (!leads.some((l) => l.id === highlightId)) return;
+    handledHighlightRef.current = true;
+    document.getElementById(`lead-${highlightId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [highlightId, leads]);
 
   async function load() {
     const leadParams = stageFilter
@@ -188,7 +199,13 @@ export default function AgencyOwnerDashboard() {
         )}
         {leadStatus && <div style={s.status}>{leadStatus}</div>}
         {leads.map((l) => (
-          <div key={l.id} style={s.row} className="ui-row-stack" onClick={() => l.customer && setSelectedCustomerId(l.customerId)}>
+          <div
+            key={l.id}
+            id={`lead-${l.id}`}
+            style={l.id === highlightId ? { ...s.row, ...s.rowHighlighted } : s.row}
+            className="ui-row-stack"
+            onClick={() => l.customer && setSelectedCustomerId(l.customerId)}
+          >
             <div>
               <div style={{ ...s.rowTitle, cursor: l.customer ? 'pointer' : 'default', textDecoration: l.customer ? 'underline' : 'none' }}>
                 {l.customer ? `${l.customer.firstName} ${l.customer.lastName}` : 'Lead'}
@@ -221,6 +238,7 @@ const s = {
   section: { marginBottom: 32 },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2 },
+  rowHighlighted: { outline: '2px solid var(--accent)', boxShadow: 'var(--shadow-glow-accent)', borderRadius: 'var(--radius-md)' },
   smallButton: { padding: '8px 14px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
   smallButtonOutline: { padding: '8px 14px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
   form: { display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg-elevated)', padding: 16, borderRadius: 8, marginBottom: 12, border: '1px solid var(--border-hairline)' },

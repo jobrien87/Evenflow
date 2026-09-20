@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import FlowScoreCard from './FlowScoreCard';
 
@@ -10,10 +11,21 @@ export default function TelemarketerDashboard() {
   const [form, setForm] = useState({ product: 'Auto', state: '', firstName: '', lastName: '', phone: '', notes: '' });
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [searchParams] = useSearchParams();
+  const highlightId = searchParams.get('highlight');
+  const handledHighlightRef = useRef(false);
 
   useEffect(() => {
     load();
   }, []);
+
+  // Destination side of notification deep-linking.
+  useEffect(() => {
+    if (!highlightId || handledHighlightRef.current || transfers.length === 0) return;
+    if (!transfers.some((t) => t.id === highlightId)) return;
+    handledHighlightRef.current = true;
+    document.getElementById(`transfer-${highlightId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [highlightId, transfers]);
 
   async function load() {
     const [data, assignmentData] = await Promise.all([api.transfers(), api.myAssignments()]);
@@ -98,7 +110,7 @@ export default function TelemarketerDashboard() {
       <section style={s.section}>
         <h3 style={s.h3}>MY RECENT TRANSFERS</h3>
         {transfers.map((t) => (
-          <div key={t.id} style={s.row} className="ui-row-stack">
+          <div key={t.id} id={`transfer-${t.id}`} style={t.id === highlightId ? { ...s.row, ...s.rowHighlighted } : s.row} className="ui-row-stack">
             <div>
               <div style={s.rowTitle}>{t.firstName} {t.lastName} · {t.product} · {t.state}</div>
               <div style={s.rowSub}>{new Date(t.createdAt).toLocaleString()}</div>
@@ -122,6 +134,7 @@ const s = {
   wrap: { color: 'var(--text-primary)' },
   section: { marginBottom: 32 },
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2, marginBottom: 12 },
+  rowHighlighted: { outline: '2px solid var(--accent)', boxShadow: 'var(--shadow-glow-accent)', borderRadius: 'var(--radius-md)' },
   noAssignmentBanner: { background: 'var(--warning-soft)', border: '1px solid rgba(255, 184, 77, 0.4)', color: 'var(--warning)', padding: 14, borderRadius: 8, fontSize: 13, lineHeight: 1.5 },
   officesRow: { display: 'flex', gap: 8, flexWrap: 'wrap' },
   officeChip: (healthy) => ({

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 
@@ -10,10 +11,21 @@ export default function SupportPanel() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ category: 'general', subject: '', description: '' });
   const [status, setStatus] = useState('');
+  const [searchParams] = useSearchParams();
+  const highlightId = searchParams.get('highlight');
+  const handledHighlightRef = useRef(false);
 
   useEffect(() => {
     load();
   }, []);
+
+  // Destination side of notification deep-linking.
+  useEffect(() => {
+    if (!highlightId || handledHighlightRef.current || tickets.length === 0) return;
+    if (!tickets.some((t) => t.id === highlightId)) return;
+    handledHighlightRef.current = true;
+    document.getElementById(`ticket-${highlightId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [highlightId, tickets]);
 
   async function load() {
     const data = await api.supportTickets();
@@ -59,7 +71,7 @@ export default function SupportPanel() {
       {status && <div style={s.status}>{status}</div>}
 
       {tickets.map((t) => (
-        <div key={t.id} style={s.row} className="ui-row-stack">
+        <div key={t.id} id={`ticket-${t.id}`} style={t.id === highlightId ? { ...s.row, ...s.rowHighlighted } : s.row} className="ui-row-stack">
           <div style={{ flex: 1 }}>
             <div style={s.rowTitle}>{t.subject}</div>
             <div style={s.rowSub}>{t.category.replace(/_/g, ' ')} · {new Date(t.createdAt).toLocaleString()}</div>
@@ -87,6 +99,7 @@ const s = {
   wrap: {},
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2 },
+  rowHighlighted: { outline: '2px solid var(--accent)', boxShadow: 'var(--shadow-glow-accent)', borderRadius: 'var(--radius-md)' },
   smallButton: { padding: '8px 14px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
   form: { display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg-elevated)', padding: 16, borderRadius: 8, marginBottom: 12, border: '1px solid var(--border-hairline)' },
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },

@@ -10,15 +10,21 @@ export default function ProducerDashboard() {
   const [started, setStarted] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [showReport, setShowReport] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     load();
   }, []);
 
   async function load() {
-    const [recapData, queueData] = await Promise.all([api.startMyDay(), api.workQueue()]);
-    setRecap(recapData);
-    setQueue(queueData);
+    setLoadError('');
+    try {
+      const [recapData, queueData] = await Promise.all([api.startMyDay(), api.workQueue()]);
+      setRecap(recapData);
+      setQueue(queueData);
+    } catch (err) {
+      setLoadError(err.data?.message || 'Could not load your day. Try refreshing.');
+    }
   }
 
   async function disposition(item, status, extra) {
@@ -48,7 +54,20 @@ export default function ProducerDashboard() {
     );
   }
 
-  if (!recap || !queue) return <div style={s.wrap}>Loading…</div>;
+  if (!recap || !queue) {
+    return (
+      <div style={s.wrap}>
+        {loadError ? (
+          <div style={s.loadErrorBox}>
+            {loadError}
+            <button style={s.retryButton} onClick={load}>RETRY</button>
+          </div>
+        ) : (
+          'Loading…'
+        )}
+      </div>
+    );
+  }
 
   const next = queue.nextUp;
 
@@ -232,6 +251,8 @@ const s = {
   center: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '70vh', gap: 24 },
   h2: { color: 'var(--text-primary)', fontWeight: 400 },
   bigButton: { padding: '20px 48px', fontSize: 20, fontWeight: 800, background: 'var(--accent)', border: 'none', borderRadius: 8, cursor: 'pointer' },
+  loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', gap: 12 },
+  retryButton: { padding: '6px 14px', background: 'transparent', border: '1px solid var(--danger)', color: 'var(--danger)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700 },
   wrap: { color: 'var(--text-primary)' },
   section: { marginBottom: 32 },
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2, marginBottom: 12 },
