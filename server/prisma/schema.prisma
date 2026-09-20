@@ -209,6 +209,10 @@ model User {
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
   deactivatedAt DateTime?
+  // Set each time this user's Ed daily briefing is generated — computes the
+  // next briefing's "what changed" deltas against this timestamp, and gates
+  // showing it as the opening message to once per day.
+  lastBriefingAt DateTime?
 
   invitations       Invitation[]     @relation("InvitationsSent")
   ownInvitation     Invitation?      @relation("InvitationForUser")

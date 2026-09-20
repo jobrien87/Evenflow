@@ -84,6 +84,7 @@ export const api = {
 
   edStatus: () => request('/ed/status'),
   edAsk: (message, humorLevel) => request('/ed/ask', { method: 'POST', body: { message, humorLevel } }),
+  edBriefing: (humorLevel) => request(`/ed/briefing${humorLevel ? `?humorLevel=${humorLevel}` : ''}`),
   edHistory: () => request('/ed/history'),
   edEscalate: (subject, description) => request('/ed/escalate', { method: 'POST', body: { subject, description } }),
   edUsageSummary: () => request('/ed/usage-summary'),

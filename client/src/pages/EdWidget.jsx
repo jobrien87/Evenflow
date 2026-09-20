@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 
+const HUMOR_LEVELS = ['LOW', 'NORMAL', 'SPICY'];
+
 export default function EdWidget() {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([]);
@@ -11,11 +13,28 @@ export default function EdWidget() {
   const [showEscalate, setShowEscalate] = useState(false);
   const [escalateForm, setEscalateForm] = useState({ subject: '', description: '' });
   const [escalateStatus, setEscalateStatus] = useState('');
+  const [humorLevel, setHumorLevel] = useState(() => {
+    try {
+      return localStorage.getItem('ed_humor_level') || 'NORMAL';
+    } catch {
+      return 'NORMAL';
+    }
+  });
+  const [briefing, setBriefing] = useState(null);
   const scrollRef = useRef(null);
 
   useEffect(() => {
     api.edStatus().then((d) => setAiConfigured(d.aiConfigured)).catch(() => {});
   }, []);
+
+  function selectHumorLevel(level) {
+    setHumorLevel(level);
+    try {
+      localStorage.setItem('ed_humor_level', level);
+    } catch {
+      // per-viewer convenience only — fine if storage is unavailable
+    }
+  }
 
   // Load real conversation history from the server the first time the
   // widget is opened, instead of silently starting fresh every time even
@@ -31,9 +50,38 @@ export default function EdWidget() {
     }
   }, [open, historyLoaded]);
 
+  // The daily briefing is on-demand, not persisted chat history — request
+  // it at most once per real calendar day per browser, and show it as ED's
+  // opening line the first time the widget is opened that day.
+  useEffect(() => {
+    if (open && historyLoaded && briefing === null) {
+      const today = new Date().toISOString().slice(0, 10);
+      let lastShown = null;
+      try {
+        lastShown = localStorage.getItem('ed_briefing_shown_date');
+      } catch {
+        // no persisted memory of the last briefing date — just show one now
+      }
+      if (lastShown === today) {
+        setBriefing(false);
+        return;
+      }
+      api.edBriefing(humorLevel)
+        .then((res) => {
+          setBriefing({ content: res.message, degraded: !res.available });
+          try {
+            localStorage.setItem('ed_briefing_shown_date', today);
+          } catch {
+            // fine — briefing just shows again next open today
+          }
+        })
+        .catch(() => setBriefing(false));
+    }
+  }, [open, historyLoaded, briefing, humorLevel]);
+
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages, open, showEscalate]);
+  }, [messages, open, showEscalate, briefing]);
 
   async function send() {
     if (!input.trim() || busy) return;
@@ -42,10 +90,10 @@ export default function EdWidget() {
     setInput('');
     setBusy(true);
     try {
-      const res = await api.edAsk(userMsg);
+      const res = await api.edAsk(userMsg, humorLevel);
       setMessages((m) => [...m, { role: 'assistant', content: res.message, degraded: !res.available }]);
     } catch (err) {
-      setMessages((m) => [...m, { role: 'assistant', content: "Something went wrong on my end. Try again in a bit.", degraded: true }]);
+      setMessages((m) => [...m, { role: 'assistant', content: err.data?.message || "Something went wrong on my end. Try again in a bit.", degraded: true }]);
     } finally {
       setBusy(false);
     }
@@ -83,6 +131,22 @@ export default function EdWidget() {
             </button>
           </div>
 
+          {!showEscalate && (
+            <div style={s.humorRow}>
+              <span style={s.humorLabel}>TONE</span>
+              {HUMOR_LEVELS.map((level) => (
+                <button
+                  key={level}
+                  style={s.humorButton(level === humorLevel)}
+                  onClick={() => selectHumorLevel(level)}
+                  title={`Set ED's tone to ${level}`}
+                >
+                  {level}
+                </button>
+              ))}
+            </div>
+          )}
+
           {showEscalate ? (
             <form onSubmit={submitEscalation} style={s.escalateForm}>
               <div style={s.escalateHint}>Create a support ticket. This goes straight to the platform team.</div>
@@ -106,9 +170,10 @@ export default function EdWidget() {
           ) : (
             <>
               <div style={s.messages} ref={scrollRef}>
-                {messages.length === 0 && (
+                {messages.length === 0 && !briefing && (
                   <div style={s.emptyState}>Ask about your pace, your queue, or what needs attention.</div>
                 )}
+                {briefing && <div style={s.edBubble(briefing.degraded)}>{briefing.content}</div>}
                 {messages.map((m, i) => (
                   <div key={i} style={m.role === 'user' ? s.userBubble : s.edBubble(m.degraded)}>
                     {m.content}
@@ -154,6 +219,15 @@ const s = {
   },
   degradedBadge: { fontSize: 10, color: 'var(--warning)', border: '1px solid rgba(255,184,77,0.4)', padding: '2px 6px', borderRadius: 4 },
   escalateLink: { marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer', textDecoration: 'underline' },
+  humorRow: { display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderBottom: '1px solid var(--border-hairline)' },
+  humorLabel: { fontSize: 10, letterSpacing: 1, color: 'var(--text-muted)', marginRight: 2 },
+  humorButton: (active) => ({
+    fontSize: 10, letterSpacing: 0.5, padding: '3px 8px', borderRadius: 20, cursor: 'pointer',
+    border: active ? 'none' : '1px solid var(--border-strong)',
+    background: active ? 'var(--accent-gradient)' : 'transparent',
+    color: active ? 'var(--accent-on)' : 'var(--text-secondary)',
+    fontWeight: active ? 700 : 400,
+  }),
   messages: { flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 },
   emptyState: { color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic', padding: 8 },
   userBubble: { alignSelf: 'flex-end', background: 'var(--accent-gradient)', color: 'var(--accent-on)', padding: '8px 12px', borderRadius: 10, fontSize: 13, maxWidth: '85%' },

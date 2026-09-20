@@ -1,15 +1,36 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const { z } = require('zod');
 const { prisma } = require('../lib/db');
 const { requireAuth } = require('../middleware/auth');
-const { buildContextForUser } = require('../lib/edContext');
-const { buildSystemPrompt } = require('../lib/edPersonality');
+const { buildContextForUser, buildBriefingContext } = require('../lib/edContext');
+const { buildSystemPrompt, buildBriefingPrompt } = require('../lib/edPersonality');
 const { callEd, isConfigured } = require('../lib/aiProvider');
 const { estimateCostMicros } = require('../lib/aiCost');
 const { recordAudit } = require('../lib/audit');
 
 const router = express.Router();
 router.use(requireAuth);
+
+// Real billed API calls now happen here, so a per-user daily cap is a
+// responsible-use safeguard — not a business rule, just a ceiling so one
+// account can't run up unbounded real spend.
+const askLimiter = rateLimit({
+  windowMs: 24 * 60 * 60 * 1000,
+  max: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user.id,
+  message: { success: false, error: 'RATE_LIMITED', message: "You've hit today's ED chat limit. It resets tomorrow." },
+});
+const briefingLimiter = rateLimit({
+  windowMs: 24 * 60 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user.id,
+  message: { success: false, error: 'RATE_LIMITED', message: "You've hit today's ED briefing limit. It resets tomorrow." },
+});
 
 function deterministicSummary(context) {
   if (context.role === 'PRODUCER') {
@@ -25,6 +46,28 @@ function deterministicSummary(context) {
     return `${context.activeAgencies}/${context.totalAgencies} agencies active. ${context.activeTMs}/${context.totalTMs} telemarketers active. ${context.missedTransfers} missed transfers this month out of ${context.transfersThisMonth}. Month revenue $${context.monthRevenue}, cost $${context.monthCost}. ${context.openSupportTickets} open support tickets.`;
   }
   return 'No summary available for this role yet.';
+}
+
+function deterministicBriefing(context) {
+  if (context.role === 'PRODUCER') {
+    const scoreLine = context.flowScoreDelta !== null && context.flowScoreDelta !== undefined
+      ? ` Flow Score moved ${context.flowScoreDelta >= 0 ? '+' : ''}${context.flowScoreDelta} to ${context.flowScoreNow}.`
+      : '';
+    const paceLine = context.goalPace
+      ? ` You're at ${context.goalPace.actual}/${context.goalPace.target} on your sales goal.`
+      : '';
+    return `Since your last briefing: ${context.newLeads} new lead(s), ${context.newSales} sale(s).${scoreLine}${paceLine}`;
+  }
+  if (context.role === 'AGENCY_OWNER') {
+    const scoreLine = context.flowScoreDelta !== null && context.flowScoreDelta !== undefined
+      ? ` Agency Flow Score moved ${context.flowScoreDelta >= 0 ? '+' : ''}${context.flowScoreDelta} to ${context.flowScoreNow}.`
+      : '';
+    return `Since your last briefing: ${context.newLeads} new lead(s), ${context.newTransfers} new transfer(s), ${context.newSales} sale(s).${scoreLine}`;
+  }
+  if (context.role === 'PLATFORM_OWNER') {
+    return `Since your last briefing: ${context.newAgencies} new agenc${context.newAgencies === 1 ? 'y' : 'ies'}, ${context.newTransfers} new transfer(s), ${context.missedTransfers} missed.`;
+  }
+  return 'No briefing available for this role yet.';
 }
 
 router.get('/status', async (req, res) => {
@@ -61,7 +104,7 @@ const askSchema = z.object({
   humorLevel: z.enum(['LOW', 'NORMAL', 'SPICY']).optional(),
 });
 
-router.post('/ask', async (req, res, next) => {
+router.post('/ask', askLimiter, async (req, res, next) => {
   try {
     const parsed = askSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -119,6 +162,63 @@ router.post('/ask', async (req, res, next) => {
   }
 });
 
+const briefingSchema = z.object({ humorLevel: z.enum(['LOW', 'NORMAL', 'SPICY']).optional() });
+
+// On-demand daily briefing (not push-scheduled — no cron infra exists in
+// this app, and none should be added just for this). Real deltas since
+// this user's lastBriefingAt, written up in ED's voice, same honest
+// fallback rule as /ask. lastBriefingAt advances on every call (whether
+// or not the language layer is configured) so the next briefing's window
+// starts from here, not from the last time the LLM happened to be reachable.
+router.get('/briefing', briefingLimiter, async (req, res, next) => {
+  try {
+    const parsed = briefingSchema.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+
+    const context = await buildBriefingContext(req.user);
+    const summary = deterministicBriefing(context);
+
+    if (!isConfigured()) {
+      await prisma.user.update({ where: { id: req.user.id }, data: { lastBriefingAt: new Date() } });
+      return res.json({ success: true, available: false, message: summary, context });
+    }
+
+    const systemPrompt = buildBriefingPrompt({ context, humorLevel: parsed.data.humorLevel || 'NORMAL' });
+
+    let result;
+    try {
+      result = await callEd({ systemPrompt, userMessage: 'Give me my daily briefing.', maxTokens: 300 });
+    } catch (err) {
+      console.error(`[ed] briefing provider error correlationId=${req.correlationId}`, err.message);
+      await prisma.user.update({ where: { id: req.user.id }, data: { lastBriefingAt: new Date() } });
+      return res.json({ success: true, available: false, message: summary, context });
+    }
+
+    const estimatedCostMicros = estimateCostMicros(result.model, result.inputTokens, result.outputTokens);
+
+    await Promise.all([
+      prisma.aiUsageLog.create({
+        data: {
+          feature: 'ed_briefing',
+          agencyId: req.user.agencyId,
+          userId: req.user.id,
+          model: result.model,
+          inputTokens: result.inputTokens,
+          outputTokens: result.outputTokens,
+          estimatedCostMicros,
+        },
+      }),
+      prisma.user.update({ where: { id: req.user.id }, data: { lastBriefingAt: new Date() } }),
+    ]);
+
+    return res.json({ success: true, available: true, message: result.text, context });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/history', async (req, res, next) => {
   try {
     const messages = await prisma.edMessage.findMany({
@@ -163,3 +263,8 @@ router.post('/escalate', async (req, res, next) => {
 });
 
 module.exports = router;
+// Pure, side-effect-free helpers attached for direct unit testing (see
+// ed.test.js) — the router itself is a function, so properties on it are
+// just as reachable via require() as a plain module.exports object.
+module.exports.deterministicSummary = deterministicSummary;
+module.exports.deterministicBriefing = deterministicBriefing;

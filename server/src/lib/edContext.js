@@ -1,6 +1,6 @@
 const { prisma } = require('./db');
 const { computeProfitability, computeROI } = require('./financialCalc');
-const { computeGoalActual } = require('./runningReport');
+const { computeGoalActual, assembleAgencyReport } = require('./runningReport');
 
 // Everything in here is plain arithmetic against real rows — per spec,
 // "ED should use deterministic database calculations for goals, pace,
@@ -49,7 +49,7 @@ async function buildAgencyOwnerContext(agencyId) {
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  const [openLeads, overdueLeads, offeredTransfers, acceptedTransfers, rejectedTransfers, revenueAgg, costAgg, producerCount] = await Promise.all([
+  const [openLeads, overdueLeads, offeredTransfers, acceptedTransfers, rejectedTransfers, revenueAgg, costAgg, producerCount, agencyReport] = await Promise.all([
     prisma.lead.count({ where: { agencyId, status: { in: ['NEW', 'ASSIGNED', 'ATTEMPTED', 'CONTACTED', 'FOLLOW_UP'] } } }),
     prisma.lead.count({ where: { agencyId, status: { in: ['NEW', 'ASSIGNED'] }, receivedAt: { lt: new Date(now.getTime() - 60 * 60 * 1000) } } }),
     prisma.transfer.count({ where: { agencyId, createdAt: { gte: monthStart } } }),
@@ -58,6 +58,11 @@ async function buildAgencyOwnerContext(agencyId) {
     prisma.revenueEvent.aggregate({ where: { agencyId, occurredAt: { gte: monthStart } }, _sum: { amountCents: true } }),
     prisma.costEvent.aggregate({ where: { agencyId, occurredAt: { gte: monthStart } }, _sum: { amountCents: true } }),
     prisma.user.count({ where: { agencyId, role: 'PRODUCER', status: 'ACTIVE' } }),
+    // Real per-producer Flow Score + trend, reusing the exact same roster
+    // assembleAgencyReport already builds for Running Reports — never a
+    // second scoring pass — so Ed can answer "who needs attention" grounded
+    // in real numbers instead of only aggregate agency totals.
+    assembleAgencyReport(agencyId),
   ]);
 
   const revenueCents = revenueAgg._sum.amountCents || 0;
@@ -77,6 +82,7 @@ async function buildAgencyOwnerContext(agencyId) {
     monthCost: profitability.cost,
     monthGrossProfit: profitability.grossProfit,
     marginPercent: profitability.marginPercent,
+    producerRoster: agencyReport.roster,
   };
 }
 
@@ -124,4 +130,72 @@ async function buildContextForUser(user) {
   return { role: user.role };
 }
 
-module.exports = { buildContextForUser, buildProducerContext, buildAgencyOwnerContext, buildPlatformOwnerContext };
+// Real deltas since this user's last briefing (or the last 24h, the first
+// time) — never a second, editorialized summary, just plain counts/score
+// movement the LLM (or the honest deterministic fallback) writes up.
+async function buildBriefingContext(user) {
+  const since = user.lastBriefingAt || new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const now = new Date();
+  const sinceHours = Math.max(1, Math.round((now - since) / (60 * 60 * 1000)));
+
+  if (user.role === 'PRODUCER') {
+    const [newLeads, newSales, currentSnapshot, priorSnapshot, goal] = await Promise.all([
+      prisma.lead.count({ where: { assignedToId: user.id, receivedAt: { gte: since } } }),
+      prisma.leadEvent.count({ where: { type: 'lead.disposition', toStatus: 'SOLD', createdAt: { gte: since }, lead: { assignedToId: user.id } } }),
+      prisma.flowScoreSnapshot.findFirst({ where: { subjectType: 'USER', subjectId: user.id }, orderBy: { computedAt: 'desc' } }),
+      prisma.flowScoreSnapshot.findFirst({ where: { subjectType: 'USER', subjectId: user.id, computedAt: { lte: since } }, orderBy: { computedAt: 'desc' } }),
+      prisma.goal.findFirst({ where: { userId: user.id, metric: 'sales', periodStart: { lte: now }, periodEnd: { gte: now } } }),
+    ]);
+
+    let goalPace = null;
+    if (goal) {
+      const actual = await computeGoalActual({ metric: 'sales', userId: user.id, agencyId: user.agencyId, periodStart: goal.periodStart, periodEnd: goal.periodEnd });
+      goalPace = { target: goal.targetValue, actual };
+    }
+
+    return {
+      role: 'PRODUCER',
+      sinceHours,
+      newLeads,
+      newSales,
+      flowScoreNow: currentSnapshot ? currentSnapshot.score : null,
+      flowScoreDelta: currentSnapshot && priorSnapshot ? currentSnapshot.score - priorSnapshot.score : null,
+      goalPace,
+    };
+  }
+
+  if (user.role === 'AGENCY_OWNER' || user.role === 'AGENCY_MANAGER') {
+    const agencyId = user.agencyId;
+    const [newLeads, newTransfers, newSales, currentSnapshot, priorSnapshot] = await Promise.all([
+      prisma.lead.count({ where: { agencyId, receivedAt: { gte: since } } }),
+      prisma.transfer.count({ where: { agencyId, createdAt: { gte: since } } }),
+      prisma.leadEvent.count({ where: { type: 'lead.disposition', toStatus: 'SOLD', createdAt: { gte: since }, lead: { agencyId } } }),
+      prisma.flowScoreSnapshot.findFirst({ where: { subjectType: 'AGENCY', subjectId: agencyId }, orderBy: { computedAt: 'desc' } }),
+      prisma.flowScoreSnapshot.findFirst({ where: { subjectType: 'AGENCY', subjectId: agencyId, computedAt: { lte: since } }, orderBy: { computedAt: 'desc' } }),
+    ]);
+
+    return {
+      role: 'AGENCY_OWNER',
+      sinceHours,
+      newLeads,
+      newTransfers,
+      newSales,
+      flowScoreNow: currentSnapshot ? currentSnapshot.score : null,
+      flowScoreDelta: currentSnapshot && priorSnapshot ? currentSnapshot.score - priorSnapshot.score : null,
+    };
+  }
+
+  if (user.role === 'PLATFORM_OWNER') {
+    const [newAgencies, newTransfers, missedTransfers] = await Promise.all([
+      prisma.agency.count({ where: { createdAt: { gte: since } } }),
+      prisma.transfer.count({ where: { createdAt: { gte: since } } }),
+      prisma.transfer.count({ where: { status: 'MISSED', createdAt: { gte: since } } }),
+    ]);
+
+    return { role: 'PLATFORM_OWNER', sinceHours, newAgencies, newTransfers, missedTransfers };
+  }
+
+  return { role: user.role, sinceHours };
+}
+
+module.exports = { buildContextForUser, buildProducerContext, buildAgencyOwnerContext, buildPlatformOwnerContext, buildBriefingContext };
