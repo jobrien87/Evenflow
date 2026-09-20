@@ -282,4 +282,5 @@ module.exports = {
   computeAgencyScore,
   explainScore,
   getActiveWeightConfig,
+  combineComponents,
 };
