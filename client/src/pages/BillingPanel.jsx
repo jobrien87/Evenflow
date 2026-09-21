@@ -12,16 +12,22 @@ export default function BillingPanel() {
   const [selectedPlanId, setSelectedPlanId] = useState('');
   const [currentSub, setCurrentSub] = useState(null);
   const [status, setStatus] = useState('');
+  const [loadError, setLoadError] = useState('');
 
   useEffect(() => {
     load();
   }, []);
 
   async function load() {
-    const [statusData, planData, agencyData] = await Promise.all([api.billingStatus(), api.plans(), api.agencies()]);
-    setBillingStatus(statusData);
-    setPlans(planData.plans);
-    setAgencies(agencyData.agencies);
+    setLoadError('');
+    try {
+      const [statusData, planData, agencyData] = await Promise.all([api.billingStatus(), api.plans(), api.agencies()]);
+      setBillingStatus(statusData);
+      setPlans(planData.plans);
+      setAgencies(agencyData.agencies);
+    } catch (err) {
+      setLoadError(err.data?.message || 'Could not load billing data. Try refreshing.');
+    }
   }
 
   async function loadSubscription(agencyId) {
@@ -33,13 +39,15 @@ export default function BillingPanel() {
 
   async function createPlan(e) {
     e.preventDefault();
+    setStatus('Creating plan…');
     try {
       await api.createPlan({ ...planForm, priceCents: Math.round(parseFloat(planForm.priceCents || 0) * 100) });
       setPlanForm({ name: '', priceCents: '', interval: 'MONTHLY', crmEnabled: true, transfersEnabled: false, coachingEnabled: false });
       setShowPlanForm(false);
+      setStatus('Plan created.');
       await load();
     } catch (err) {
-      alert(err.data?.message || 'Failed to create plan.');
+      setStatus(err.data?.message || 'Failed to create plan.');
     }
   }
 
@@ -67,6 +75,16 @@ export default function BillingPanel() {
     await loadSubscription(selectedAgencyId);
   }
 
+  if (loadError) {
+    return (
+      <div style={{ color: 'var(--text-primary)' }}>
+        <div style={s.loadErrorBox}>
+          {loadError}
+          <button style={s.retryButton} onClick={load}>RETRY</button>
+        </div>
+      </div>
+    );
+  }
   if (!billingStatus) return <div style={{ color: 'var(--text-muted)' }}>Loading…</div>;
 
   return (
@@ -159,6 +177,8 @@ export default function BillingPanel() {
 
 const s = {
   wrap: {},
+  loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', gap: 12 },
+  retryButton: { padding: '6px 14px', background: 'transparent', border: '1px solid var(--danger)', color: 'var(--danger)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700 },
   modeBanner: (mode) => ({
     background: mode === 'MANUAL' ? 'var(--warning-soft)' : 'var(--accent-gradient-soft)', border: `1px solid ${mode === 'MANUAL' ? 'rgba(255, 184, 77, 0.4)' : 'var(--border-accent)'}`,
     color: mode === 'MANUAL' ? 'var(--warning)' : 'var(--accent)', padding: 12, borderRadius: 8, fontSize: 12, marginBottom: 20,

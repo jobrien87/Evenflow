@@ -15,6 +15,8 @@ function statusTone(status) {
 export default function SupportPanel() {
   const { user } = useAuth();
   const [tickets, setTickets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ category: 'general', subject: '', description: '' });
   const [status, setStatus] = useState('');
@@ -35,8 +37,15 @@ export default function SupportPanel() {
   }, [highlightId, tickets]);
 
   async function load() {
-    const data = await api.supportTickets();
-    setTickets(data.tickets);
+    setLoadError('');
+    try {
+      const data = await api.supportTickets();
+      setTickets(data.tickets);
+    } catch (err) {
+      setLoadError(err.data?.message || 'Could not load support tickets. Try refreshing.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function submit(e) {
@@ -56,6 +65,21 @@ export default function SupportPanel() {
   async function changeStatus(id, newStatus) {
     await api.setSupportTicketStatus(id, newStatus);
     await load();
+  }
+
+  if (loading) {
+    return <div style={s.wrap}>Loading…</div>;
+  }
+
+  if (loadError) {
+    return (
+      <div style={s.wrap}>
+        <div style={s.loadErrorBox}>
+          {loadError}
+          <Button variant="secondary" size="sm" onClick={load}>RETRY</Button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -110,6 +134,7 @@ export default function SupportPanel() {
 
 const s = {
   wrap: {},
+  loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   rowHighlighted: { outline: '2px solid var(--accent)', boxShadow: 'var(--shadow-glow-accent)' },
   formCard: { marginBottom: 12 },
   form: { display: 'flex', flexDirection: 'column', gap: 10 },

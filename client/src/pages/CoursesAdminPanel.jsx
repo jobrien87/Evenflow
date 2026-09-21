@@ -13,6 +13,7 @@ export default function CoursesAdminPanel() {
   const [assignForm, setAssignForm] = useState({ courseId: '', userId: '' });
   const [status, setStatus] = useState('');
   const [notEntitled, setNotEntitled] = useState(false);
+  const [loadError, setLoadError] = useState('');
 
   const isPlatformOwner = user.role === 'PLATFORM_OWNER';
 
@@ -21,6 +22,7 @@ export default function CoursesAdminPanel() {
   }, []);
 
   async function load() {
+    setLoadError('');
     try {
       const promises = [api.trainingCourses(), api.teamTrainingAssignments()];
       if (!isPlatformOwner) promises.push(api.users(''));
@@ -32,6 +34,8 @@ export default function CoursesAdminPanel() {
     } catch (err) {
       if (err.data?.error === 'MODULE_NOT_ENTITLED') {
         setNotEntitled(true);
+      } else {
+        setLoadError(err.data?.message || 'Could not load training courses. Try refreshing.');
       }
     }
   }
@@ -44,15 +48,25 @@ export default function CoursesAdminPanel() {
     );
   }
 
+  if (loadError) {
+    return (
+      <div style={s.loadErrorBox}>
+        {loadError}
+        <button style={s.smallButtonOutline} onClick={load}>RETRY</button>
+      </div>
+    );
+  }
+
   async function createCourse(e) {
     e.preventDefault();
+    setStatus('');
     try {
       await api.createTrainingCourse(courseForm);
       setCourseForm({ title: '', description: '', category: '' });
       setShowCourseForm(false);
       await load();
     } catch (err) {
-      alert(err.data?.message || 'Failed to create course.');
+      setStatus(err.data?.message || 'Failed to create course.');
     }
   }
 
@@ -87,7 +101,7 @@ export default function CoursesAdminPanel() {
       setLessonDrafts((prev) => ({ ...prev, [courseId]: { title: '', content: '', quiz: [] } }));
       await load();
     } catch (err) {
-      alert(err.data?.message || 'Failed to add lesson.');
+      setStatus(err.data?.message || 'Failed to add lesson.');
     }
   }
 
@@ -204,6 +218,7 @@ export default function CoursesAdminPanel() {
 
 const s = {
   wrap: {},
+  loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   notEntitledBox: { background: 'var(--warning-soft)', border: '1px solid rgba(255, 184, 77, 0.4)', color: 'var(--warning)', padding: 20, borderRadius: 8, fontSize: 13, lineHeight: 1.6 },
   section: { marginBottom: 28 },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },

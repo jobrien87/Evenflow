@@ -4,8 +4,11 @@ import { api } from '../lib/api';
 
 export default function VendorsPanel() {
   const [vendors, setVendors] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', product: 'Auto', costPerLeadCents: '' });
+  const [formError, setFormError] = useState('');
   const [newKeyResult, setNewKeyResult] = useState(null);
   const [selectedVendor, setSelectedVendor] = useState(null);
   const [transactions, setTransactions] = useState([]);
@@ -13,6 +16,7 @@ export default function VendorsPanel() {
   const [expandedCredentialsId, setExpandedCredentialsId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
+  const [editError, setEditError] = useState('');
   const [searchParams] = useSearchParams();
   const highlightId = searchParams.get('highlight');
   const handledHighlightRef = useRef(false);
@@ -30,12 +34,20 @@ export default function VendorsPanel() {
   }, [highlightId, vendors]);
 
   async function load() {
-    const data = await api.vendors();
-    setVendors(data.vendors);
+    setLoadError('');
+    try {
+      const data = await api.vendors();
+      setVendors(data.vendors);
+    } catch (err) {
+      setLoadError(err.data?.message || 'Could not load vendors. Try refreshing.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function submit(e) {
     e.preventDefault();
+    setFormError('');
     try {
       const res = await api.createVendor({
         ...form,
@@ -46,7 +58,7 @@ export default function VendorsPanel() {
       setShowForm(false);
       await load();
     } catch (err) {
-      alert(err.data?.message || 'Failed to create vendor.');
+      setFormError(err.data?.message || 'Failed to create vendor.');
     }
   }
 
@@ -84,6 +96,7 @@ export default function VendorsPanel() {
   }
 
   async function saveEdit(id) {
+    setEditError('');
     try {
       await api.updateVendor(id, {
         name: editForm.name,
@@ -94,8 +107,23 @@ export default function VendorsPanel() {
       setEditingId(null);
       await load();
     } catch (err) {
-      alert(err.data?.message || 'Failed to save vendor.');
+      setEditError(err.data?.message || 'Failed to save vendor.');
     }
+  }
+
+  if (loading) {
+    return <div style={s.wrap}>Loading…</div>;
+  }
+
+  if (loadError) {
+    return (
+      <div style={s.wrap}>
+        <div style={s.loadErrorBox}>
+          {loadError}
+          <button style={s.button} onClick={load}>RETRY</button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -122,6 +150,7 @@ export default function VendorsPanel() {
             onChange={(e) => setForm({ ...form, costPerLeadCents: e.target.value })}
           />
           <button style={s.submitButton} type="submit">Create Vendor & Send Instructions</button>
+          {formError && <div style={s.formError}>{formError}</div>}
         </form>
       )}
 
@@ -172,6 +201,7 @@ export default function VendorsPanel() {
                 <button style={s.smallButton} onClick={() => saveEdit(v.id)}>SAVE</button>
                 <button style={s.smallButtonOutline} onClick={() => setEditingId(null)}>CANCEL</button>
               </div>
+              {editError && <div style={s.formError}>{editError}</div>}
             </div>
           )}
 
@@ -241,6 +271,8 @@ const txColor = (code) => (code === 'SUCCESS' ? 'var(--accent)' : code === 'DUPL
 
 const s = {
   wrap: {},
+  loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  formError: { color: 'var(--danger)', fontSize: 13, marginTop: 8 },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2 },
   rowHighlighted: { outline: '2px solid var(--accent)', boxShadow: 'var(--shadow-glow-accent)', borderRadius: 'var(--radius-md)' },

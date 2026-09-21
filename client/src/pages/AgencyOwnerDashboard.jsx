@@ -28,6 +28,8 @@ export default function AgencyOwnerDashboard() {
   const [agency, setAgency] = useState(null);
   const [editingUserId, setEditingUserId] = useState(null);
   const [editUserForm, setEditUserForm] = useState({ firstName: '', lastName: '' });
+  const [editUserError, setEditUserError] = useState('');
+  const [loadError, setLoadError] = useState('');
   const [scoreUser, setScoreUser] = useState(null);
   const [scoreData, setScoreData] = useState(null);
 
@@ -54,13 +56,18 @@ export default function AgencyOwnerDashboard() {
   }, [highlightId, leads]);
 
   async function load() {
+    setLoadError('');
     const leadParams = stageFilter
       ? `?stage=${stageFilter.stage}&from=${stageFilter.from}&to=${stageFilter.to}`
       : '';
-    const [leadData, userData, agencyData] = await Promise.all([api.leads(leadParams), api.users(''), api.agencyDetail(user.agencyId)]);
-    setLeads(leadData.leads);
-    setUsers(userData.users);
-    setAgency(agencyData.agency);
+    try {
+      const [leadData, userData, agencyData] = await Promise.all([api.leads(leadParams), api.users(''), api.agencyDetail(user.agencyId)]);
+      setLeads(leadData.leads);
+      setUsers(userData.users);
+      setAgency(agencyData.agency);
+    } catch (err) {
+      setLoadError(err.data?.message || 'Could not load your agency dashboard. Try refreshing.');
+    }
   }
 
   function startEditUser(u) {
@@ -69,12 +76,13 @@ export default function AgencyOwnerDashboard() {
   }
 
   async function saveEditUser(userId) {
+    setEditUserError('');
     try {
       await api.updateUser(userId, editUserForm);
       setEditingUserId(null);
       await load();
     } catch (err) {
-      alert(err.data?.message || 'Failed to save.');
+      setEditUserError(err.data?.message || 'Failed to save.');
     }
   }
 
@@ -156,6 +164,13 @@ export default function AgencyOwnerDashboard() {
 
   return (
     <div style={s.wrap}>
+      {loadError && (
+        <div style={s.loadErrorBox}>
+          {loadError}
+          <Button variant="secondary" size="sm" onClick={load}>RETRY</Button>
+        </div>
+      )}
+
       <section style={s.section}>
         <div style={s.settingsRow}>
           <Button variant="secondary" size="sm" onClick={() => setShowSettings(true)}>AGENCY SETTINGS</Button>
@@ -225,6 +240,7 @@ export default function AgencyOwnerDashboard() {
                 <input style={s.input} value={editUserForm.lastName} onChange={(e) => setEditUserForm({ ...editUserForm, lastName: e.target.value })} placeholder="Last name" />
                 <button style={s.smallButton} onClick={() => saveEditUser(u.id)}>SAVE</button>
                 <button style={s.smallButtonOutline} onClick={() => setEditingUserId(null)}>CANCEL</button>
+                {editUserError && <div style={s.editUserError}>{editUserError}</div>}
               </div>
             )}
           </div>
@@ -322,6 +338,8 @@ export default function AgencyOwnerDashboard() {
 
 const s = {
   wrap: { color: 'var(--text-primary)' },
+  loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 24 },
+  editUserError: { color: 'var(--danger)', fontSize: 12, width: '100%', marginTop: 4 },
   section: { marginBottom: 32 },
   settingsRow: { display: 'flex', justifyContent: 'flex-end', marginBottom: 8 },
   inlineEditForm: { display: 'flex', gap: 8, alignItems: 'center', padding: '8px 14px', background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 8, marginTop: -4, marginBottom: 8 },

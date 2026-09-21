@@ -12,6 +12,8 @@ function formatUserName(user) {
 export default function GoalsPanel() {
   const [goals, setGoals] = useState([]);
   const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ userId: '', metric: 'sales', targetValue: '', periodType: 'monthly', periodStart: '', periodEnd: '' });
   const [status, setStatus] = useState('');
@@ -26,9 +28,16 @@ export default function GoalsPanel() {
   }, []);
 
   async function load() {
-    const [goalData, userData] = await Promise.all([api.goals(), api.users('')]);
-    setGoals(goalData.goals);
-    setUsers(userData.users.filter((u) => u.role === 'PRODUCER'));
+    setLoadError('');
+    try {
+      const [goalData, userData] = await Promise.all([api.goals(), api.users('')]);
+      setGoals(goalData.goals);
+      setUsers(userData.users.filter((u) => u.role === 'PRODUCER'));
+    } catch (err) {
+      setLoadError(err.data?.message || 'Could not load goals. Try refreshing.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   function defaultMonthRange() {
@@ -132,6 +141,21 @@ export default function GoalsPanel() {
     await load();
   }
 
+  if (loading) {
+    return <div style={s.wrap}>Loading…</div>;
+  }
+
+  if (loadError) {
+    return (
+      <div style={s.wrap}>
+        <div style={s.loadErrorBox}>
+          {loadError}
+          <button style={s.retryButton} onClick={load}>RETRY</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={s.wrap}>
       <div style={s.headerRow}>
@@ -222,6 +246,8 @@ export default function GoalsPanel() {
 
 const s = {
   wrap: {},
+  loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', gap: 12 },
+  retryButton: { padding: '6px 14px', background: 'transparent', border: '1px solid var(--danger)', color: 'var(--danger)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700 },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2 },
   smallButton: { padding: '8px 14px', background: 'var(--accent-gradient)', color: 'var(--accent-on)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },

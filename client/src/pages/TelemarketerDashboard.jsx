@@ -26,6 +26,7 @@ function statusTone(status) {
 export default function TelemarketerDashboard() {
   const isMobile = useIsMobile();
   const [assignments, setAssignments] = useState(null);
+  const [assignmentsError, setAssignmentsError] = useState('');
   const [agencyId, setAgencyId] = useState('');
   const [submissions, setSubmissions] = useState([]);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -43,14 +44,24 @@ export default function TelemarketerDashboard() {
   }, []);
 
   async function loadAssignments() {
-    const data = await api.myAssignments();
-    setAssignments(data.assignments);
-    if (data.assignments.length === 1) setAgencyId(data.assignments[0].agency.id);
+    setAssignmentsError('');
+    try {
+      const data = await api.myAssignments();
+      setAssignments(data.assignments);
+      if (data.assignments.length === 1) setAgencyId(data.assignments[0].agency.id);
+    } catch (err) {
+      setAssignmentsError(err.data?.message || 'Could not load your assignments. Try refreshing.');
+    }
   }
 
   async function loadSubmissions() {
-    const data = await api.leads();
-    setSubmissions(data.leads);
+    try {
+      const data = await api.leads();
+      setSubmissions(data.leads);
+    } catch {
+      // Polled every 8s — a transient failure here shouldn't blank out
+      // an already-loaded submissions list; the next poll retries.
+    }
   }
 
   function setField(key, value) {
@@ -82,6 +93,16 @@ export default function TelemarketerDashboard() {
   }
 
   if (assignments === null) {
+    if (assignmentsError) {
+      return (
+        <div style={s.wrap}>
+          <div style={s.loadErrorBox}>
+            {assignmentsError}
+            <Button variant="secondary" size="sm" onClick={loadAssignments}>RETRY</Button>
+          </div>
+        </div>
+      );
+    }
     return <div style={s.wrap}>Loading…</div>;
   }
 
@@ -235,6 +256,7 @@ function LeadForm({ form, setField, onSubmit, busy, result }) {
 
 const s = {
   wrap: { color: 'var(--text-primary)' },
+  loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   section: { marginTop: 32 },
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2, marginBottom: 12 },
   noAssignmentBanner: { background: 'var(--warning-soft)', border: '1px solid rgba(255, 184, 77, 0.4)', color: 'var(--warning)', padding: 14, borderRadius: 8, fontSize: 13, lineHeight: 1.5 },

@@ -12,6 +12,8 @@ function statusTone(status) {
 export default function TelemarketersPanel() {
   const [tms, setTms] = useState([]);
   const [agencies, setAgencies] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [showInvite, setShowInvite] = useState(false);
   const [form, setForm] = useState({ email: '', firstName: '', lastName: '' });
   const [assignAgency, setAssignAgency] = useState({});
@@ -23,9 +25,16 @@ export default function TelemarketersPanel() {
   }, []);
 
   async function load() {
-    const [tmData, agencyData] = await Promise.all([api.telemarketers(), api.agencies()]);
-    setTms(tmData.telemarketers);
-    setAgencies(agencyData.agencies);
+    setLoadError('');
+    try {
+      const [tmData, agencyData] = await Promise.all([api.telemarketers(), api.agencies()]);
+      setTms(tmData.telemarketers);
+      setAgencies(agencyData.agencies);
+    } catch (err) {
+      setLoadError(err.data?.message || 'Could not load telemarketers. Try refreshing.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function resendTm(tmId) {
@@ -74,6 +83,21 @@ export default function TelemarketersPanel() {
   async function endAssignment(id) {
     await api.endAssignment(id);
     await load();
+  }
+
+  if (loading) {
+    return <div style={s.wrap}>Loading…</div>;
+  }
+
+  if (loadError) {
+    return (
+      <div style={s.wrap}>
+        <div style={s.loadErrorBox}>
+          {loadError}
+          <Button variant="secondary" size="sm" onClick={load}>RETRY</Button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -158,6 +182,7 @@ export default function TelemarketersPanel() {
 
 const s = {
   wrap: {},
+  loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   formCard: { marginBottom: 12 },
   form: { display: 'flex', flexDirection: 'column', gap: 10 },
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },
