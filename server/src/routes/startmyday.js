@@ -34,7 +34,7 @@ router.get('/', async (req, res, next) => {
         where: {
           type: 'lead.disposition',
           createdAt: { gte: yesterday, lt: today },
-          lead: { assignedToId: userId, ...(agencyId ? { agencyId } : {}) },
+          lead: { assignedToId: userId, agencyId },
         },
       }),
       // Same real "sales this month" math runningReport.js's goal-progress
@@ -49,10 +49,10 @@ router.get('/', async (req, res, next) => {
         },
       }),
       prisma.lead.count({
-        where: { assignedToId: userId, receivedAt: { gte: today }, ...(agencyId ? { agencyId } : {}) },
+        where: { assignedToId: userId, receivedAt: { gte: today }, agencyId },
       }),
       prisma.task.count({
-        where: { assignedToId: userId, status: { in: ['OPEN', 'IN_PROGRESS'] }, ...(agencyId ? { agencyId } : {}) },
+        where: { assignedToId: userId, status: { in: ['OPEN', 'IN_PROGRESS'] }, agencyId },
       }),
     ]);
 

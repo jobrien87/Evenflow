@@ -76,6 +76,16 @@ router.get('/:id', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER', 'PL
       }),
     ]);
 
+    // The nested collections above are already agency-scoped, but the
+    // top-level `customer` record was fetched by raw id with no tenant
+    // check at all — a non-platform-owner caller who guesses/knows a
+    // Customer UUID with zero real relationship to their own agency must
+    // not get the customer's PII back. If every scoped collection came
+    // back empty, this customer isn't actually theirs.
+    if (agencyId && leads.length === 0 && transfers.length === 0 && opportunities.length === 0) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+
     // Calls are linked via leadId, not directly to Customer — gather them
     // through the customer's own real leads rather than a fabricated join.
     const leadIds = leads.map((l) => l.id);

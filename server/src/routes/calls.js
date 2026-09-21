@@ -131,6 +131,20 @@ router.post('/', requireRole('PRODUCER', 'AGENCY_MANAGER', 'AGENCY_OWNER'), uplo
       return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
     }
 
+    const leadIdParsed = z.string().uuid().optional().safeParse(req.body.leadId || undefined);
+    if (!leadIdParsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'leadId must be a valid UUID.' });
+    }
+    const leadId = leadIdParsed.data || null;
+    if (leadId) {
+      // Never trust a client-supplied leadId as belonging to the uploader's
+      // own agency — confirm it before linking a call recording to it.
+      const lead = await prisma.lead.findUnique({ where: { id: leadId }, select: { agencyId: true } });
+      if (!lead || lead.agencyId !== req.user.agencyId) {
+        return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'leadId does not belong to your agency.' });
+      }
+    }
+
     const validation = validateAudioUpload(req.file.buffer);
     if (!validation.valid) {
       return res.status(400).json({ success: false, error: 'INVALID_FILE', message: validation.reason });
@@ -142,8 +156,6 @@ router.post('/', requireRole('PRODUCER', 'AGENCY_MANAGER', 'AGENCY_OWNER'), uplo
     } catch (err) {
       return res.status(500).json({ success: false, error: 'STORAGE_ERROR', message: err.message });
     }
-
-    const leadId = req.body.leadId || null;
 
     const call = await prisma.call.create({
       data: {

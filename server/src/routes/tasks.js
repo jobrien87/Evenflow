@@ -1,14 +1,19 @@
 const express = require('express');
 const { z } = require('zod');
 const { prisma } = require('../lib/db');
-const { requireAuth, scopeAgencyId } = require('../middleware/auth');
+const { requireAuth, requireRole, scopeAgencyId } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { computeProducerScore } = require('../lib/flowScore');
 
 const router = express.Router();
 router.use(requireAuth);
 
-router.get('/', async (req, res, next) => {
+// Tasks are an agency/producer-side work item — a Telemarketer has no
+// legitimate reason to list them, and scopeAgencyId(req) returns null
+// for a TM (no agencyId of their own), which would otherwise omit the
+// agencyId filter entirely rather than scope it. See opportunities.js
+// for the same fix and reasoning.
+router.get('/', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER', 'PLATFORM_OWNER'), async (req, res, next) => {
   try {
     const agencyId = scopeAgencyId(req);
     const where = {

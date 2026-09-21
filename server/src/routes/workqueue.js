@@ -1,6 +1,6 @@
 const express = require('express');
 const { prisma } = require('../lib/db');
-const { requireAuth, scopeAgencyId } = require('../middleware/auth');
+const { requireAuth, requireRole, scopeAgencyId } = require('../middleware/auth');
 const { scoreLead } = require('../lib/priority');
 
 const router = express.Router();
@@ -8,12 +8,26 @@ router.use(requireAuth);
 
 // GET /api/work-queue
 // Combines open leads assigned to the producer + open tasks assigned to the producer
-// into a single ranked "what should I do next" list.
-router.get('/', async (req, res, next) => {
+// into a single ranked "what should I do next" list. Producer-side concept — a
+// Telemarketer has no work queue of their own (see opportunities.js/tasks.js for
+// the same TM exclusion and reasoning).
+router.get('/', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER', 'PLATFORM_OWNER'), async (req, res, next) => {
   try {
     const agencyId = scopeAgencyId(req);
     const isProducer = req.user.role === 'PRODUCER';
-    const targetUserId = req.query.userId && req.user.role !== 'PRODUCER' ? req.query.userId : req.user.id;
+    let targetUserId = req.user.id;
+
+    if (req.query.userId && req.user.role !== 'PRODUCER') {
+      // A manager/owner/platform-owner viewing another producer's queue —
+      // never trust the supplied id without confirming it's actually a
+      // producer in the caller's own agency (or the caller is platform-wide).
+      const targetUser = await prisma.user.findUnique({ where: { id: req.query.userId }, select: { id: true, agencyId: true } });
+      if (!targetUser) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+      if (req.user.role !== 'PLATFORM_OWNER' && targetUser.agencyId !== req.user.agencyId) {
+        return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+      }
+      targetUserId = targetUser.id;
+    }
 
     const leadWhere = {
       ...(agencyId ? { agencyId } : {}),

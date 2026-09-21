@@ -9,7 +9,13 @@ const { recordLeadSaleRevenue } = require('../lib/financialEvents');
 const router = express.Router();
 router.use(requireAuth);
 
-router.get('/', async (req, res, next) => {
+// Opportunities/winbacks are an agency- and producer-side concept — a
+// Telemarketer has no legitimate reason to list them, and (since TMs have
+// no agencyId of their own) scopeAgencyId(req) returns null for a TM,
+// which would otherwise omit the agencyId filter entirely rather than
+// scope it. Excluding TELEMARKETER here is the real fix, not new scoping
+// logic.
+router.get('/', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER', 'PLATFORM_OWNER'), async (req, res, next) => {
   try {
     const agencyId = scopeAgencyId(req);
     const where = {
