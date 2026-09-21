@@ -22,6 +22,7 @@ import CoursesAdminPanel from './pages/CoursesAdminPanel';
 import GoalsPanel from './pages/GoalsPanel';
 
 import AgenciesPanel from './pages/AgenciesPanel';
+import AgencyDetailPage from './pages/AgencyDetailPage';
 import TelemarketersPanel from './pages/TelemarketersPanel';
 import BillingPanel from './pages/BillingPanel';
 
@@ -71,6 +72,7 @@ export default function App() {
 
         <Route element={<RoleGate allow={['PLATFORM_OWNER']} />}>
           <Route path="platform" element={<AgenciesPanel />} />
+          <Route path="platform/agencies/:agencyId" element={<AgencyDetailPage />} />
           <Route path="platform/telemarketers" element={<TelemarketersPanel />} />
           <Route path="platform/financials" element={<FinancialsPanel />} />
           <Route path="platform/support" element={<SupportPanel />} />

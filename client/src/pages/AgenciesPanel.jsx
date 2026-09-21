@@ -1,5 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
+import { Card, Badge, Button, StatTile, SectionHeader, EmptyState } from '../ui';
+
+function statusTone(status) {
+  if (status === 'ACTIVE') return 'accent';
+  if (status === 'INVITED') return 'warning';
+  return 'neutral';
+}
 
 export default function AgenciesPanel() {
   const [agencies, setAgencies] = useState([]);
@@ -49,25 +57,37 @@ export default function AgenciesPanel() {
     }
   }
 
+  const totals = useMemo(() => agencies.reduce((acc, a) => ({
+    producers: acc.producers + (a.producerCount || 0),
+    telemarketers: acc.telemarketers + (a.telemarketerCount || 0),
+    mrrCents: acc.mrrCents + (a.mrrCents || 0),
+  }), { producers: 0, telemarketers: 0, mrrCents: 0 }), [agencies]);
+
   return (
     <div style={s.wrap}>
-      <div style={s.headerRow}>
-        <h2 style={s.h2}>Agencies ({agencies.length})</h2>
-        <button style={s.button} onClick={() => setShowForm(!showForm)}>
-          + INVITE AGENCY
-        </button>
+      <SectionHeader
+        right={<Button variant="primary" size="sm" onClick={() => setShowForm(!showForm)}>+ INVITE AGENCY</Button>}
+      >
+        AGENCIES
+      </SectionHeader>
+
+      <div style={s.statsRow}>
+        <StatTile label="Agencies" value={agencies.length} />
+        <StatTile label="Producers" value={totals.producers} />
+        <StatTile label="Telemarketers" value={totals.telemarketers} />
+        <StatTile label="MRR" value={`$${(totals.mrrCents / 100).toFixed(0)}`} />
       </div>
 
       {showForm && (
-        <form onSubmit={submit} style={s.form}>
-          <input style={s.input} placeholder="Agency name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-          <input style={s.input} placeholder="Owner first name" value={form.ownerFirstName} onChange={(e) => setForm({ ...form, ownerFirstName: e.target.value })} required />
-          <input style={s.input} placeholder="Owner last name" value={form.ownerLastName} onChange={(e) => setForm({ ...form, ownerLastName: e.target.value })} required />
-          <input style={s.input} type="email" placeholder="Owner email" value={form.ownerEmail} onChange={(e) => setForm({ ...form, ownerEmail: e.target.value })} required />
-          <button style={s.submitButton} type="submit">
-            Send Invitation
-          </button>
-        </form>
+        <Card style={s.formCard}>
+          <form onSubmit={submit} style={s.form}>
+            <input style={s.input} placeholder="Agency name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+            <input style={s.input} placeholder="Owner first name" value={form.ownerFirstName} onChange={(e) => setForm({ ...form, ownerFirstName: e.target.value })} required />
+            <input style={s.input} placeholder="Owner last name" value={form.ownerLastName} onChange={(e) => setForm({ ...form, ownerLastName: e.target.value })} required />
+            <input style={s.input} type="email" placeholder="Owner email" value={form.ownerEmail} onChange={(e) => setForm({ ...form, ownerEmail: e.target.value })} required />
+            <Button variant="primary" type="submit">Send Invitation</Button>
+          </form>
+        </Card>
       )}
       {status && <div style={s.status}>{status}</div>}
       {inviteLink && (
@@ -78,43 +98,59 @@ export default function AgenciesPanel() {
         </div>
       )}
 
-      <div style={s.list}>
-        {agencies.map((a) => (
-          <div key={a.id} style={s.row} className="ui-row-stack">
-            <div>
-              <div style={s.rowTitle}>{a.name}</div>
-              <div style={s.rowSub}>{a.status}</div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={s.statusBadge}>{a.status}</div>
-              {a.status !== 'ACTIVE' && (
-                <button style={s.resendButton} onClick={() => resendAgency(a.id)}>RESEND INVITE</button>
-              )}
-            </div>
+      {agencies.length === 0 ? (
+        <EmptyState title="EvenFlow is ready" description="Invite your first agency to get started." />
+      ) : (
+        <Card style={s.tableCard}>
+          <div style={{ ...s.tableRow, ...s.tableHeader }}>
+            <div style={s.colName}>AGENCY</div>
+            <div style={s.colSmall}>STATUS</div>
+            <div style={s.colSmall}>PLAN</div>
+            <div style={s.colSmall}>MRR</div>
+            <div style={s.colSmall}>PRODUCERS</div>
+            <div style={s.colSmall}>TMS</div>
+            <div style={s.colAction} />
           </div>
-        ))}
-        {agencies.length === 0 && <div style={s.empty}>EvenFlow is ready. Invite your first agency.</div>}
-      </div>
+          {agencies.map((a) => (
+            <Link key={a.id} to={`/platform/agencies/${a.id}`} style={s.tableRowLink}>
+              <div style={s.tableRow}>
+                <div style={s.colName}>{a.name}</div>
+                <div style={s.colSmall}><Badge tone={statusTone(a.status)}>{a.status}</Badge></div>
+                <div style={s.colSmall}>{a.plan ? a.plan.name : '—'}</div>
+                <div style={s.colSmall}>${(a.mrrCents / 100).toFixed(0)}</div>
+                <div style={s.colSmall}>{a.producerCount}</div>
+                <div style={s.colSmall}>{a.telemarketerCount}</div>
+                <div style={s.colAction}>
+                  {a.status !== 'ACTIVE' && (
+                    <Button variant="secondary" size="sm" onClick={(e) => { e.preventDefault(); resendAgency(a.id); }}>RESEND INVITE</Button>
+                  )}
+                </div>
+              </div>
+            </Link>
+          ))}
+        </Card>
+      )}
     </div>
   );
 }
 
 const s = {
   wrap: { color: 'var(--text-primary)' },
-  headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  h2: { fontWeight: 400 },
-  button: { padding: '10px 18px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
-  form: { display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg-elevated)', padding: 20, borderRadius: 8, marginBottom: 16, border: '1px solid var(--border-hairline)' },
+  statsRow: { display: 'flex', gap: 32, marginBottom: 24, flexWrap: 'wrap' },
+  formCard: { marginBottom: 16 },
+  form: { display: 'flex', flexDirection: 'column', gap: 10 },
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },
-  submitButton: { padding: '10px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
   status: { color: 'var(--accent)', marginBottom: 16, fontSize: 13 },
   linkBox: { color: 'var(--text-secondary)', fontSize: 13, marginBottom: 16, background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 12 },
   link: { color: 'var(--accent)', wordBreak: 'break-all' },
-  list: { display: 'flex', flexDirection: 'column', gap: 8 },
-  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 16 },
-  rowTitle: { fontWeight: 600 },
-  rowSub: { color: 'var(--text-muted)', fontSize: 12 },
-  statusBadge: { fontSize: 11, color: 'var(--text-secondary)', border: '1px solid var(--border-strong)', padding: '4px 8px', borderRadius: 4 },
-  resendButton: { background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--accent)', padding: '4px 8px', borderRadius: 4, fontSize: 11, cursor: 'pointer' },
-  empty: { color: 'var(--text-muted)', fontStyle: 'italic' },
+  tableCard: { padding: 0, overflow: 'hidden' },
+  tableRowLink: { textDecoration: 'none', color: 'inherit', display: 'block' },
+  tableRow: {
+    display: 'grid', gridTemplateColumns: '2fr 1fr 1.2fr 0.8fr 1fr 1fr 1.4fr',
+    alignItems: 'center', gap: 8, padding: '12px 16px', borderBottom: '1px solid var(--border-hairline)', fontSize: 13,
+  },
+  tableHeader: { color: 'var(--text-muted)', fontSize: 11, letterSpacing: 1, fontWeight: 700 },
+  colName: { fontWeight: 600, color: 'var(--text-primary)' },
+  colSmall: { color: 'var(--text-secondary)' },
+  colAction: { textAlign: 'right' },
 };
