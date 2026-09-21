@@ -15,6 +15,18 @@ const loginLimiter = rateLimit({
   message: { success: false, error: 'RATE_LIMITED', message: 'Too many login attempts. Try again later.' },
 });
 
+// Public, unauthenticated, token-guessing surface — the token itself is
+// 192 bits of entropy (crypto.randomBytes(24) in lib/invitations.js) so
+// brute force is infeasible, but a rate limit here is still cheap
+// defense in depth against an unlimited-attempt public endpoint.
+const acceptInvitationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'RATE_LIMITED', message: 'Too many attempts. Try again later.' },
+});
+
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
@@ -101,7 +113,7 @@ const acceptInvitationSchema = z.object({
   password: z.string().min(10, 'Password must be at least 10 characters.'),
 });
 
-router.post('/accept-invitation', async (req, res, next) => {
+router.post('/accept-invitation', acceptInvitationLimiter, async (req, res, next) => {
   try {
     const parsed = acceptInvitationSchema.safeParse(req.body);
     if (!parsed.success) {
