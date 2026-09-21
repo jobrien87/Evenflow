@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { Card, Badge, Button, SectionHeader } from '../ui';
 
 export default function BillingPanel() {
   const [billingStatus, setBillingStatus] = useState(null);
@@ -75,48 +76,56 @@ export default function BillingPanel() {
       </div>
 
       <section style={s.section}>
-        <div style={s.headerRow}>
-          <h3 style={s.h3}>PLANS ({plans.length})</h3>
-          <button style={s.smallButton} onClick={() => setShowPlanForm(!showPlanForm)}>+ NEW PLAN</button>
-        </div>
+        <SectionHeader
+          right={<Button variant="primary" size="sm" onClick={() => setShowPlanForm(!showPlanForm)}>+ NEW PLAN</Button>}
+        >
+          PLANS ({plans.length})
+        </SectionHeader>
 
         {showPlanForm && (
-          <form onSubmit={createPlan} style={s.form}>
-            <input style={s.input} placeholder="Plan name" value={planForm.name} onChange={(e) => setPlanForm({ ...planForm, name: e.target.value })} required />
-            <input style={s.input} type="number" step="0.01" min="0" placeholder="Price ($/interval)" value={planForm.priceCents} onChange={(e) => setPlanForm({ ...planForm, priceCents: e.target.value })} required />
-            <select style={s.input} value={planForm.interval} onChange={(e) => setPlanForm({ ...planForm, interval: e.target.value })}>
-              <option value="MONTHLY">Monthly</option>
-              <option value="ANNUAL">Annual</option>
-            </select>
-            <label style={s.checkboxRow}>
-              <input type="checkbox" checked={planForm.crmEnabled} onChange={(e) => setPlanForm({ ...planForm, crmEnabled: e.target.checked })} /> CRM
-            </label>
-            <label style={s.checkboxRow}>
-              <input type="checkbox" checked={planForm.transfersEnabled} onChange={(e) => setPlanForm({ ...planForm, transfersEnabled: e.target.checked })} /> Yield Transfers
-            </label>
-            <label style={s.checkboxRow}>
-              <input type="checkbox" checked={planForm.coachingEnabled} onChange={(e) => setPlanForm({ ...planForm, coachingEnabled: e.target.checked })} /> Sales Coaching
-            </label>
-            <button style={s.submitButton} type="submit">Create Plan</button>
-          </form>
+          <Card style={s.formCard}>
+            <form onSubmit={createPlan} style={s.form}>
+              <input style={s.input} placeholder="Plan name" value={planForm.name} onChange={(e) => setPlanForm({ ...planForm, name: e.target.value })} required />
+              <input style={s.input} type="number" step="0.01" min="0" placeholder="Price ($/interval)" value={planForm.priceCents} onChange={(e) => setPlanForm({ ...planForm, priceCents: e.target.value })} required />
+              <select style={s.input} value={planForm.interval} onChange={(e) => setPlanForm({ ...planForm, interval: e.target.value })}>
+                <option value="MONTHLY">Monthly</option>
+                <option value="ANNUAL">Annual</option>
+              </select>
+              <label style={s.checkboxRow}>
+                <input type="checkbox" checked={planForm.crmEnabled} onChange={(e) => setPlanForm({ ...planForm, crmEnabled: e.target.checked })} /> CRM
+              </label>
+              <label style={s.checkboxRow}>
+                <input type="checkbox" checked={planForm.transfersEnabled} onChange={(e) => setPlanForm({ ...planForm, transfersEnabled: e.target.checked })} /> Yield Transfers
+              </label>
+              <label style={s.checkboxRow}>
+                <input type="checkbox" checked={planForm.coachingEnabled} onChange={(e) => setPlanForm({ ...planForm, coachingEnabled: e.target.checked })} /> Sales Coaching
+              </label>
+              <Button variant="primary" type="submit">Create Plan</Button>
+            </form>
+          </Card>
         )}
 
         {plans.map((p) => (
-          <div key={p.id} style={s.planRow}>
-            <div>
-              <div style={s.rowTitle}>{p.name} — ${(p.priceCents / 100).toFixed(2)}/{p.interval === 'MONTHLY' ? 'mo' : 'yr'}</div>
-              <div style={s.rowSub}>
-                {[p.crmEnabled && 'CRM', p.transfersEnabled && 'Transfers', p.coachingEnabled && 'Coaching'].filter(Boolean).join(' · ')}
+          <Card key={p.id} style={s.planCard} className="ui-row-stack">
+            <div style={s.planRow}>
+              <div>
+                <div style={s.rowTitle}>{p.name} — ${(p.priceCents / 100).toFixed(2)}/{p.interval === 'MONTHLY' ? 'mo' : 'yr'}</div>
+                <div style={s.rowSub}>
+                  {[p.crmEnabled && 'CRM', p.transfersEnabled && 'Transfers', p.coachingEnabled && 'Coaching'].filter(Boolean).join(' · ')}
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Badge tone={p.isActive ? 'accent' : 'neutral'}>{p.isActive ? 'ACTIVE' : 'INACTIVE'}</Badge>
+                <Button variant="secondary" size="sm" onClick={() => togglePlanActive(p)}>{p.isActive ? 'DEACTIVATE' : 'ACTIVATE'}</Button>
               </div>
             </div>
-            <button style={s.smallButtonOutline} onClick={() => togglePlanActive(p)}>{p.isActive ? 'DEACTIVATE' : 'ACTIVATE'}</button>
-          </div>
+          </Card>
         ))}
       </section>
 
       <section style={s.section}>
-        <h3 style={s.h3}>ASSIGN PLAN TO AGENCY</h3>
-        <div style={s.assignForm}>
+        <SectionHeader>ASSIGN PLAN TO AGENCY</SectionHeader>
+        <Card style={s.assignForm}>
           <select style={s.input} value={selectedAgencyId} onChange={(e) => loadSubscription(e.target.value)}>
             <option value="">Select agency…</option>
             {agencies.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
@@ -136,13 +145,13 @@ export default function BillingPanel() {
                 {plans.filter((p) => p.isActive).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button style={s.submitButton} onClick={assign} disabled={!selectedPlanId}>ASSIGN PLAN</button>
-                {currentSub && <button style={s.cancelButton} onClick={cancel}>CANCEL SUBSCRIPTION</button>}
+                <Button variant="primary" onClick={assign} disabled={!selectedPlanId}>ASSIGN PLAN</Button>
+                {currentSub && <Button variant="danger" onClick={cancel}>CANCEL SUBSCRIPTION</Button>}
               </div>
               {status && <div style={s.status}>{status}</div>}
             </>
           )}
-        </div>
+        </Card>
       </section>
     </div>
   );
@@ -155,19 +164,15 @@ const s = {
     color: mode === 'MANUAL' ? 'var(--warning)' : 'var(--accent)', padding: 12, borderRadius: 8, fontSize: 12, marginBottom: 20,
   }),
   section: { marginBottom: 28 },
-  headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2 },
-  smallButton: { padding: '8px 14px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
-  smallButtonOutline: { padding: '6px 12px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, cursor: 'pointer', fontSize: 11 },
-  form: { display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg-elevated)', padding: 16, borderRadius: 8, marginBottom: 12, border: '1px solid var(--border-hairline)' },
+  formCard: { marginBottom: 12 },
+  form: { display: 'flex', flexDirection: 'column', gap: 10 },
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },
   checkboxRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-secondary)' },
-  submitButton: { padding: '10px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
-  cancelButton: { padding: '10px 16px', background: 'transparent', border: '1px solid var(--danger)', color: 'var(--danger)', borderRadius: 6, cursor: 'pointer' },
   status: { color: 'var(--accent)', fontSize: 13 },
-  planRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 14, marginBottom: 8 },
-  rowTitle: { fontWeight: 600, fontSize: 14 },
+  planCard: { marginBottom: 8 },
+  planRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 },
+  rowTitle: { fontWeight: 600, fontSize: 14, color: 'var(--text-primary)' },
   rowSub: { color: 'var(--text-muted)', fontSize: 12, marginTop: 2 },
-  assignForm: { display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg-elevated)', padding: 16, borderRadius: 8, border: '1px solid var(--border-hairline)' },
+  assignForm: { display: 'flex', flexDirection: 'column', gap: 10 },
   currentSubBox: { color: 'var(--text-secondary)', fontSize: 13, padding: '8px 0' },
 };
