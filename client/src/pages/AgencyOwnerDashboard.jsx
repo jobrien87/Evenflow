@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
+import { Button, Modal, ProgressRing } from '../ui';
 import FlowScoreCard from './FlowScoreCard';
 import FunnelMetricsCard from './FunnelMetricsCard';
 import Customer360Modal from './Customer360Modal';
 import RunningReportPage from './RunningReportPage';
+import AgencySettingsModal from './AgencySettingsModal';
 
 export default function AgencyOwnerDashboard() {
   const { user } = useAuth();
@@ -21,6 +23,12 @@ export default function AgencyOwnerDashboard() {
   const [inviteLink, setInviteLink] = useState('');
   const [leadStatus, setLeadStatus] = useState('');
   const [showReport, setShowReport] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [agency, setAgency] = useState(null);
+  const [editingUserId, setEditingUserId] = useState(null);
+  const [editUserForm, setEditUserForm] = useState({ firstName: '', lastName: '' });
+  const [scoreUser, setScoreUser] = useState(null);
+  const [scoreData, setScoreData] = useState(null);
 
   // The funnel drill-down's filter lives in the URL (not component state)
   // so it's shareable and survives the back button.
@@ -48,9 +56,39 @@ export default function AgencyOwnerDashboard() {
     const leadParams = stageFilter
       ? `?stage=${stageFilter.stage}&from=${stageFilter.from}&to=${stageFilter.to}`
       : '';
-    const [leadData, userData] = await Promise.all([api.leads(leadParams), api.users('')]);
+    const [leadData, userData, agencyData] = await Promise.all([api.leads(leadParams), api.users(''), api.agencyDetail(user.agencyId)]);
     setLeads(leadData.leads);
     setUsers(userData.users);
+    setAgency(agencyData.agency);
+  }
+
+  function startEditUser(u) {
+    setEditingUserId(u.id);
+    setEditUserForm({ firstName: u.firstName, lastName: u.lastName });
+  }
+
+  async function saveEditUser(userId) {
+    try {
+      await api.updateUser(userId, editUserForm);
+      setEditingUserId(null);
+      await load();
+    } catch (err) {
+      alert(err.data?.message || 'Failed to save.');
+    }
+  }
+
+  // Producer Flow Score drill-down — userFlowScore/flowScoreHistory were
+  // fully functional server-side but never called from any page before
+  // this; there was no way to see an individual producer's trend, only
+  // the aggregate agency score.
+  async function viewProducerScore(u) {
+    setScoreUser(u);
+    setScoreData(null);
+    const [scoreRes, historyRes] = await Promise.all([
+      api.userFlowScore(u.id),
+      api.flowScoreHistory('USER', u.id),
+    ]);
+    setScoreData({ snapshot: scoreRes.snapshot, history: historyRes.snapshots });
   }
 
   function selectFunnelStage(stageKey, range) {
@@ -118,6 +156,9 @@ export default function AgencyOwnerDashboard() {
   return (
     <div style={s.wrap}>
       <section style={s.section}>
+        <div style={s.settingsRow}>
+          <Button variant="secondary" size="sm" onClick={() => setShowSettings(true)}>AGENCY SETTINGS</Button>
+        </div>
         <FlowScoreCard scope="agency" agencyId={user?.agencyId} title="AGENCY FLOW SCORE" onViewReport={() => setShowReport(true)} />
       </section>
 
@@ -153,20 +194,34 @@ export default function AgencyOwnerDashboard() {
           </div>
         )}
         {users.map((u) => (
-          <div key={u.id} style={s.row} className="ui-row-stack">
-            <div>
-              <div style={s.rowTitle}>{u.firstName} {u.lastName}</div>
-              <div style={s.rowSub}>{u.email} · {u.role}</div>
+          <div key={u.id}>
+            <div style={s.row} className="ui-row-stack">
+              <div>
+                <div style={s.rowTitle}>{u.firstName} {u.lastName}</div>
+                <div style={s.rowSub}>{u.email} · {u.role}</div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <div style={s.badge}>{u.status}</div>
+                {u.role === 'PRODUCER' && (
+                  <button style={s.resendButton} onClick={() => viewProducerScore(u)}>VIEW SCORE</button>
+                )}
+                <button style={s.resendButton} onClick={() => startEditUser(u)}>EDIT</button>
+                {u.status === 'INVITED' && (
+                  <button style={s.resendButton} onClick={() => resendUser(u.id)}>RESEND INVITE</button>
+                )}
+                {u.status !== 'DEACTIVATED' && (
+                  <button style={s.deactivateButton} onClick={() => deactivate(u.id)}>DEACTIVATE</button>
+                )}
+              </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={s.badge}>{u.status}</div>
-              {u.status === 'INVITED' && (
-                <button style={s.resendButton} onClick={() => resendUser(u.id)}>RESEND INVITE</button>
-              )}
-              {u.status !== 'DEACTIVATED' && (
-                <button style={s.deactivateButton} onClick={() => deactivate(u.id)}>DEACTIVATE</button>
-              )}
-            </div>
+            {editingUserId === u.id && (
+              <div style={s.inlineEditForm}>
+                <input style={s.input} value={editUserForm.firstName} onChange={(e) => setEditUserForm({ ...editUserForm, firstName: e.target.value })} placeholder="First name" />
+                <input style={s.input} value={editUserForm.lastName} onChange={(e) => setEditUserForm({ ...editUserForm, lastName: e.target.value })} placeholder="Last name" />
+                <button style={s.smallButton} onClick={() => saveEditUser(u.id)}>SAVE</button>
+                <button style={s.smallButtonOutline} onClick={() => setEditingUserId(null)}>CANCEL</button>
+              </div>
+            )}
           </div>
         ))}
       </section>
@@ -229,6 +284,33 @@ export default function AgencyOwnerDashboard() {
           </div>
         </div>
       )}
+
+      {showSettings && agency && (
+        <AgencySettingsModal agency={agency} onClose={() => setShowSettings(false)} onSaved={() => { setShowSettings(false); load(); }} />
+      )}
+
+      {scoreUser && (
+        <Modal title={`FLOW SCORE — ${scoreUser.firstName} ${scoreUser.lastName}`} onClose={() => { setScoreUser(null); setScoreData(null); }}>
+          {!scoreData ? (
+            <div style={{ color: 'var(--text-muted)' }}>Loading…</div>
+          ) : !scoreData.snapshot ? (
+            <div style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Not enough activity yet to compute a Flow Score.</div>
+          ) : (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+                <ProgressRing value={scoreData.snapshot.score} label="/ 100" size={110} />
+              </div>
+              {scoreData.history.length > 1 && (
+                <div style={s.trendRow}>
+                  {scoreData.history.slice().reverse().map((snap) => (
+                    <div key={snap.id} style={s.trendBar(snap.score)} title={`${snap.score} on ${new Date(snap.computedAt).toLocaleDateString()}`} />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </Modal>
+      )}
     </div>
   );
 }
@@ -236,6 +318,10 @@ export default function AgencyOwnerDashboard() {
 const s = {
   wrap: { color: 'var(--text-primary)' },
   section: { marginBottom: 32 },
+  settingsRow: { display: 'flex', justifyContent: 'flex-end', marginBottom: 8 },
+  inlineEditForm: { display: 'flex', gap: 8, alignItems: 'center', padding: '8px 14px', background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 8, marginTop: -4, marginBottom: 8 },
+  trendRow: { display: 'flex', gap: 4, alignItems: 'flex-end', height: 40, justifyContent: 'center' },
+  trendBar: (score) => ({ width: 10, height: `${Math.max(4, score) / 100 * 40}px`, background: 'var(--border-accent)', borderRadius: 2 }),
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2 },
   rowHighlighted: { outline: '2px solid var(--accent)', boxShadow: 'var(--shadow-glow-accent)', borderRadius: 'var(--radius-md)' },

@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Card, Badge, Button, StatTile, SectionHeader, EmptyState, Modal, ExportButton } from '../ui';
 import { downloadCsv } from '../lib/downloadCsv';
+import AgencySettingsModal from './AgencySettingsModal';
 
 function statusTone(status) {
   if (status === 'ACTIVE') return 'accent';
@@ -162,7 +163,7 @@ export default function AgencyDetailPage() {
       )}
 
       {showEdit && (
-        <EditSettingsModal agency={agency} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); load(); }} />
+        <AgencySettingsModal agency={agency} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); load(); }} />
       )}
       {showInvite && (
         <InviteOwnerModal agencyId={agencyId} onClose={() => setShowInvite(false)} onSent={() => { setShowInvite(false); load(); }} />
@@ -192,42 +193,6 @@ function RosterSection({ title, users }) {
         ))
       )}
     </Card>
-  );
-}
-
-function EditSettingsModal({ agency, onClose, onSaved }) {
-  const [form, setForm] = useState({ name: agency.name, timezone: agency.timezone, products: agency.products.join(', ') });
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState('');
-
-  async function submit(e) {
-    e.preventDefault();
-    setBusy(true);
-    setErr('');
-    try {
-      await api.updateAgency(agency.id, {
-        name: form.name,
-        timezone: form.timezone,
-        products: form.products.split(',').map((p) => p.trim()).filter(Boolean),
-      });
-      onSaved();
-    } catch (error) {
-      setErr(error.data?.message || 'Failed to save.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Modal title="EDIT AGENCY SETTINGS" onClose={onClose}>
-      <form onSubmit={submit} style={s.form}>
-        <label style={s.fieldLabel}>Name<input style={s.input} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></label>
-        <label style={s.fieldLabel}>Timezone<input style={s.input} value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} /></label>
-        <label style={s.fieldLabel}>Products (comma-separated)<input style={s.input} value={form.products} onChange={(e) => setForm({ ...form, products: e.target.value })} /></label>
-        {err && <div style={s.error}>{err}</div>}
-        <Button variant="primary" type="submit" disabled={busy}>{busy ? 'SAVING…' : 'SAVE'}</Button>
-      </form>
-    </Modal>
   );
 }
 

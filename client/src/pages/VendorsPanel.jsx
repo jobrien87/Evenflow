@@ -10,6 +10,9 @@ export default function VendorsPanel() {
   const [selectedVendor, setSelectedVendor] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [instructionsVendor, setInstructionsVendor] = useState(null);
+  const [expandedCredentialsId, setExpandedCredentialsId] = useState(null);
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({});
   const [searchParams] = useSearchParams();
   const highlightId = searchParams.get('highlight');
   const handledHighlightRef = useRef(false);
@@ -75,6 +78,26 @@ export default function VendorsPanel() {
     await load();
   }
 
+  function startEdit(v) {
+    setEditingId(v.id);
+    setEditForm({ name: v.name, email: v.email, product: v.product, costPerLeadCents: v.costPerLeadCents ? (v.costPerLeadCents / 100).toFixed(2) : '' });
+  }
+
+  async function saveEdit(id) {
+    try {
+      await api.updateVendor(id, {
+        name: editForm.name,
+        email: editForm.email,
+        product: editForm.product,
+        costPerLeadCents: editForm.costPerLeadCents ? Math.round(parseFloat(editForm.costPerLeadCents) * 100) : null,
+      });
+      setEditingId(null);
+      await load();
+    } catch (err) {
+      alert(err.data?.message || 'Failed to save vendor.');
+    }
+  }
+
   return (
     <div style={s.wrap}>
       <div style={s.headerRow}>
@@ -112,22 +135,64 @@ export default function VendorsPanel() {
       )}
 
       {vendors.map((v) => (
-        <div key={v.id} id={`vendor-${v.id}`} style={v.id === highlightId ? { ...s.row, ...s.rowHighlighted } : s.row} className="ui-row-stack">
-          <div style={{ flex: 1 }}>
-            <div style={s.rowTitle}>{v.name} · {v.product}</div>
-            <div style={s.rowSub}>{v.email}</div>
+        <div key={v.id} id={`vendor-${v.id}`} style={s.vendorBlock}>
+          <div style={v.id === highlightId ? { ...s.row, ...s.rowHighlighted } : s.row} className="ui-row-stack">
+            <div style={{ flex: 1 }}>
+              <div style={s.rowTitle}>{v.name} · {v.product}</div>
+              <div style={s.rowSub}>
+                {v.email} · {v.costPerLeadCents ? `$${(v.costPerLeadCents / 100).toFixed(2)}/lead` : 'cost not set'}
+              </div>
+            </div>
+            <select style={s.miniInput} value={v.status} onChange={(e) => setStatus(v.id, e.target.value)}>
+              <option value="PENDING">PENDING</option>
+              <option value="TESTING">TESTING</option>
+              <option value="VERIFIED">VERIFIED</option>
+              <option value="LIVE">LIVE</option>
+              <option value="PAUSED">PAUSED</option>
+            </select>
+            <button style={s.smallButtonOutline} onClick={() => startEdit(v)}>EDIT</button>
+            <button style={s.smallButton} onClick={() => rotate(v.id)}>ROTATE KEY</button>
+            <button style={s.smallButtonOutline} onClick={() => viewInstructions(v.id)}>VIEW INSTRUCTIONS</button>
+            <button style={s.smallButtonOutline} onClick={() => revoke(v.id)}>REVOKE</button>
+            <button style={s.smallButtonOutline} onClick={() => viewDetail(v)}>LOGS</button>
+            <button style={s.smallButtonOutline} onClick={() => setExpandedCredentialsId(expandedCredentialsId === v.id ? null : v.id)}>
+              CREDENTIALS ({v.credentials?.length || 0})
+            </button>
           </div>
-          <select style={s.miniInput} value={v.status} onChange={(e) => setStatus(v.id, e.target.value)}>
-            <option value="PENDING">PENDING</option>
-            <option value="TESTING">TESTING</option>
-            <option value="VERIFIED">VERIFIED</option>
-            <option value="LIVE">LIVE</option>
-            <option value="PAUSED">PAUSED</option>
-          </select>
-          <button style={s.smallButton} onClick={() => rotate(v.id)}>ROTATE KEY</button>
-          <button style={s.smallButtonOutline} onClick={() => viewInstructions(v.id)}>VIEW INSTRUCTIONS</button>
-          <button style={s.smallButtonOutline} onClick={() => revoke(v.id)}>REVOKE</button>
-          <button style={s.smallButtonOutline} onClick={() => viewDetail(v)}>LOGS</button>
+
+          {editingId === v.id && (
+            <div style={s.editForm}>
+              <input style={s.input} value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} placeholder="Name" />
+              <input style={s.input} type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} placeholder="Email" />
+              <select style={s.input} value={editForm.product} onChange={(e) => setEditForm({ ...editForm, product: e.target.value })}>
+                <option>Auto</option><option>Home</option><option>Life</option><option>Health</option>
+              </select>
+              <input style={s.input} type="number" step="0.01" min="0" value={editForm.costPerLeadCents} onChange={(e) => setEditForm({ ...editForm, costPerLeadCents: e.target.value })} placeholder="Cost per lead ($)" />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button style={s.smallButton} onClick={() => saveEdit(v.id)}>SAVE</button>
+                <button style={s.smallButtonOutline} onClick={() => setEditingId(null)}>CANCEL</button>
+              </div>
+            </div>
+          )}
+
+          {expandedCredentialsId === v.id && (
+            <div style={s.credentialsBox}>
+              {(v.credentials || []).length === 0 ? (
+                <div style={s.empty}>No credentials issued yet.</div>
+              ) : (
+                v.credentials.map((c) => (
+                  <div key={c.id} style={s.credRow}>
+                    <span style={s.credPrefix}>{c.keyPrefix}…</span>
+                    <span style={s.txCode(c.status === 'ACTIVE' ? 'SUCCESS' : 'FAILED')}>{c.status}</span>
+                    <span style={s.txMeta}>
+                      Created {new Date(c.createdAt).toLocaleDateString()}
+                      {c.lastUsedAt ? ` · last used ${new Date(c.lastUsedAt).toLocaleString()}` : ' · never used'}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
       ))}
       {vendors.length === 0 && <div style={s.empty}>No vendors connected yet.</div>}
@@ -188,7 +253,12 @@ const s = {
   keyCode: { display: 'block', background: 'var(--bg-sunken)', padding: 10, borderRadius: 6, color: 'var(--accent)', fontSize: 12, wordBreak: 'break-all', marginBottom: 8 },
   keySub: { color: 'var(--text-secondary)', fontSize: 12, marginBottom: 8 },
   dismissButton: { padding: '6px 12px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, cursor: 'pointer', fontSize: 11 },
-  row: { display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 14, marginBottom: 8 },
+  vendorBlock: { marginBottom: 8 },
+  row: { display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 14 },
+  editForm: { display: 'flex', flexDirection: 'column', gap: 8, background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 12, marginTop: 4 },
+  credentialsBox: { background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 12, marginTop: 4 },
+  credRow: { display: 'flex', gap: 10, alignItems: 'center', padding: '6px 0', fontSize: 12, borderBottom: '1px solid var(--border-hairline)' },
+  credPrefix: { color: 'var(--text-primary)', fontFamily: 'monospace' },
   rowTitle: { fontWeight: 600, fontSize: 14 },
   rowSub: { color: 'var(--text-muted)', fontSize: 12 },
   miniInput: { padding: '6px 8px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 11 },

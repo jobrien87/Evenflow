@@ -184,8 +184,8 @@ export default function FinancialsPanel() {
         {vendors.map((v) => (
           <div key={v.vendorId} style={s.vendorRow}>
             <div>
-              <div style={s.rowTitle}>{v.vendorName}</div>
-              <div style={s.rowSub}>{v.leadsReceived} leads · {v.status}</div>
+              <div style={s.rowTitle}>{v.vendorName} <span style={s.vendorProduct}>· {v.product}</span></div>
+              <div style={s.rowSub}>{v.leadsReceived} leads · {v.status} · ${v.totalCost.toLocaleString()} total cost</div>
             </div>
             <div style={s.costPer}>
               {v.costPerLead !== null ? `$${v.costPerLead.toFixed(2)}/lead` : 'not configured'}
@@ -247,6 +247,7 @@ const s = {
   catRow: { display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border-hairline)', fontSize: 13 },
   vendorRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 12, marginBottom: 8 },
   rowTitle: { fontWeight: 600, fontSize: 13 },
+  vendorProduct: { color: 'var(--text-muted)', fontWeight: 400 },
   rowSub: { color: 'var(--text-muted)', fontSize: 11 },
   costPer: { color: 'var(--accent)', fontSize: 13, fontWeight: 600 },
   empty: { color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 13 },

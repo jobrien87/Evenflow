@@ -24,6 +24,7 @@ export const NAV_BY_ROLE = {
     { label: 'Billing', to: '/agency/billing', icon: 'card' },
     { label: 'Training', to: '/agency/training', icon: 'book' },
     { label: 'Winbacks & Cross-Sells', to: '/agency/opportunities', icon: 'target' },
+    { label: 'Transfer History', to: '/agency/transfer-history', icon: 'transfer' },
   ],
   PLATFORM_OWNER: [
     { label: 'Agencies', to: '/platform', icon: 'agencies', primary: true },
