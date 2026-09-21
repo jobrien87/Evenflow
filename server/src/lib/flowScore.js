@@ -1,5 +1,5 @@
 // Flow Score — every component below is computed from real rows already in
-// this schema (leads, tasks, transfers, call analyses). A component with
+// this schema (leads, tasks, call analyses). A component with
 // zero underlying data points is EXCLUDED (remaining weights renormalize to
 // still sum to 100), never defaulted to some invented number — same rule
 // `lib/financialCalc.js` already uses for margin/ROI. A component with 1-2
@@ -12,13 +12,34 @@ const MIN_CONFIDENT_SAMPLE = 3;
 
 const DEFAULT_WEIGHTS = {
   PRODUCER: { responsiveness: 25, pipelineDiscipline: 20, conversion: 35, callQuality: 20 },
-  TELEMARKETER: { qualificationRate: 25, routingSuccessRate: 25, downstreamQuality: 50 },
-  AGENCY: { responseSpeed: 20, funnelHealth: 35, transferPerformance: 20, teamCallQuality: 25 },
+  // Rebuilt for the Yield Transfers rebuild: a Telemarketer's submissions
+  // are now real Lead rows (source: 'telemarketer'), not Transfers — the
+  // old routing/offer step no longer exists, so there's no analog for
+  // the old routingSuccessRate component.
+  TELEMARKETER: { leadQuality: 50, downstreamQuality: 50 },
+  AGENCY: { responseSpeed: 20, funnelHealth: 45, teamCallQuality: 35 },
 };
 
 async function getActiveWeightConfig(role) {
   const existing = await prisma.flowScoreWeightConfig.findFirst({ where: { role, isActive: true } });
-  if (existing) return existing;
+  const defaultKeys = Object.keys(DEFAULT_WEIGHTS[role]).sort().join(',');
+
+  // A config created under an OLD DEFAULT_WEIGHTS shape (e.g. before the
+  // Yield Transfers rebuild retired routingSuccessRate) would otherwise
+  // stay active forever — combineComponents' `weights[key] || 0` fallback
+  // would silently zero out every real new component. Retiring/renaming a
+  // component is a real weight-config change, not a data problem, so it
+  // gets the same version bump a manual re-tune would: deactivate the
+  // stale row and create a fresh active one.
+  if (existing) {
+    const existingKeys = Object.keys(existing.weights).sort().join(',');
+    if (existingKeys === defaultKeys) return existing;
+    await prisma.flowScoreWeightConfig.update({ where: { id: existing.id }, data: { isActive: false } });
+    return prisma.flowScoreWeightConfig.create({
+      data: { role, version: existing.version + 1, weights: DEFAULT_WEIGHTS[role], isActive: true },
+    });
+  }
+
   return prisma.flowScoreWeightConfig.create({
     data: { role, version: 1, weights: DEFAULT_WEIGHTS[role], isActive: true },
   });
@@ -150,33 +171,27 @@ async function computeProducerScore(userId) {
 
 // ---- TELEMARKETER ----
 
+const LEAD_QUALITY_FAILURES = ['BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT'];
+
 async function computeTelemarketerScore(userId) {
-  const transfers = await prisma.transfer.findMany({
-    where: { createdByTMId: userId },
-    select: { status: true, disposition: true },
+  const leads = await prisma.lead.findMany({
+    where: { createdById: userId, source: 'telemarketer' },
+    select: { status: true },
   });
 
-  const qualified = transfers.filter((t) => !['LEAD_CAPTURED', 'QUALIFYING', 'NOT_QUALIFIED'].includes(t.status));
-  const offered = transfers.filter(
-    (t) => !['LEAD_CAPTURED', 'QUALIFYING', 'NOT_QUALIFIED', 'READY', 'ROUTING', 'NO_ELIGIBLE_DESTINATION'].includes(t.status)
-  );
-  const sold = transfers.filter((t) => t.disposition === 'SOLD');
+  const goodLeads = leads.filter((l) => !LEAD_QUALITY_FAILURES.includes(l.status));
+  const sold = leads.filter((l) => l.status === 'SOLD');
 
   const rawComponents = {
-    qualificationRate: {
-      label: 'Qualification rate',
-      value: pct(qualified.length, transfers.length),
-      sampleSize: transfers.length,
-    },
-    routingSuccessRate: {
-      label: 'Routing success rate',
-      value: pct(offered.length, qualified.length),
-      sampleSize: qualified.length,
+    leadQuality: {
+      label: 'Lead quality (real contacts, not bad numbers or duplicates)',
+      value: pct(goodLeads.length, leads.length),
+      sampleSize: leads.length,
     },
     downstreamQuality: {
       label: 'Downstream sale rate (quality over quantity)',
-      value: pct(sold.length, transfers.length),
-      sampleSize: transfers.length,
+      value: pct(sold.length, leads.length),
+      sampleSize: leads.length,
     },
   };
 
@@ -196,15 +211,6 @@ async function computeAgencyScore(agencyId) {
   );
   const soldLeads = leads.filter((l) => l.status === 'SOLD');
 
-  const transfers = await prisma.transfer.findMany({
-    where: { agencyId },
-    select: { status: true },
-  });
-  const offeredTransfers = transfers.filter((t) => t.status !== 'NO_ELIGIBLE_DESTINATION');
-  const acceptedOrBeyond = transfers.filter(
-    (t) => !['LEAD_CAPTURED', 'QUALIFYING', 'NOT_QUALIFIED', 'READY', 'ROUTING', 'NO_ELIGIBLE_DESTINATION', 'OFFERED', 'REJECTED', 'MISSED', 'EXPIRED'].includes(t.status)
-  );
-
   const calls = await prisma.callAnalysis.findMany({
     where: { call: { agencyId } },
     select: { overallScore: true },
@@ -222,11 +228,6 @@ async function computeAgencyScore(agencyId) {
       label: 'Lead-to-sale conversion',
       value: pct(soldLeads.length, leads.length),
       sampleSize: leads.length,
-    },
-    transferPerformance: {
-      label: 'Transfer acceptance rate',
-      value: pct(acceptedOrBeyond.length, offeredTransfers.length),
-      sampleSize: offeredTransfers.length,
     },
     teamCallQuality: {
       label: 'Team call quality',
