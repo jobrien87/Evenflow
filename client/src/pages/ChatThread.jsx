@@ -11,7 +11,7 @@ const POLL_MS = 5000;
 // into whatever container the parent provides (no backdrop, no close
 // button) — used for the persistent agency-wide team room, which lives
 // embedded in a page rather than popped over it.
-export default function ChatThread({ entityType, entityId, title, onClose, variant = 'modal' }) {
+export default function ChatThread({ entityType, entityId, title, onClose, variant = 'modal', unread = false }) {
   const { user } = useAuth();
   const [conversationId, setConversationId] = useState(null);
   const [messages, setMessages] = useState(null);
@@ -77,7 +77,10 @@ export default function ChatThread({ entityType, entityId, title, onClose, varia
   const body = (
     <div style={inline ? s.inlineModal : s.modal} onClick={inline ? undefined : (e) => e.stopPropagation()}>
       <div style={s.header}>
-        <div style={s.title}>{title || 'DISCUSSION'}</div>
+        <div style={s.titleRow}>
+          <div style={s.title}>{title || 'DISCUSSION'}</div>
+          {unread && <span style={s.unreadDot} />}
+        </div>
         {!inline && <button style={s.closeButton} onClick={onClose}>CLOSE</button>}
       </div>
 
@@ -131,7 +134,9 @@ const s = {
   modal: { background: 'var(--bg-elevated)', border: '1px solid var(--border-strong)', borderRadius: 12, padding: 20, maxWidth: 480, width: '100%', maxHeight: '80vh', display: 'flex', flexDirection: 'column', color: 'var(--text-primary)' },
   inlineModal: { background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 'var(--radius-lg)', padding: 16, height: '100%', minHeight: 320, display: 'flex', flexDirection: 'column', color: 'var(--text-primary)' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
+  titleRow: { display: 'flex', alignItems: 'center', gap: 6 },
   title: { color: 'var(--text-secondary)', fontSize: 12, fontWeight: 700, letterSpacing: 1 },
+  unreadDot: { display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: 'var(--accent-gradient)' },
   closeButton: { padding: '6px 12px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, cursor: 'pointer', fontSize: 11 },
   thread: { flex: 1, overflowY: 'auto', minHeight: 200, display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 },
   muted: { color: 'var(--text-muted)', fontSize: 13, fontStyle: 'italic', margin: 'auto' },

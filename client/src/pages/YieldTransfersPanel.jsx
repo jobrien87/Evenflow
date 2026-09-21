@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { useIsMobile } from '../lib/useViewport';
+import { useTeamChatUnread } from '../lib/useTeamChatUnread';
 import { Card, Badge, Button, SectionHeader, EmptyState, ExportButton } from '../ui';
 import { downloadCsv, fetchAllPages } from '../lib/downloadCsv';
 import ChatThread from './ChatThread';
@@ -50,6 +51,7 @@ function tmInitials(user) {
 export default function YieldTransfersPanel() {
   const { user } = useAuth();
   const isMobile = useIsMobile();
+  const chatUnread = useTeamChatUnread();
   const [leads, setLeads] = useState([]);
   const [error, setError] = useState('');
   const [discussLead, setDiscussLead] = useState(null);
@@ -216,7 +218,7 @@ export default function YieldTransfersPanel() {
         </div>
 
         <div style={s.chatColumn}>
-          <ChatThread entityType="AGENCY" entityId={user.agencyId} variant="inline" title="TEAM CHAT" />
+          <ChatThread entityType="AGENCY" entityId={user.agencyId} variant="inline" title="TEAM CHAT" unread={chatUnread} />
         </div>
       </div>
 
