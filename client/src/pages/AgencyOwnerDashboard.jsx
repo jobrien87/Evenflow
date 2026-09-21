@@ -8,6 +8,7 @@ import FunnelMetricsCard from './FunnelMetricsCard';
 import Customer360Modal from './Customer360Modal';
 import RunningReportPage from './RunningReportPage';
 import AgencySettingsModal from './AgencySettingsModal';
+import PerformanceLeaderboards from './PerformanceLeaderboards';
 
 export default function AgencyOwnerDashboard() {
   const { user } = useAuth();
@@ -164,6 +165,10 @@ export default function AgencyOwnerDashboard() {
 
       <section style={s.section}>
         <FunnelMetricsCard scope="agency" title="AGENCY FUNNEL" onSelectStage={selectFunnelStage} />
+      </section>
+
+      <section style={s.section}>
+        <PerformanceLeaderboards agencyId={user?.agencyId} />
       </section>
 
       <section style={s.section}>

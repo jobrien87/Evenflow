@@ -75,6 +75,7 @@ export const api = {
 
   financialSummary: (params = '') => request(`/financials/summary${params}`),
   financialByVendor: (params = '') => request(`/financials/by-vendor${params}`),
+  financialByAgent: (params = '') => request(`/financials/by-agent${params}`),
   financialEvents: (params = '') => request(`/financials/events${params}`),
   createRevenueEvent: (payload) => request('/financials/revenue-events', { method: 'POST', body: payload }),
   createCostEvent: (payload) => request('/financials/cost-events', { method: 'POST', body: payload }),

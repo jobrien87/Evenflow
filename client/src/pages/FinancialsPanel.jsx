@@ -169,15 +169,21 @@ export default function FinancialsPanel() {
 
       <section style={s.section}>
         <div style={s.headerRow}>
-          <h3 style={s.h3}>VENDOR COST PER LEAD</h3>
+          <h3 style={s.h3}>VENDOR COST EFFICIENCY</h3>
           {vendors.length > 0 && (
-            <ExportButton onExport={() => downloadCsv('vendor-cost-per-lead', vendors, [
+            <ExportButton onExport={() => downloadCsv('vendor-cost-efficiency', vendors, [
               { key: 'vendorName', label: 'Vendor' },
               { key: 'product', label: 'Product' },
               { key: 'status', label: 'Status' },
               { key: 'leadsReceived', label: 'Leads Received' },
+              { key: 'quotesReceived', label: 'Quotes' },
+              { key: 'salesCount', label: 'Sales' },
+              { key: 'conversionRate', label: 'Conversion %' },
               { key: 'totalCost', label: 'Total Cost ($)' },
               { key: 'costPerLead', label: 'Cost Per Lead ($)' },
+              { key: 'costPerQuote', label: 'Cost Per Quote ($)' },
+              { key: 'costPerSale', label: 'Cost Per Sale ($)' },
+              { key: 'revenue', label: 'Revenue ($)' },
             ])} />
           )}
         </div>
@@ -185,10 +191,15 @@ export default function FinancialsPanel() {
           <div key={v.vendorId} style={s.vendorRow}>
             <div>
               <div style={s.rowTitle}>{v.vendorName} <span style={s.vendorProduct}>· {v.product}</span></div>
-              <div style={s.rowSub}>{v.leadsReceived} leads · {v.status} · ${v.totalCost.toLocaleString()} total cost</div>
+              <div style={s.rowSub}>
+                {v.leadsReceived} leads · {v.quotesReceived} quotes · {v.salesCount} sales
+                {v.conversionRate !== null && ` (${v.conversionRate}% conv.)`} · ${v.totalCost.toLocaleString()} total cost
+              </div>
             </div>
-            <div style={s.costPer}>
-              {v.costPerLead !== null ? `$${v.costPerLead.toFixed(2)}/lead` : 'not configured'}
+            <div style={s.costBreakdown}>
+              <div style={s.costLine}><span style={s.costLabel}>Cost/lead</span>{v.costPerLead !== null ? `$${v.costPerLead.toFixed(2)}` : '—'}</div>
+              <div style={s.costLine}><span style={s.costLabel}>Cost/quote</span>{v.costPerQuote !== null ? `$${v.costPerQuote.toFixed(2)}` : '—'}</div>
+              <div style={s.costLine}><span style={s.costLabel}>Cost/sale</span>{v.costPerSale !== null ? `$${v.costPerSale.toFixed(2)}` : '—'}</div>
             </div>
           </div>
         ))}
@@ -250,6 +261,9 @@ const s = {
   vendorProduct: { color: 'var(--text-muted)', fontWeight: 400 },
   rowSub: { color: 'var(--text-muted)', fontSize: 11 },
   costPer: { color: 'var(--accent)', fontSize: 13, fontWeight: 600 },
+  costBreakdown: { display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'right' },
+  costLine: { fontSize: 12, color: 'var(--accent)', fontWeight: 600 },
+  costLabel: { color: 'var(--text-muted)', fontWeight: 400, marginRight: 6 },
   empty: { color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 13 },
   aiUsageBox: { background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 16 },
   aiUsageRow: { display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 13, color: 'var(--text-secondary)' },

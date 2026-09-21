@@ -67,6 +67,15 @@ router.get('/summary', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req
   }
 });
 
+// Same "quoted or beyond" definition funnelMetrics.js's computeFunnel()
+// uses for quoteRate — one canonical definition of what counts as a
+// quote, not a second one invented here.
+const QUOTED_OR_BEYOND_STATUSES = ['QUOTE_STARTED', 'QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'];
+
+function costPer(costCents, count) {
+  return count > 0 ? Math.round(costCents / count) / 100 : null;
+}
+
 router.get('/by-vendor', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res, next) => {
   try {
     const agencyId = scopedAgencyId(req);
@@ -75,11 +84,17 @@ router.get('/by-vendor', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (r
 
     const rows = await Promise.all(
       vendors.map(async (v) => {
-        const [costAgg, leadCount] = await Promise.all([
+        const [costAgg, leads] = await Promise.all([
           prisma.costEvent.aggregate({ where: { vendorId: v.id, occurredAt: { gte: from, lte: to } }, _sum: { amountCents: true } }),
-          prisma.lead.count({ where: { vendorId: v.id, createdAt: { gte: from, lte: to } } }),
+          prisma.lead.findMany({ where: { vendorId: v.id, createdAt: { gte: from, lte: to } }, select: { status: true, salePremiumCents: true } }),
         ]);
         const costCents = costAgg._sum.amountCents || 0;
+        const leadCount = leads.length;
+        const quotedCount = leads.filter((l) => QUOTED_OR_BEYOND_STATUSES.includes(l.status)).length;
+        const soldLeads = leads.filter((l) => l.status === 'SOLD');
+        const soldCount = soldLeads.length;
+        const revenueCents = soldLeads.reduce((sum, l) => sum + (l.salePremiumCents || 0), 0);
+
         return {
           vendorId: v.id,
           vendorName: v.name,
@@ -87,12 +102,64 @@ router.get('/by-vendor', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (r
           status: v.status,
           leadsReceived: leadCount,
           totalCost: costCents / 100,
-          costPerLead: leadCount > 0 ? Math.round(costCents / leadCount) / 100 : null,
+          costPerLead: costPer(costCents, leadCount),
+          quotesReceived: quotedCount,
+          costPerQuote: costPer(costCents, quotedCount),
+          salesCount: soldCount,
+          costPerSale: costPer(costCents, soldCount),
+          conversionRate: leadCount > 0 ? Math.round((soldCount / leadCount) * 1000) / 10 : null,
+          revenue: revenueCents / 100,
         };
       })
     );
 
     return res.json({ success: true, period: { from: from.toISOString(), to: to.toISOString() }, vendors: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Agent (Producer) leaderboard — same real Lead/Flow-Score data the rest
+// of the app already computes from, just grouped per producer instead of
+// per vendor. revenue is the sum of real, entered salePremiumCents on
+// their SOLD leads (never a fabricated commission calculation).
+router.get('/by-agent', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const agencyId = scopedAgencyId(req);
+    if (req.user.role !== 'PLATFORM_OWNER' && !agencyId) {
+      return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+    }
+    const { from, to } = parseDateRange(req);
+    const producers = await prisma.user.findMany({
+      where: { agencyId, role: 'PRODUCER', status: 'ACTIVE' },
+      select: { id: true, firstName: true, lastName: true },
+    });
+
+    const rows = await Promise.all(
+      producers.map(async (p) => {
+        const [leads, scoreSnapshot] = await Promise.all([
+          prisma.lead.findMany({ where: { assignedToId: p.id, receivedAt: { gte: from, lte: to } }, select: { status: true, salePremiumCents: true } }),
+          prisma.flowScoreSnapshot.findFirst({ where: { subjectType: 'USER', subjectId: p.id }, orderBy: { computedAt: 'desc' }, select: { score: true } }),
+        ]);
+        const leadCount = leads.length;
+        const soldLeads = leads.filter((l) => l.status === 'SOLD');
+        const soldCount = soldLeads.length;
+        const revenueCents = soldLeads.reduce((sum, l) => sum + (l.salePremiumCents || 0), 0);
+
+        return {
+          userId: p.id,
+          firstName: p.firstName,
+          lastName: p.lastName,
+          leadsAssigned: leadCount,
+          salesCount: soldCount,
+          revenue: revenueCents / 100,
+          conversionRate: leadCount > 0 ? Math.round((soldCount / leadCount) * 1000) / 10 : null,
+          flowScore: scoreSnapshot ? scoreSnapshot.score : null,
+        };
+      })
+    );
+
+    return res.json({ success: true, period: { from: from.toISOString(), to: to.toISOString() }, agents: rows });
   } catch (err) {
     next(err);
   }
