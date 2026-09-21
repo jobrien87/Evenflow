@@ -16,6 +16,7 @@ export default function FinancialsPanel() {
   const [entryType, setEntryType] = useState('revenue');
   const [entryForm, setEntryForm] = useState({ category: 'OTHER', amount: '', notes: '' });
   const [entryStatus, setEntryStatus] = useState('');
+  const [loadError, setLoadError] = useState('');
 
   const isPlatformOwner = user.role === 'PLATFORM_OWNER';
 
@@ -24,12 +25,22 @@ export default function FinancialsPanel() {
   }, []);
 
   async function load() {
-    const promises = [api.financialSummary(), api.financialByVendor()];
+    setLoadError('');
+    // /financials/by-vendor now always requires a single agencyId (an
+    // unscoped platform-wide vendor breakdown isn't a real report and was
+    // a scale/N+1 risk) — Platform Owner's financials view stays
+    // aggregate-only here rather than picking one agency arbitrarily.
+    const promises = [api.financialSummary()];
+    if (!isPlatformOwner) promises.push(api.financialByVendor());
     if (isPlatformOwner) promises.push(api.edUsageSummary());
-    const results = await Promise.all(promises);
-    setSummary(results[0]);
-    setVendors(results[1].vendors);
-    if (isPlatformOwner) setAiUsage(results[2]);
+    try {
+      const results = await Promise.all(promises);
+      setSummary(results[0]);
+      if (!isPlatformOwner) setVendors(results[1].vendors);
+      if (isPlatformOwner) setAiUsage(results[1]);
+    } catch (err) {
+      setLoadError(err.data?.message || 'Could not load financials. Try refreshing.');
+    }
   }
 
   async function submitEntry(e) {
@@ -65,6 +76,16 @@ export default function FinancialsPanel() {
     ]);
   }
 
+  if (!summary && loadError) {
+    return (
+      <div style={{ color: 'var(--text-primary)' }}>
+        <div style={s.loadErrorBox}>
+          {loadError}
+          <button style={s.retryButton} onClick={load}>RETRY</button>
+        </div>
+      </div>
+    );
+  }
   if (!summary) return <div style={{ color: 'var(--text-muted)' }}>Loading…</div>;
 
   return (
@@ -167,44 +188,46 @@ export default function FinancialsPanel() {
         ))}
       </section>
 
-      <section style={s.section}>
-        <div style={s.headerRow}>
-          <h3 style={s.h3}>VENDOR COST EFFICIENCY</h3>
-          {vendors.length > 0 && (
-            <ExportButton onExport={() => downloadCsv('vendor-cost-efficiency', vendors, [
-              { key: 'vendorName', label: 'Vendor' },
-              { key: 'product', label: 'Product' },
-              { key: 'status', label: 'Status' },
-              { key: 'leadsReceived', label: 'Leads Received' },
-              { key: 'quotesReceived', label: 'Quotes' },
-              { key: 'salesCount', label: 'Sales' },
-              { key: 'conversionRate', label: 'Conversion %' },
-              { key: 'totalCost', label: 'Total Cost ($)' },
-              { key: 'costPerLead', label: 'Cost Per Lead ($)' },
-              { key: 'costPerQuote', label: 'Cost Per Quote ($)' },
-              { key: 'costPerSale', label: 'Cost Per Sale ($)' },
-              { key: 'revenue', label: 'Revenue ($)' },
-            ])} />
-          )}
-        </div>
-        {vendors.map((v) => (
-          <div key={v.vendorId} style={s.vendorRow}>
-            <div>
-              <div style={s.rowTitle}>{v.vendorName} <span style={s.vendorProduct}>· {v.product}</span></div>
-              <div style={s.rowSub}>
-                {v.leadsReceived} leads · {v.quotesReceived} quotes · {v.salesCount} sales
-                {v.conversionRate !== null && ` (${v.conversionRate}% conv.)`} · ${v.totalCost.toLocaleString()} total cost
+      {!isPlatformOwner && (
+        <section style={s.section}>
+          <div style={s.headerRow}>
+            <h3 style={s.h3}>VENDOR COST EFFICIENCY</h3>
+            {vendors.length > 0 && (
+              <ExportButton onExport={() => downloadCsv('vendor-cost-efficiency', vendors, [
+                { key: 'vendorName', label: 'Vendor' },
+                { key: 'product', label: 'Product' },
+                { key: 'status', label: 'Status' },
+                { key: 'leadsReceived', label: 'Leads Received' },
+                { key: 'quotesReceived', label: 'Quotes' },
+                { key: 'salesCount', label: 'Sales' },
+                { key: 'conversionRate', label: 'Conversion %' },
+                { key: 'totalCost', label: 'Total Cost ($)' },
+                { key: 'costPerLead', label: 'Cost Per Lead ($)' },
+                { key: 'costPerQuote', label: 'Cost Per Quote ($)' },
+                { key: 'costPerSale', label: 'Cost Per Sale ($)' },
+                { key: 'revenue', label: 'Revenue ($)' },
+              ])} />
+            )}
+          </div>
+          {vendors.map((v) => (
+            <div key={v.vendorId} style={s.vendorRow}>
+              <div>
+                <div style={s.rowTitle}>{v.vendorName} <span style={s.vendorProduct}>· {v.product}</span></div>
+                <div style={s.rowSub}>
+                  {v.leadsReceived} leads · {v.quotesReceived} quotes · {v.salesCount} sales
+                  {v.conversionRate !== null && ` (${v.conversionRate}% conv.)`} · ${v.totalCost.toLocaleString()} total cost
+                </div>
+              </div>
+              <div style={s.costBreakdown}>
+                <div style={s.costLine}><span style={s.costLabel}>Cost/lead</span>{v.costPerLead !== null ? `$${v.costPerLead.toFixed(2)}` : '—'}</div>
+                <div style={s.costLine}><span style={s.costLabel}>Cost/quote</span>{v.costPerQuote !== null ? `$${v.costPerQuote.toFixed(2)}` : '—'}</div>
+                <div style={s.costLine}><span style={s.costLabel}>Cost/sale</span>{v.costPerSale !== null ? `$${v.costPerSale.toFixed(2)}` : '—'}</div>
               </div>
             </div>
-            <div style={s.costBreakdown}>
-              <div style={s.costLine}><span style={s.costLabel}>Cost/lead</span>{v.costPerLead !== null ? `$${v.costPerLead.toFixed(2)}` : '—'}</div>
-              <div style={s.costLine}><span style={s.costLabel}>Cost/quote</span>{v.costPerQuote !== null ? `$${v.costPerQuote.toFixed(2)}` : '—'}</div>
-              <div style={s.costLine}><span style={s.costLabel}>Cost/sale</span>{v.costPerSale !== null ? `$${v.costPerSale.toFixed(2)}` : '—'}</div>
-            </div>
-          </div>
-        ))}
-        {vendors.length === 0 && <div style={s.empty}>No vendors yet.</div>}
-      </section>
+          ))}
+          {vendors.length === 0 && <div style={s.empty}>No vendors yet.</div>}
+        </section>
+      )}
 
       {isPlatformOwner && aiUsage && (
         <section style={s.section}>
@@ -235,6 +258,8 @@ function Stat({ label, value, highlight, muted }) {
 
 const s = {
   wrap: {},
+  loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', gap: 12 },
+  retryButton: { padding: '6px 14px', background: 'transparent', border: '1px solid var(--danger)', color: 'var(--danger)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700 },
   periodHeaderRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 8, flexWrap: 'wrap' },
   periodLabel: { color: 'var(--text-muted)', fontSize: 12 },
   statsRow: { display: 'flex', gap: 16, marginBottom: 16 },

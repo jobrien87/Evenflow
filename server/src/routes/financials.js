@@ -79,8 +79,15 @@ function costPer(costCents, count) {
 router.get('/by-vendor', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res, next) => {
   try {
     const agencyId = scopedAgencyId(req);
+    // Always required, even for PLATFORM_OWNER — an unscoped call here
+    // would fan out a query pair per vendor across every agency on the
+    // platform (no groupBy/batching), which isn't a real product surface
+    // anyway. Scoping to one agency removes the unbounded-N risk outright.
+    if (!agencyId) {
+      return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+    }
     const { from, to } = parseDateRange(req);
-    const vendors = await prisma.vendor.findMany({ where: agencyId ? { agencyId } : {} });
+    const vendors = await prisma.vendor.findMany({ where: { agencyId } });
 
     const rows = await Promise.all(
       vendors.map(async (v) => {
@@ -126,7 +133,9 @@ router.get('/by-vendor', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (r
 router.get('/by-agent', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
   try {
     const agencyId = scopedAgencyId(req);
-    if (req.user.role !== 'PLATFORM_OWNER' && !agencyId) {
+    // Always required, even for PLATFORM_OWNER — see /by-vendor above for
+    // why an unscoped platform-wide fan-out here isn't a real report.
+    if (!agencyId) {
       return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
     }
     const { from, to } = parseDateRange(req);
