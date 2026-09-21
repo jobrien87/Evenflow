@@ -362,6 +362,32 @@ model Lead {
   updatedAt       DateTime   @updatedAt
   archivedAt      DateTime?
 
+  // Rich intake fields captured at the moment a Telemarketer submits a
+  // lead (source: 'telemarketer') — denormalized onto the Lead itself
+  // rather than Customer, since this is an intake-time snapshot (the same
+  // reason Transfer already denormalizes contact/state fields locally).
+  // All nullable: unused for any other lead source.
+  dob               DateTime?
+  address           String?
+  city              String?
+  state             String?
+  zip               String?
+  vehicleYear       String?
+  vehicleMake       String?
+  vehicleModel      String?
+  additionalDrivers String?
+  autoClaims        String?
+  violations        String?
+  ownRent           String?
+  homeAge           String?
+  sqFootage         String?
+  homeClaims        String?
+  currentInsurance  String?
+  currentPremium    String?
+  yearsWithCarrier  String?
+  callbackTime      String?
+  tmNotes           String?
+
   events LeadEvent[]
   notes  LeadNote[]
   tasks  Task[]
@@ -1130,16 +1156,20 @@ model FlowScoreSnapshot {
 // ======================================================================
 // CHAT
 // ======================================================================
-// Scoped to a specific real entity (a Transfer or a Lead) or a direct
-// conversation between users — never a generic global chatroom. No
-// websockets: this app has zero real-time infra anywhere else either
-// (same honest tradeoff already documented for the call-processing job),
-// so the client polls while a thread is open rather than adding new paid
+// Scoped to a specific real entity: a Lead, a Transfer, or (deliberately,
+// as of the Yield Transfers rebuild) an Agency — the one persistent,
+// agency-wide team room, with real membership computed live from that
+// agency's active users + active TelemarketerAssignments rather than a
+// static participant list (see lib/agencyChat.js). No websockets: this
+// app has zero real-time infra anywhere else either (same honest
+// tradeoff already documented for the call-processing job), so the
+// client polls while a thread is open rather than adding new paid
 // infrastructure for it.
 
 enum ConversationEntityType {
   LEAD
   TRANSFER
+  AGENCY
 }
 
 model Conversation {

@@ -62,6 +62,14 @@ export function notificationTarget(notification, role) {
       if (role === 'AGENCY_OWNER' || role === 'AGENCY_MANAGER') return { path: '/agency/coaching', highlightId: id, openChat: false };
       return { path: base, highlightId: null, openChat: false };
 
+    case 'AGENCY':
+      // The persistent agency-wide team room — always a chat.message
+      // notification, always opens straight into the room rather than
+      // just highlighting something (there's no separate "row" for a
+      // room to highlight).
+      if (role === 'TELEMARKETER') return { path: '/telemarketer', highlightId: null, openChat: true };
+      return { path: '/agency/transfers', highlightId: null, openChat: true };
+
     default:
       return { path: base, highlightId: null, openChat: false };
   }

@@ -4,9 +4,14 @@ import { useAuth } from '../lib/AuthContext';
 
 const POLL_MS = 5000;
 
-// Opens (or creates) the thread scoped to a single Lead/Transfer and polls
-// for new messages while open — no websockets, matching the rest of this app.
-export default function ChatThread({ entityType, entityId, title, onClose }) {
+// Opens (or creates) the thread scoped to a single Lead/Transfer/Agency
+// and polls for new messages while open — no websockets, matching the
+// rest of this app. variant="modal" (default) is the original fixed
+// overlay; variant="inline" renders the same header/thread/input flush
+// into whatever container the parent provides (no backdrop, no close
+// button) — used for the persistent agency-wide team room, which lives
+// embedded in a page rather than popped over it.
+export default function ChatThread({ entityType, entityId, title, onClose, variant = 'modal' }) {
   const { user } = useAuth();
   const [conversationId, setConversationId] = useState(null);
   const [messages, setMessages] = useState(null);
@@ -67,48 +72,56 @@ export default function ChatThread({ entityType, entityId, title, onClose }) {
     }
   }
 
+  const inline = variant === 'inline';
+
+  const body = (
+    <div style={inline ? s.inlineModal : s.modal} onClick={inline ? undefined : (e) => e.stopPropagation()}>
+      <div style={s.header}>
+        <div style={s.title}>{title || 'DISCUSSION'}</div>
+        {!inline && <button style={s.closeButton} onClick={onClose}>CLOSE</button>}
+      </div>
+
+      <div style={s.thread}>
+        {messages === null && !error && <div style={s.muted}>Loading…</div>}
+        {messages !== null && messages.length === 0 && <div style={s.muted}>No messages yet — say something.</div>}
+        {messages?.map((m) => {
+          const mine = m.authorId === user?.id;
+          return (
+            <div key={m.id} style={s.messageRow(mine)}>
+              <div style={s.bubble(mine)}>
+                {!mine && <div style={s.author}>{m.author?.firstName} {m.author?.lastName}</div>}
+                <div>{m.content}</div>
+                <div style={s.time}>{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+              </div>
+            </div>
+          );
+        })}
+        <div ref={bottomRef} />
+      </div>
+
+      {error && <div style={s.error}>{error}</div>}
+
+      <div style={s.inputRow}>
+        <input
+          style={s.input}
+          placeholder="Type a message…"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+          disabled={!conversationId}
+        />
+        <button style={s.sendButton} disabled={sending || !draft.trim() || !conversationId} onClick={send}>
+          SEND
+        </button>
+      </div>
+    </div>
+  );
+
+  if (inline) return body;
+
   return (
     <div style={s.overlay} onClick={onClose}>
-      <div style={s.modal} onClick={(e) => e.stopPropagation()}>
-        <div style={s.header}>
-          <div style={s.title}>{title || 'DISCUSSION'}</div>
-          <button style={s.closeButton} onClick={onClose}>CLOSE</button>
-        </div>
-
-        <div style={s.thread}>
-          {messages === null && !error && <div style={s.muted}>Loading…</div>}
-          {messages !== null && messages.length === 0 && <div style={s.muted}>No messages yet — say something.</div>}
-          {messages?.map((m) => {
-            const mine = m.authorId === user?.id;
-            return (
-              <div key={m.id} style={s.messageRow(mine)}>
-                <div style={s.bubble(mine)}>
-                  {!mine && <div style={s.author}>{m.author?.firstName} {m.author?.lastName}</div>}
-                  <div>{m.content}</div>
-                  <div style={s.time}>{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-                </div>
-              </div>
-            );
-          })}
-          <div ref={bottomRef} />
-        </div>
-
-        {error && <div style={s.error}>{error}</div>}
-
-        <div style={s.inputRow}>
-          <input
-            style={s.input}
-            placeholder="Type a message…"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-            disabled={!conversationId}
-          />
-          <button style={s.sendButton} disabled={sending || !draft.trim() || !conversationId} onClick={send}>
-            SEND
-          </button>
-        </div>
-      </div>
+      {body}
     </div>
   );
 }
@@ -116,6 +129,7 @@ export default function ChatThread({ entityType, entityId, title, onClose }) {
 const s = {
   overlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2500, padding: 20 },
   modal: { background: 'var(--bg-elevated)', border: '1px solid var(--border-strong)', borderRadius: 12, padding: 20, maxWidth: 480, width: '100%', maxHeight: '80vh', display: 'flex', flexDirection: 'column', color: 'var(--text-primary)' },
+  inlineModal: { background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 'var(--radius-lg)', padding: 16, height: '100%', minHeight: 320, display: 'flex', flexDirection: 'column', color: 'var(--text-primary)' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
   title: { color: 'var(--text-secondary)', fontSize: 12, fontWeight: 700, letterSpacing: 1 },
   closeButton: { padding: '6px 12px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, cursor: 'pointer', fontSize: 11 },

@@ -3,6 +3,7 @@ const { z } = require('zod');
 const { prisma } = require('../lib/db');
 const { requireAuth } = require('../middleware/auth');
 const { getOrCreateEntityConversation, isParticipant, postMessage, markRead } = require('../lib/chat');
+const { getOrSyncAgencyConversation } = require('../lib/agencyChat');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -40,13 +41,31 @@ router.get('/conversations', async (req, res, next) => {
   }
 });
 
-// Get-or-create the thread for a specific Lead/Transfer. Tenant-scoped via
-// the entity's own agencyId — never trust a client-supplied agencyId here.
+// Get-or-create the thread for a specific Lead/Transfer, or the one
+// persistent team room for an Agency (entityId is the agencyId itself).
+// Tenant-scoped via the entity's own agencyId — never trust a
+// client-supplied agencyId for Lead/Transfer; for AGENCY the entityId IS
+// the agencyId, so the tenant check below is what does the real gating.
 router.get('/conversations/entity/:entityType/:entityId', async (req, res, next) => {
   try {
     const entityType = req.params.entityType.toUpperCase();
-    if (!['LEAD', 'TRANSFER'].includes(entityType)) {
-      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'entityType must be LEAD or TRANSFER.' });
+    if (!['LEAD', 'TRANSFER', 'AGENCY'].includes(entityType)) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'entityType must be LEAD, TRANSFER, or AGENCY.' });
+    }
+
+    if (entityType === 'AGENCY') {
+      const agencyId = req.params.entityId;
+      let allowed = req.user.role === 'PLATFORM_OWNER' || req.user.agencyId === agencyId;
+      if (!allowed && req.user.role === 'TELEMARKETER') {
+        const assignment = await prisma.telemarketerAssignment.findFirst({
+          where: { telemarketerId: req.user.id, agencyId, status: 'ACTIVE' },
+        });
+        allowed = !!assignment;
+      }
+      if (!allowed) return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+
+      const conversation = await getOrSyncAgencyConversation(agencyId);
+      return res.json({ success: true, conversation: { id: conversation.id, relatedEntityType: conversation.relatedEntityType, relatedEntityId: conversation.relatedEntityId } });
     }
 
     let agencyId, participantUserIds;
