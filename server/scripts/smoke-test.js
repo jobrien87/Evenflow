@@ -1,7 +1,11 @@
 // Real end-to-end smoke walk over live HTTP against a running server + a
 // reachable Postgres. Mirrors the README's own "pre-launch smoke test"
-// checklist (Platform -> Agency & team -> Telemarketer -> Transfer -> Sale
-// -> Money), but scripted and asserted at every step instead of eyeballed.
+// checklist (Platform -> Agency & team -> Telemarketer -> Yield Transfers
+// lead -> Team chat -> Sale -> Money), but scripted and asserted at every
+// step instead of eyeballed. Yield Transfers rebuild: a Telemarketer's
+// submission is now a real Lead (source: 'telemarketer'), instantly visible
+// to the whole agency — no accept/reject/routing gate, matching the Inferno
+// Connect reference the user asked to match.
 //
 // Requirements:
 //   - The server is running and reachable at BASE_URL (default http://localhost:4000).
@@ -140,18 +144,6 @@ async function main() {
     assertEq(r.data.agency.transfersEnabled, true, 'agency.transfersEnabled synced true');
   }
 
-  step('Ada configures transfer settings (state, product, fee) — the exact gap the README flagged as previously unwired');
-  {
-    const r = await ada.call('PATCH', `/agencies/${agencyId}/transfer-settings`, {
-      transfersEnabled: true,
-      transferStates: ['CA'],
-      products: ['Auto'],
-      transferFeeCents: 2500,
-    });
-    assertEq(r.status, 200, 'transfer-settings update status');
-    assertEq(r.data.agency.transfersEnabled, true, 'transfersEnabled true after settings update');
-  }
-
   step('Josh invites a Telemarketer and assigns them to the agency');
   let tmId, tmToken;
   const tinaEmail = `tina${RUN}.tm@smoketest.local`;
@@ -176,59 +168,104 @@ async function main() {
     assertEq(r.data.assignments.length, 1, 'tina has exactly one active assignment');
   }
 
-  let transferId;
-  step('Tina submits a qualified lead — must route to OFFERED, not NO_ELIGIBLE_DESTINATION');
+  let leadId;
+  step('Tina submits a rich lead (full Inferno-style intake) — instantly a real Lead, no accept/reject gate');
   {
-    const r = await tina.call('POST', '/transfers', {
+    const r = await tina.call('POST', '/leads', {
+      agencyId,
       product: 'Auto',
-      state: 'CA',
       firstName: 'Cathy',
       lastName: 'Customer',
       phone: '555' + RUN.padStart(7, '0'),
       email: `cathy${RUN}.customer@smoketest.local`,
+      dob: '1990-05-20T00:00:00.000Z',
+      address: '456 Oak Ave',
+      city: 'Sacramento',
+      state: 'CA',
+      zip: '95814',
+      vehicleYear: '2019',
+      vehicleMake: 'Toyota',
+      vehicleModel: 'Camry',
+      currentInsurance: 'Geico',
+      currentPremium: '110',
+      callbackTime: 'Today 4pm',
+      tmNotes: 'Ready to switch, price shopping',
     });
-    assertEq(r.status, 201, 'create transfer status');
-    assertEq(r.data.transfer.status, 'OFFERED', 'transfer routed to OFFERED');
-    transferId = r.data.transfer.id;
+    assertEq(r.status, 201, 'create lead status');
+    assertEq(r.data.lead.status, 'NEW', 'lead lands as NEW, no accept/reject step');
+    assertEq(r.data.lead.source, 'telemarketer', 'source is authoritatively telemarketer, server-set');
+    leadId = r.data.lead.id;
   }
 
-  step('Ada accepts the transfer — real-time revenue event should appear (fee was configured)');
+  step('Ada sees the lead land instantly on Yield Transfers with every intake field intact');
   {
-    const r = await ada.call('POST', `/transfers/${transferId}/accept`, {});
-    assertEq(r.status, 200, 'accept transfer status');
-    assertEq(r.data.transfer.status, 'ACCEPTED', 'transfer status ACCEPTED');
+    const r = await ada.call('GET', '/leads?source=telemarketer');
+    assertEq(r.status, 200, 'leads?source=telemarketer status');
+    const lead = r.data.leads.find((l) => l.id === leadId);
+    assertTruthy(lead, 'the just-submitted lead is visible to the Agency Owner');
+    assertEq(lead.vehicleMake, 'Toyota', 'vehicle intake field made it through');
+    assertEq(lead.currentInsurance, 'Geico', 'current-carrier intake field made it through');
+    assertEq(lead.tmNotes, 'Ready to switch, price shopping', 'TM notes field made it through');
   }
 
-  step('Ada marks Connected, then Complete');
+  step('Agency-wide team chat: Ada and Tina land in the same room and exchange real messages');
+  let agencyConvoId;
   {
-    let r = await ada.call('POST', `/transfers/${transferId}/connect`, {});
-    assertEq(r.status, 200, 'connect status');
-    assertEq(r.data.transfer.status, 'CONNECTED', 'transfer status CONNECTED');
-    r = await ada.call('POST', `/transfers/${transferId}/complete`, {});
-    assertEq(r.status, 200, 'complete status');
-    assertEq(r.data.transfer.status, 'COMPLETED', 'transfer status COMPLETED');
+    let r = await ada.call('GET', `/chat/conversations/entity/AGENCY/${agencyId}`);
+    assertEq(r.status, 200, 'ada fetches AGENCY conversation');
+    agencyConvoId = r.data.conversation.id;
+    r = await tina.call('GET', `/chat/conversations/entity/AGENCY/${agencyId}`);
+    assertEq(r.data.conversation.id, agencyConvoId, 'tina lands in the same agency-wide room');
+
+    r = await ada.call('POST', `/chat/conversations/${agencyConvoId}/messages`, { content: 'Nice work on the Cathy Customer lead!' });
+    assertEq(r.status, 201, 'ada posts to team chat');
+    r = await tina.call('POST', `/chat/conversations/${agencyConvoId}/messages`, { content: 'Thanks — follow up today at 4pm.' });
+    assertEq(r.status, 201, 'tina replies in team chat');
+
+    r = await ada.call('GET', `/chat/conversations/${agencyConvoId}/messages`);
+    assertEq(r.data.messages.length, 2, 'both team chat messages persisted');
+    assertEq(r.data.messages[1].author.firstName, 'Tina', "tina's reply is correctly attributed");
+  }
+
+  step('Per-lead DISCUSS thread is independent of the team room');
+  {
+    const r = await ada.call('GET', `/chat/conversations/entity/LEAD/${leadId}`);
+    assertEq(r.status, 200, 'ada fetches per-lead DISCUSS conversation');
+    assertTruthy(r.data.conversation.id !== agencyConvoId, 'the DISCUSS thread is a separate room from the team chat');
   }
 
   step('Ada dispositions SOLD with a $1,200 premium — must land in the real Financial Ledger');
   {
-    const r = await ada.call('POST', `/transfers/${transferId}/disposition`, {
-      disposition: 'SOLD',
+    const r = await ada.call('POST', `/leads/${leadId}/disposition`, {
+      status: 'SOLD',
       saleProduct: 'Auto',
       salePremiumCents: 120000,
     });
     assertEq(r.status, 200, 'disposition status');
-    assertEq(r.data.transfer.status, 'DISPOSITIONED', 'transfer status DISPOSITIONED');
+    assertEq(r.data.lead.status, 'SOLD', 'lead status SOLD');
   }
 
-  step('Financials summary reflects real revenue (acceptance fee + sale premium)');
+  step('Financials summary reflects the real sale premium');
   {
     const r = await ada.call('GET', '/financials/summary');
     assertEq(r.status, 200, 'financials summary status');
     // computeProfitability (lib/financialCalc.js) returns `revenue` in
-    // display dollars, not cents — $25 acceptance fee + $1,200 sale premium.
+    // display dollars, not cents — Yield Transfers no longer charges an
+    // acceptance fee (that whole gate was retired), so revenue is just the
+    // $1,200 sale premium.
     assertTruthy(r.data.revenue > 0, `revenue is real and positive (got $${r.data.revenue})`);
-    assertEq(r.data.revenue, 1225, 'revenue equals fee ($25) + sale premium ($1200)');
+    assertEq(r.data.revenue, 1200, 'revenue equals the $1200 sale premium');
     assertEq(r.data.salesRecorded, 1, 'exactly 1 sale recorded');
+  }
+
+  step("Telemarketer's and the Agency's Flow Score both update off the real Lead outcome");
+  {
+    let r = await tina.call('GET', '/flow-score/me');
+    assertEq(r.status, 200, 'tina flow score status');
+    assertTruthy(r.data.snapshot && r.data.snapshot.score !== null, 'tina has a real Flow Score after her first Lead outcome');
+    r = await ada.call('GET', `/flow-score/agency/${agencyId}`);
+    assertEq(r.status, 200, 'agency flow score status');
+    assertTruthy(r.data.snapshot && r.data.snapshot.score !== null, 'agency has a real Flow Score after the sale');
   }
 
   step('Cross-sell opportunity appears (customer now has Auto, no Home/Life)');

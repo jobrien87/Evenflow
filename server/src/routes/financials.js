@@ -29,11 +29,14 @@ router.get('/summary', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req
 
     const whereBase = { occurredAt: { gte: from, lte: to }, ...(agencyId ? { agencyId } : {}) };
 
-    const [revenueAgg, costAgg, salesCount, transferCount] = await Promise.all([
+    // Sales are now recorded via Lead disposition (Yield Transfers rebuild
+    // retired the Transfer pipeline) — updatedAt is the real timestamp of
+    // that disposition, since a Lead has no separate "soldAt" field and a
+    // SOLD lead is not normally touched again afterward.
+    const [revenueAgg, costAgg, salesCount] = await Promise.all([
       prisma.revenueEvent.aggregate({ where: whereBase, _sum: { amountCents: true } }),
       prisma.costEvent.aggregate({ where: whereBase, _sum: { amountCents: true } }),
-      prisma.transfer.count({ where: { disposition: 'SOLD', dispositionAt: { gte: from, lte: to }, ...(agencyId ? { agencyId } : {}) } }),
-      prisma.transfer.count({ where: { createdAt: { gte: from, lte: to }, ...(agencyId ? { agencyId } : {}) } }),
+      prisma.lead.count({ where: { status: 'SOLD', updatedAt: { gte: from, lte: to }, ...(agencyId ? { agencyId } : {}) } }),
     ]);
 
     const revenueCents = revenueAgg._sum.amountCents || 0;
@@ -55,7 +58,6 @@ router.get('/summary', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req
       ...profitability,
       roiPercent: roi.roiPercent,
       roiReason: roi.reason,
-      transfersCreated: transferCount,
       salesRecorded: salesCount,
       revenueByCategory: revenueByCategory.map((r) => ({ category: r.category, amount: (r._sum.amountCents || 0) / 100 })),
       costByCategory: costByCategory.map((c) => ({ category: c.category, amount: (c._sum.amountCents || 0) / 100 })),
