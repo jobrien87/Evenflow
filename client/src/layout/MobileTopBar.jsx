@@ -22,6 +22,8 @@ const s = {
     padding: '0 var(--space-4)',
     borderBottom: '1px solid var(--border-hairline)',
     background: 'var(--bg-elevated)',
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
     position: 'sticky',
     top: 0,
     zIndex: 'var(--z-sidebar)',

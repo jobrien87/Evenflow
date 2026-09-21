@@ -40,8 +40,13 @@ export default function AcceptInvitation() {
 }
 
 const s = {
-  wrap: { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)' },
-  card: { width: 380, padding: 32, background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 12, color: 'var(--text-primary)' },
+  wrap: { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' },
+  card: {
+    width: 380, padding: 32, background: 'var(--bg-elevated)',
+    backdropFilter: 'var(--glass-blur)', WebkitBackdropFilter: 'var(--glass-blur)',
+    border: '1px solid var(--border-hairline)', borderTopColor: 'var(--border-glass-highlight)',
+    borderRadius: 12, color: 'var(--text-primary)', boxShadow: 'var(--shadow-card)',
+  },
   h2: { fontWeight: 500, fontSize: 18, marginBottom: 16 },
   label: { color: 'var(--text-secondary)', fontSize: 12, display: 'block', marginBottom: 6 },
   input: { width: '100%', padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', marginBottom: 16 },

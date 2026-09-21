@@ -149,7 +149,9 @@ const s = {
     fontSize: 10, fontWeight: 700, borderRadius: '50%', width: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center',
   }),
   panel: {
-    position: 'absolute', top: 32, right: 0, width: 320, maxHeight: 420, background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)',
+    position: 'absolute', top: 32, right: 0, width: 320, maxHeight: 420, background: 'var(--bg-elevated)',
+    backdropFilter: 'var(--glass-blur)', WebkitBackdropFilter: 'var(--glass-blur)',
+    border: '1px solid var(--border-hairline)', borderTopColor: 'var(--border-glass-highlight)',
     borderRadius: 'var(--radius-md)', overflow: 'hidden', zIndex: 'var(--z-drawer)', boxShadow: 'var(--shadow-card)', display: 'flex', flexDirection: 'column',
   },
   // The sidebar's bell sits at the bottom of a narrow left column. Opening

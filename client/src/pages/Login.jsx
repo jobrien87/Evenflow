@@ -45,8 +45,13 @@ export default function Login() {
 }
 
 const styles = {
-  wrap: { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--bg)' },
-  card: { width: 360, padding: 32, background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 12 },
+  wrap: { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' },
+  card: {
+    width: 360, padding: 32, background: 'var(--bg-elevated)',
+    backdropFilter: 'var(--glass-blur)', WebkitBackdropFilter: 'var(--glass-blur)',
+    border: '1px solid var(--border-hairline)', borderTopColor: 'var(--border-glass-highlight)',
+    borderRadius: 12, boxShadow: 'var(--shadow-card)',
+  },
   logo: {
     fontFamily: 'var(--font-display)', fontWeight: 700, letterSpacing: 3, fontSize: 24, marginBottom: 24, textAlign: 'center',
     backgroundImage: 'var(--accent-gradient)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',

@@ -209,7 +209,9 @@ const s = {
   },
   panel: {
     position: 'fixed', bottom: 'calc(var(--ed-bottom, 24px) + 68px)', right: 24, width: 340, height: 460, background: 'var(--bg-elevated)',
-    border: '1px solid var(--border-hairline)', borderRadius: 'var(--radius-lg)', display: 'flex', flexDirection: 'column',
+    backdropFilter: 'var(--glass-blur)', WebkitBackdropFilter: 'var(--glass-blur)',
+    border: '1px solid var(--border-hairline)', borderTopColor: 'var(--border-glass-highlight)',
+    borderRadius: 'var(--radius-lg)', display: 'flex', flexDirection: 'column',
     zIndex: 'var(--z-drawer)', overflow: 'hidden', boxShadow: 'var(--shadow-card)',
   },
   header: { padding: '12px 16px', borderBottom: '1px solid var(--border-hairline)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },

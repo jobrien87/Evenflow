@@ -130,9 +130,9 @@ export default function ChatThread({ entityType, entityId, title, onClose, varia
 }
 
 const s = {
-  overlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2500, padding: 20 },
-  modal: { background: 'var(--bg-elevated)', border: '1px solid var(--border-strong)', borderRadius: 12, padding: 20, maxWidth: 480, width: '100%', maxHeight: '80vh', display: 'flex', flexDirection: 'column', color: 'var(--text-primary)' },
-  inlineModal: { background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 'var(--radius-lg)', padding: 16, height: '100%', minHeight: 320, display: 'flex', flexDirection: 'column', color: 'var(--text-primary)' },
+  overlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(6,7,9,0.6)', backdropFilter: 'var(--glass-blur-sm)', WebkitBackdropFilter: 'var(--glass-blur-sm)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2500, padding: 20 },
+  modal: { background: 'var(--bg-elevated)', backdropFilter: 'var(--glass-blur)', WebkitBackdropFilter: 'var(--glass-blur)', border: '1px solid var(--border-strong)', borderTopColor: 'var(--border-glass-highlight)', borderRadius: 12, padding: 20, maxWidth: 480, width: '100%', maxHeight: '80vh', display: 'flex', flexDirection: 'column', color: 'var(--text-primary)' },
+  inlineModal: { background: 'var(--bg-elevated)', backdropFilter: 'var(--glass-blur)', WebkitBackdropFilter: 'var(--glass-blur)', border: '1px solid var(--border-hairline)', borderTopColor: 'var(--border-glass-highlight)', borderRadius: 'var(--radius-lg)', padding: 16, height: '100%', minHeight: 320, display: 'flex', flexDirection: 'column', color: 'var(--text-primary)' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
   titleRow: { display: 'flex', alignItems: 'center', gap: 6 },
   title: { color: 'var(--text-secondary)', fontSize: 12, fontWeight: 700, letterSpacing: 1 },

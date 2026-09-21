@@ -16,7 +16,7 @@ export default function AppLayout() {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
+    <div style={{ minHeight: '100vh' }}>
       <GradientDefs />
       <ImpersonationBar />
       <div style={{ display: 'flex' }}>

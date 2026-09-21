@@ -6,7 +6,9 @@ export default function Modal({ onClose, title, children, maxWidth = 480 }) {
       style={{
         position: 'fixed',
         inset: 0,
-        background: 'rgba(0, 0, 0, 0.75)',
+        background: 'rgba(6, 7, 9, 0.6)',
+        backdropFilter: 'var(--glass-blur-sm)',
+        WebkitBackdropFilter: 'var(--glass-blur-sm)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -19,7 +21,10 @@ export default function Modal({ onClose, title, children, maxWidth = 480 }) {
       <div
         style={{
           background: 'var(--bg-elevated)',
+          backdropFilter: 'var(--glass-blur)',
+          WebkitBackdropFilter: 'var(--glass-blur)',
           border: '1px solid var(--border-hairline)',
+          borderTopColor: 'var(--border-glass-highlight)',
           borderRadius: 'var(--radius-lg)',
           maxWidth,
           width: '100%',

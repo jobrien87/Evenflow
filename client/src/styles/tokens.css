@@ -1,30 +1,41 @@
-/* EvenFlow design tokens — "Acid Line": matte black, acid lime/teal
-   gradient accent, thin hairline borders, high-contrast, restrained
+/* EvenFlow design tokens — "Acid Line": gunmetal glass, acid lime/teal
+   gradient accent, light hairline borders, high-contrast, restrained
    gradients used broadly (not everywhere-neon). Every page should read
-   these variables rather than hardcoding hex values. */
+   these variables rather than hardcoding hex values.
+
+   Surfaces are translucent gunmetal grey over a fixed, softly-lit body
+   backdrop (see index.css) so Card/Modal/Sidebar's backdrop-filter blur
+   has something real to pick up — the "liquid glass" look comes from
+   that blur+saturate, not from a flat color. --bg-elevated-solid is a
+   non-transparent fallback for the rare spot that can't backdrop-filter
+   (e.g. printed/export contexts). */
 
 :root {
   /* --- surfaces --- */
-  --bg: #0a0a0a;
-  --bg-elevated: #131313;
-  --bg-sunken: #050505;
-  --bg-hover: #1c1c1c;
+  --bg: #0c0e11;
+  --bg-elevated: rgba(52, 58, 66, 0.5);
+  --bg-elevated-solid: #2b3138;
+  --bg-sunken: rgba(20, 23, 27, 0.6);
+  --bg-hover: rgba(74, 82, 92, 0.55);
+  --glass-blur: blur(24px) saturate(160%);
+  --glass-blur-sm: blur(12px) saturate(140%);
 
-  /* --- borders --- */
-  --border-hairline: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.18);
-  --border-accent: rgba(198, 255, 46, 0.4);
+  /* --- borders (light gunmetal-grey hairlines, not pure white) --- */
+  --border-hairline: rgba(196, 202, 210, 0.16);
+  --border-strong: rgba(196, 202, 210, 0.32);
+  --border-accent: rgba(198, 255, 46, 0.5);
+  --border-glass-highlight: rgba(226, 230, 235, 0.22); /* top inner edge, the "glass rim" */
 
   /* --- text --- */
   --text-primary: #f6f6f1;
-  --text-secondary: #a6a6a2;
-  --text-muted: #6b6b67;
+  --text-secondary: #b7bbc1;
+  --text-muted: #82868d;
 
   /* --- accent: acid lime -> cooler teal-green --- */
   --accent: #c6ff2e;
   --accent-2: #16e0a0;
   --accent-gradient: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
-  --accent-gradient-soft: linear-gradient(135deg, rgba(198, 255, 46, 0.14), rgba(22, 224, 160, 0.14));
+  --accent-gradient-soft: linear-gradient(135deg, rgba(198, 255, 46, 0.18), rgba(22, 224, 160, 0.18));
   --accent-on: #081209; /* text/icon color placed on top of the accent fill */
 
   /* --- semantic (kept distinct from brand accent) --- */
@@ -38,8 +49,8 @@
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 16px;
-  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 8px 24px rgba(0, 0, 0, 0.45);
-  --shadow-glow-accent: 0 0 0 1px var(--border-accent), 0 0 24px rgba(198, 255, 46, 0.15);
+  --shadow-card: 0 1px 0 var(--border-glass-highlight) inset, 0 8px 32px rgba(0, 0, 0, 0.5);
+  --shadow-glow-accent: 0 0 0 1px var(--border-accent), 0 0 28px rgba(198, 255, 46, 0.22);
 
   /* --- type --- */
   --font-display: 'Unbounded', sans-serif;

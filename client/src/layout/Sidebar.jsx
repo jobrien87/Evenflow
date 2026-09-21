@@ -68,6 +68,8 @@ const s = {
     flexDirection: 'column',
     borderRight: '1px solid var(--border-hairline)',
     background: 'var(--bg-elevated)',
+    backdropFilter: 'var(--glass-blur)',
+    WebkitBackdropFilter: 'var(--glass-blur)',
   },
   logoRow: { padding: 'var(--space-5) var(--space-5) var(--space-4)' },
   logo: {

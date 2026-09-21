@@ -59,12 +59,13 @@ export default function MobileDrawer({ open, onClose }) {
 
 const s = {
   backdrop: {
-    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+    position: 'fixed', inset: 0, background: 'rgba(6,7,9,0.6)', backdropFilter: 'var(--glass-blur-sm)', WebkitBackdropFilter: 'var(--glass-blur-sm)',
     zIndex: 'var(--z-drawer)', transition: `opacity var(--dur-base) var(--ease-standard)`,
   },
   drawer: {
     position: 'fixed', top: 0, left: 0, bottom: 0, width: 260,
-    background: 'var(--bg-elevated)', borderRight: '1px solid var(--border-hairline)',
+    background: 'var(--bg-elevated)', backdropFilter: 'var(--glass-blur)', WebkitBackdropFilter: 'var(--glass-blur)',
+    borderRight: '1px solid var(--border-hairline)',
     zIndex: 'var(--z-drawer)', display: 'flex', flexDirection: 'column',
     transition: `transform var(--dur-base) var(--ease-standard)`,
   },

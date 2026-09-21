@@ -32,7 +32,8 @@ export default function MobileBottomNav() {
 const s = {
   wrap: {
     position: 'fixed', bottom: 0, left: 0, right: 0, height: 'var(--bottom-nav-h)',
-    display: 'flex', background: 'var(--bg-elevated)', borderTop: '1px solid var(--border-hairline)',
+    display: 'flex', background: 'var(--bg-elevated)', backdropFilter: 'var(--glass-blur)', WebkitBackdropFilter: 'var(--glass-blur)',
+    borderTop: '1px solid var(--border-hairline)',
     zIndex: 'var(--z-sidebar)',
   },
   item: {
