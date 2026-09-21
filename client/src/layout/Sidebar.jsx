@@ -1,6 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
-import { navForRole } from './navConfig';
+import { useTeamChatUnread } from '../lib/useTeamChatUnread';
+import { navForRole, teamChatNavPath } from './navConfig';
 import { Icon, Button } from '../ui';
 import NotificationBell from '../pages/NotificationBell';
 
@@ -8,6 +9,8 @@ export default function Sidebar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const items = navForRole(user?.role);
+  const chatUnread = useTeamChatUnread();
+  const chatPath = teamChatNavPath(user?.role);
 
   return (
     <aside style={s.wrap}>
@@ -25,6 +28,7 @@ export default function Sidebar() {
           >
             <Icon name={item.icon} size={17} />
             {item.label}
+            {chatUnread && item.to === chatPath && <span style={s.unreadDot} />}
           </NavLink>
         ))}
       </nav>
@@ -77,6 +81,10 @@ const s = {
     color: 'transparent',
   },
   nav: { flex: 1, overflowY: 'auto', padding: '0 var(--space-3)', display: 'flex', flexDirection: 'column', gap: 2 },
+  unreadDot: {
+    display: 'inline-block', width: 7, height: 7, borderRadius: '50%',
+    background: 'var(--accent-gradient)', marginLeft: 'auto',
+  },
   bottom: { padding: 'var(--space-4)', borderTop: '1px solid var(--border-hairline)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' },
   bellRow: { display: 'flex', alignItems: 'center', gap: 10 },
   userLabel: { color: 'var(--text-muted)', fontSize: 11 },

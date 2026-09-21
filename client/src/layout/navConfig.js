@@ -5,9 +5,10 @@
 export const NAV_BY_ROLE = {
   PRODUCER: [
     { label: 'Home', to: '/producer', icon: 'home', primary: true },
+    { label: 'Team Chat', to: '/producer/team-chat', icon: 'chat', primary: true },
     { label: 'Coaching', to: '/producer/coaching', icon: 'phone', primary: true },
     { label: 'Training', to: '/producer/training', icon: 'book', primary: true },
-    { label: 'Winbacks & Cross-Sells', to: '/producer/opportunities', icon: 'target', primary: true },
+    { label: 'Winbacks & Cross-Sells', to: '/producer/opportunities', icon: 'target' },
   ],
   TELEMARKETER: [
     { label: 'Home', to: '/telemarketer', icon: 'home', primary: true },
@@ -43,6 +44,16 @@ export function navForRole(role) {
 
 export function primaryNavForRole(role) {
   return navForRole(role).filter((item) => item.primary);
+}
+
+// Which nav item hosts the agency-wide team chat for a given role — used
+// to place the unread dot (useTeamChatUnread) on the right tab. null for
+// a role that isn't a chat participant (PLATFORM_OWNER).
+export function teamChatNavPath(role) {
+  if (role === 'AGENCY_OWNER' || role === 'AGENCY_MANAGER') return '/agency/transfers';
+  if (role === 'PRODUCER') return '/producer/team-chat';
+  if (role === 'TELEMARKETER') return '/telemarketer';
+  return null;
 }
 
 export function basePathForRole(role) {

@@ -57,7 +57,11 @@ router.get('/', async (req, res, next) => {
     const [leads, total] = await Promise.all([
       prisma.lead.findMany({
         where,
-        include: { customer: true, assignedTo: { select: { id: true, firstName: true, lastName: true } } },
+        include: {
+          customer: true,
+          assignedTo: { select: { id: true, firstName: true, lastName: true } },
+          createdBy: { select: { id: true, firstName: true, lastName: true } },
+        },
         orderBy: [{ priorityScore: 'desc' }, { receivedAt: 'desc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
@@ -302,6 +306,7 @@ router.get('/:leadId', async (req, res, next) => {
       include: {
         customer: true,
         assignedTo: { select: { id: true, firstName: true, lastName: true } },
+        createdBy: { select: { id: true, firstName: true, lastName: true } },
         events: { orderBy: { createdAt: 'desc' } },
         notes: { include: { author: { select: { firstName: true, lastName: true } } }, orderBy: { createdAt: 'desc' } },
         tasks: { orderBy: { createdAt: 'desc' } },

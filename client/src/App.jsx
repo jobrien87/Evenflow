@@ -10,6 +10,7 @@ import ProducerDashboard from './pages/ProducerDashboard';
 import CallsPanel from './pages/CallsPanel';
 import TrainingPanel from './pages/TrainingPanel';
 import OpportunitiesPanel from './pages/OpportunitiesPanel';
+import TeamChatPanel from './pages/TeamChatPanel';
 
 import AgencyOwnerDashboard from './pages/AgencyOwnerDashboard';
 import YieldTransfersPanel from './pages/YieldTransfersPanel';
@@ -49,6 +50,7 @@ export default function App() {
 
         <Route element={<RoleGate allow={['PRODUCER']} />}>
           <Route path="producer" element={<ProducerDashboard />} />
+          <Route path="producer/team-chat" element={<TeamChatPanel />} />
           <Route path="producer/coaching" element={<CallsPanel />} />
           <Route path="producer/training" element={<TrainingPanel />} />
           <Route path="producer/opportunities" element={<OpportunitiesPanel />} />
