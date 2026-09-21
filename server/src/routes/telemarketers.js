@@ -36,7 +36,7 @@ router.get('/me/assignments', requireRole('TELEMARKETER'), async (req, res, next
   try {
     const assignments = await prisma.telemarketerAssignment.findMany({
       where: { telemarketerId: req.user.id, status: 'ACTIVE' },
-      include: { agency: { select: { id: true, name: true, transfersEnabled: true, transferPaused: true } } },
+      include: { agency: { select: { id: true, name: true } } },
     });
     return res.json({ success: true, assignments });
   } catch (err) {

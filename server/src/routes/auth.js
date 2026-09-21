@@ -136,11 +136,11 @@ router.post('/accept-invitation', async (req, res, next) => {
       });
 
       // An Agency is created with status INVITED (see POST /agencies) and
-      // nothing else in this codebase ever advances it — without this, every
-      // agency stays permanently ineligible for transfer routing forever,
-      // since findEligibleAgency (lib/transferRouting.js) requires status
-      // ACTIVE. The owner accepting their invitation is the real-world
-      // moment the agency actually goes live, so activate it here.
+      // nothing else in this codebase ever advances it. The owner accepting
+      // their invitation is the real-world moment the agency actually goes
+      // live, so activate it here — Ed's Platform Owner context and other
+      // agency-wide counts (e.g. "3/5 agencies active") depend on this
+      // status being real, not left permanently INVITED.
       if (invitation.role === 'AGENCY_OWNER' && invitation.agencyId) {
         await tx.agency.update({
           where: { id: invitation.agencyId },
