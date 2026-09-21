@@ -12,10 +12,9 @@ import TrainingPanel from './pages/TrainingPanel';
 import OpportunitiesPanel from './pages/OpportunitiesPanel';
 
 import AgencyOwnerDashboard from './pages/AgencyOwnerDashboard';
-import TransfersPanel from './pages/TransfersPanel';
+import YieldTransfersPanel from './pages/YieldTransfersPanel';
 import VendorsPanel from './pages/VendorsPanel';
 import FinancialsPanel from './pages/FinancialsPanel';
-import AgencySettingsPanel from './pages/AgencySettingsPanel';
 import SupportPanel from './pages/SupportPanel';
 import AgencyBillingPanel from './pages/AgencyBillingPanel';
 import CoursesAdminPanel from './pages/CoursesAdminPanel';
@@ -23,7 +22,6 @@ import GoalsPanel from './pages/GoalsPanel';
 
 import AgenciesPanel from './pages/AgenciesPanel';
 import TelemarketersPanel from './pages/TelemarketersPanel';
-import CreditRequestsPanel from './pages/CreditRequestsPanel';
 import BillingPanel from './pages/BillingPanel';
 
 import TelemarketerDashboard from './pages/TelemarketerDashboard';
@@ -58,10 +56,9 @@ export default function App() {
 
         <Route element={<RoleGate allow={['AGENCY_OWNER', 'AGENCY_MANAGER']} />}>
           <Route path="agency" element={<AgencyOwnerDashboard />} />
-          <Route path="agency/transfers" element={<TransfersPanel />} />
+          <Route path="agency/transfers" element={<YieldTransfersPanel />} />
           <Route path="agency/vendors" element={<VendorsPanel />} />
           <Route path="agency/financials" element={<FinancialsPanel />} />
-          <Route path="agency/settings" element={<AgencySettingsPanel />} />
           <Route path="agency/support" element={<SupportPanel />} />
           <Route path="agency/coaching" element={<CallsPanel />} />
           <Route path="agency/billing" element={<AgencyBillingPanel />} />
@@ -74,7 +71,6 @@ export default function App() {
           <Route path="platform" element={<AgenciesPanel />} />
           <Route path="platform/telemarketers" element={<TelemarketersPanel />} />
           <Route path="platform/financials" element={<FinancialsPanel />} />
-          <Route path="platform/credits" element={<CreditRequestsPanel />} />
           <Route path="platform/support" element={<SupportPanel />} />
           <Route path="platform/billing" element={<BillingPanel />} />
           <Route path="platform/training" element={<CoursesAdminPanel />} />

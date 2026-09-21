@@ -38,7 +38,6 @@ export const api = {
 
   agencies: () => request('/agencies'),
   createAgency: (payload) => request('/agencies', { method: 'POST', body: payload }),
-  updateTransferSettings: (agencyId, payload) => request(`/agencies/${agencyId}/transfer-settings`, { method: 'PATCH', body: payload }),
   resendAgencyInvite: (agencyId) => request(`/agencies/${agencyId}/resend-invite`, { method: 'POST' }),
 
   users: (params = '') => request(`/users${params}`),
@@ -53,16 +52,11 @@ export const api = {
   endAssignment: (id) => request(`/telemarketers/assignments/${id}/end`, { method: 'POST' }),
   resendTelemarketerInvite: (id) => request(`/telemarketers/${id}/resend-invite`, { method: 'POST' }),
 
+  // Read-only — the Transfer accept/reject/routing/credit-request
+  // workflow was retired (telemarketer submissions are real Leads now,
+  // see createLead); historical Transfer data stays inspectable.
   transfers: (params = '') => request(`/transfers${params}`),
-  createTransfer: (payload) => request('/transfers', { method: 'POST', body: payload }),
-  acceptTransfer: (id) => request(`/transfers/${id}/accept`, { method: 'POST' }),
-  rejectTransfer: (id, reason) => request(`/transfers/${id}/reject`, { method: 'POST', body: { reason } }),
-  connectTransfer: (id) => request(`/transfers/${id}/connect`, { method: 'POST' }),
-  completeTransfer: (id) => request(`/transfers/${id}/complete`, { method: 'POST' }),
-  dispositionTransfer: (id, payload) => request(`/transfers/${id}/disposition`, { method: 'POST', body: payload }),
-  requestCredit: (id, payload) => request(`/transfers/${id}/credit-request`, { method: 'POST', body: payload }),
-  creditRequests: (params = '') => request(`/transfers/credit-requests${params}`),
-  decideCredit: (id, payload) => request(`/transfers/credit-requests/${id}/decide`, { method: 'POST', body: payload }),
+  transferDetail: (id) => request(`/transfers/${id}`),
 
   vendors: (params = '') => request(`/vendors${params}`),
   createVendor: (payload) => request('/vendors', { method: 'POST', body: payload }),

@@ -1,47 +1,79 @@
-import { useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import FlowScoreCard from './FlowScoreCard';
+import { useIsMobile } from '../lib/useViewport';
+import { Card, Badge, Button, SectionHeader, EmptyState } from '../ui';
+import ChatThread from './ChatThread';
 
 const PRODUCTS = ['Auto', 'Home', 'Life', 'Health'];
 
+const EMPTY_FORM = {
+  product: 'Auto',
+  firstName: '', lastName: '', phone: '', email: '',
+  dob: '', address: '', city: '', state: '', zip: '',
+  vehicleYear: '', vehicleMake: '', vehicleModel: '', additionalDrivers: '', autoClaims: '', violations: '',
+  ownRent: '', homeAge: '', sqFootage: '', homeClaims: '',
+  currentInsurance: '', currentPremium: '', yearsWithCarrier: '',
+  callbackTime: '', tmNotes: '',
+};
+
+function statusTone(status) {
+  if (status === 'SOLD') return 'accent';
+  if (['LOST', 'BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT'].includes(status)) return 'danger';
+  if (status === 'NEW') return 'warning';
+  return 'neutral';
+}
+
 export default function TelemarketerDashboard() {
-  const [transfers, setTransfers] = useState([]);
+  const isMobile = useIsMobile();
   const [assignments, setAssignments] = useState(null);
-  const [form, setForm] = useState({ product: 'Auto', state: '', firstName: '', lastName: '', phone: '', notes: '' });
+  const [agencyId, setAgencyId] = useState('');
+  const [submissions, setSubmissions] = useState([]);
+  const [form, setForm] = useState(EMPTY_FORM);
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [searchParams] = useSearchParams();
-  const highlightId = searchParams.get('highlight');
-  const handledHighlightRef = useRef(false);
 
   useEffect(() => {
-    load();
+    loadAssignments();
   }, []);
 
-  // Destination side of notification deep-linking.
   useEffect(() => {
-    if (!highlightId || handledHighlightRef.current || transfers.length === 0) return;
-    if (!transfers.some((t) => t.id === highlightId)) return;
-    handledHighlightRef.current = true;
-    document.getElementById(`transfer-${highlightId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, [highlightId, transfers]);
+    loadSubmissions();
+    const interval = setInterval(loadSubmissions, 8000);
+    return () => clearInterval(interval);
+  }, []);
 
-  async function load() {
-    const [data, assignmentData] = await Promise.all([api.transfers(), api.myAssignments()]);
-    setTransfers(data.transfers);
-    setAssignments(assignmentData.assignments);
+  async function loadAssignments() {
+    const data = await api.myAssignments();
+    setAssignments(data.assignments);
+    if (data.assignments.length === 1) setAgencyId(data.assignments[0].agency.id);
+  }
+
+  async function loadSubmissions() {
+    const data = await api.leads();
+    setSubmissions(data.leads);
+  }
+
+  function setField(key, value) {
+    setForm((f) => ({ ...f, [key]: value }));
   }
 
   async function submit(e) {
     e.preventDefault();
+    if (!agencyId) return;
     setBusy(true);
     setResult(null);
     try {
-      const res = await api.createTransfer({ ...form, state: form.state.toUpperCase() });
-      setResult(res.transfer);
-      setForm({ product: 'Auto', state: '', firstName: '', lastName: '', phone: '', notes: '' });
-      await load();
+      const payload = {
+        ...form,
+        agencyId,
+        state: form.state.toUpperCase(),
+        dob: form.dob ? new Date(form.dob).toISOString() : '',
+      };
+      const res = await api.createLead(payload);
+      setResult({ success: true });
+      setForm(EMPTY_FORM);
+      await loadSubmissions();
+      return res;
     } catch (err) {
       setResult({ error: err.data?.message || err.message });
     } finally {
@@ -49,108 +81,182 @@ export default function TelemarketerDashboard() {
     }
   }
 
+  if (assignments === null) {
+    return <div style={s.wrap}>Loading…</div>;
+  }
+
+  if (assignments.length === 0) {
+    return (
+      <div style={s.wrap}>
+        <SectionHeader>YIELD TRANSFERS</SectionHeader>
+        <div style={s.noAssignmentBanner}>
+          No offices are assigned yet. Contact Yield Operations before submitting leads — a submission has nowhere to go without an assignment.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={s.wrap}>
-      <section style={s.section}>
-        <FlowScoreCard scope="me" />
-      </section>
+      <SectionHeader>YIELD TRANSFERS</SectionHeader>
 
-      <section style={s.section}>
-        <h3 style={s.h3}>ASSIGNED OFFICES</h3>
-        {assignments === null ? (
-          <div style={s.empty}>Loading…</div>
-        ) : assignments.length === 0 ? (
-          <div style={s.noAssignmentBanner}>
-            No offices are assigned yet. Contact Yield Operations before submitting leads, a submission has nowhere to route without an assignment.
-          </div>
+      {assignments.length > 1 && (
+        <div style={s.officesRow}>
+          {assignments.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              style={s.officeChip(a.agency.id === agencyId)}
+              onClick={() => setAgencyId(a.agency.id)}
+            >
+              {a.agency.name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div style={isMobile ? s.stacked : s.split}>
+        <div style={s.formColumn}>
+          <LeadForm form={form} setField={setField} onSubmit={submit} busy={busy} result={result} />
+        </div>
+        <div style={s.chatColumn}>
+          {agencyId ? (
+            <ChatThread entityType="AGENCY" entityId={agencyId} variant="inline" title="TEAM CHAT" />
+          ) : (
+            <Card style={s.chatPlaceholder}>Select an office above to see its team chat.</Card>
+          )}
+        </div>
+      </div>
+
+      <div style={s.section}>
+        <h3 style={s.h3}>MY RECENT SUBMISSIONS</h3>
+        {submissions.length === 0 ? (
+          <EmptyState title="No submissions yet" description="Leads you submit will show up here." />
         ) : (
-          <div style={s.officesRow}>
-            {assignments.map((a) => (
-              <div key={a.id} style={s.officeChip(a.agency.transfersEnabled && !a.agency.transferPaused)}>
-                {a.agency.name}
-                {!a.agency.transfersEnabled && ' (not accepting transfers)'}
-                {a.agency.transfersEnabled && a.agency.transferPaused && ' (paused)'}
+          submissions.map((lead) => (
+            <Card key={lead.id} style={s.row}>
+              <div>
+                <div style={s.rowTitle}>
+                  {lead.customer ? `${lead.customer.firstName} ${lead.customer.lastName}` : 'Lead'} · {lead.product || ''} · {lead.state || ''}
+                </div>
+                <div style={s.rowSub}>{new Date(lead.receivedAt).toLocaleString()}</div>
               </div>
-            ))}
-          </div>
+              <Badge tone={statusTone(lead.status)}>{lead.status.replace(/_/g, ' ')}</Badge>
+            </Card>
+          ))
         )}
-      </section>
-
-      <section style={s.section}>
-        <h3 style={s.h3}>SUBMIT QUALIFIED LEAD</h3>
-        <form onSubmit={submit} style={s.form}>
-          <select style={s.input} value={form.product} onChange={(e) => setForm({ ...form, product: e.target.value })}>
-            {PRODUCTS.map((p) => (
-              <option key={p} value={p}>{p}</option>
-            ))}
-          </select>
-          <input style={s.input} placeholder="State (2-letter, e.g. FL)" maxLength={2} value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} required />
-          <input style={s.input} placeholder="First name" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} required />
-          <input style={s.input} placeholder="Last name" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} required />
-          <input style={s.input} placeholder="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-          <textarea style={{ ...s.input, minHeight: 60 }} placeholder="Notes / qualification details" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-          <button style={s.submitButton} disabled={busy} type="submit">
-            {busy ? 'Routing…' : 'SUBMIT & ROUTE'}
-          </button>
-        </form>
-        {result && (
-          <div style={s.resultBox}>
-            {result.error ? (
-              <span style={{ color: 'var(--danger)' }}>{result.error}</span>
-            ) : (
-              <>
-                <div style={s.resultStatus(result.status)}>{result.status.replace(/_/g, ' ')}</div>
-                <div style={s.resultReason}>{result.routingReason}</div>
-              </>
-            )}
-          </div>
-        )}
-      </section>
-
-      <section style={s.section}>
-        <h3 style={s.h3}>MY RECENT TRANSFERS</h3>
-        {transfers.map((t) => (
-          <div key={t.id} id={`transfer-${t.id}`} style={t.id === highlightId ? { ...s.row, ...s.rowHighlighted } : s.row} className="ui-row-stack">
-            <div>
-              <div style={s.rowTitle}>{t.firstName} {t.lastName} · {t.product} · {t.state}</div>
-              <div style={s.rowSub}>{new Date(t.createdAt).toLocaleString()}</div>
-            </div>
-            <div style={s.badge(t.status)}>{t.status.replace(/_/g, ' ')}</div>
-          </div>
-        ))}
-        {transfers.length === 0 && <div style={s.empty}>No transfers submitted yet.</div>}
-      </section>
+      </div>
     </div>
   );
 }
 
-const bandColor = (status) => {
-  if (['OFFERED', 'ACCEPTED', 'CONNECTED', 'COMPLETED', 'DISPOSITIONED'].includes(status)) return 'var(--accent)';
-  if (['NO_ELIGIBLE_DESTINATION', 'REJECTED', 'MISSED', 'FAILED', 'CANCELLED'].includes(status)) return 'var(--danger)';
-  return 'var(--warning)';
-};
+function Field({ label, children }) {
+  return (
+    <label style={s.fieldLabel}>
+      {label}
+      {children}
+    </label>
+  );
+}
+
+function LeadForm({ form, setField, onSubmit, busy, result }) {
+  return (
+    <Card style={s.formCard}>
+      <form onSubmit={onSubmit} style={s.form}>
+        <h4 style={s.formSectionTitle}>LEAD DESTINATION</h4>
+        <div style={s.formGrid}>
+          <Field label="Product">
+            <select style={s.input} value={form.product} onChange={(e) => setField('product', e.target.value)}>
+              {PRODUCTS.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </Field>
+        </div>
+
+        <h4 style={s.formSectionTitle}>CONTACT INFO</h4>
+        <div style={s.formGrid}>
+          <Field label="First name"><input style={s.input} value={form.firstName} onChange={(e) => setField('firstName', e.target.value)} required /></Field>
+          <Field label="Last name"><input style={s.input} value={form.lastName} onChange={(e) => setField('lastName', e.target.value)} required /></Field>
+          <Field label="Phone"><input style={s.input} value={form.phone} onChange={(e) => setField('phone', e.target.value)} /></Field>
+          <Field label="Email"><input style={s.input} type="email" value={form.email} onChange={(e) => setField('email', e.target.value)} /></Field>
+          <Field label="Date of birth"><input style={s.input} type="date" value={form.dob} onChange={(e) => setField('dob', e.target.value)} /></Field>
+          <Field label="Address"><input style={s.input} value={form.address} onChange={(e) => setField('address', e.target.value)} /></Field>
+          <Field label="City"><input style={s.input} value={form.city} onChange={(e) => setField('city', e.target.value)} /></Field>
+          <Field label="State"><input style={s.input} maxLength={2} value={form.state} onChange={(e) => setField('state', e.target.value)} required /></Field>
+          <Field label="ZIP"><input style={s.input} value={form.zip} onChange={(e) => setField('zip', e.target.value)} /></Field>
+        </div>
+
+        <h4 style={s.formSectionTitle}>VEHICLE INFO</h4>
+        <div style={s.formGrid}>
+          <Field label="Year"><input style={s.input} value={form.vehicleYear} onChange={(e) => setField('vehicleYear', e.target.value)} /></Field>
+          <Field label="Make"><input style={s.input} value={form.vehicleMake} onChange={(e) => setField('vehicleMake', e.target.value)} /></Field>
+          <Field label="Model"><input style={s.input} value={form.vehicleModel} onChange={(e) => setField('vehicleModel', e.target.value)} /></Field>
+          <Field label="Additional drivers"><input style={s.input} value={form.additionalDrivers} onChange={(e) => setField('additionalDrivers', e.target.value)} /></Field>
+          <Field label="Auto claims"><input style={s.input} value={form.autoClaims} onChange={(e) => setField('autoClaims', e.target.value)} /></Field>
+          <Field label="Violations"><input style={s.input} value={form.violations} onChange={(e) => setField('violations', e.target.value)} /></Field>
+        </div>
+
+        <h4 style={s.formSectionTitle}>HOME INFO</h4>
+        <div style={s.formGrid}>
+          <Field label="Own / rent"><input style={s.input} value={form.ownRent} onChange={(e) => setField('ownRent', e.target.value)} /></Field>
+          <Field label="Home age"><input style={s.input} value={form.homeAge} onChange={(e) => setField('homeAge', e.target.value)} /></Field>
+          <Field label="Sq footage"><input style={s.input} value={form.sqFootage} onChange={(e) => setField('sqFootage', e.target.value)} /></Field>
+          <Field label="Home claims"><input style={s.input} value={form.homeClaims} onChange={(e) => setField('homeClaims', e.target.value)} /></Field>
+        </div>
+
+        <h4 style={s.formSectionTitle}>CURRENT INSURANCE</h4>
+        <div style={s.formGrid}>
+          <Field label="Current carrier"><input style={s.input} value={form.currentInsurance} onChange={(e) => setField('currentInsurance', e.target.value)} /></Field>
+          <Field label="Current premium"><input style={s.input} value={form.currentPremium} onChange={(e) => setField('currentPremium', e.target.value)} /></Field>
+          <Field label="Years with carrier"><input style={s.input} value={form.yearsWithCarrier} onChange={(e) => setField('yearsWithCarrier', e.target.value)} /></Field>
+        </div>
+
+        <h4 style={s.formSectionTitle}>CALL NOTES</h4>
+        <div style={s.formGrid}>
+          <Field label="Callback time"><input style={s.input} value={form.callbackTime} onChange={(e) => setField('callbackTime', e.target.value)} /></Field>
+        </div>
+        <Field label="TM notes">
+          <textarea style={{ ...s.input, minHeight: 70 }} value={form.tmNotes} onChange={(e) => setField('tmNotes', e.target.value)} />
+        </Field>
+
+        <Button variant="primary" type="submit" disabled={busy}>{busy ? 'SUBMITTING…' : 'SUBMIT LEAD'}</Button>
+      </form>
+      {result && (
+        <div style={s.resultBox}>
+          {result.error ? (
+            <span style={{ color: 'var(--danger)' }}>{result.error}</span>
+          ) : (
+            <span style={{ color: 'var(--accent)' }}>Lead submitted — visible to the team now.</span>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
 
 const s = {
   wrap: { color: 'var(--text-primary)' },
-  section: { marginBottom: 32 },
+  section: { marginTop: 32 },
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2, marginBottom: 12 },
-  rowHighlighted: { outline: '2px solid var(--accent)', boxShadow: 'var(--shadow-glow-accent)', borderRadius: 'var(--radius-md)' },
   noAssignmentBanner: { background: 'var(--warning-soft)', border: '1px solid rgba(255, 184, 77, 0.4)', color: 'var(--warning)', padding: 14, borderRadius: 8, fontSize: 13, lineHeight: 1.5 },
-  officesRow: { display: 'flex', gap: 8, flexWrap: 'wrap' },
-  officeChip: (healthy) => ({
-    padding: '8px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600,
-    background: healthy ? 'var(--accent-gradient-soft)' : 'var(--warning-soft)', color: healthy ? 'var(--accent)' : 'var(--warning)',
-    border: `1px solid ${healthy ? 'var(--border-accent)' : 'rgba(255, 184, 77, 0.4)'}`,
+  officesRow: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 },
+  officeChip: (active) => ({
+    padding: '8px 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+    background: active ? 'var(--accent-gradient-soft)' : 'var(--bg-elevated)', color: active ? 'var(--accent)' : 'var(--text-secondary)',
+    border: `1px solid ${active ? 'var(--border-accent)' : 'var(--border-hairline)'}`,
   }),
-  form: { display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg-elevated)', padding: 20, borderRadius: 8, border: '1px solid var(--border-hairline)' },
-  input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },
-  submitButton: { padding: '12px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
-  resultBox: { marginTop: 12, padding: 14, background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 8 },
-  resultStatus: (status) => ({ fontWeight: 700, color: bandColor(status) }),
-  resultReason: { color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 },
-  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 14, marginBottom: 8 },
+  split: { display: 'grid', gridTemplateColumns: '1fr 360px', gap: 20, alignItems: 'start' },
+  stacked: { display: 'flex', flexDirection: 'column', gap: 20 },
+  formColumn: { minWidth: 0 },
+  chatColumn: { position: 'sticky', top: 0, height: 640 },
+  chatPlaceholder: { padding: 20, color: 'var(--text-muted)', fontStyle: 'italic' },
+  formCard: { padding: 20 },
+  form: { display: 'flex', flexDirection: 'column', gap: 10 },
+  formSectionTitle: { color: 'var(--text-muted)', fontSize: 11, letterSpacing: 1.5, margin: '10px 0 2px', textTransform: 'uppercase' },
+  formGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 },
+  fieldLabel: { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: 'var(--text-muted)' },
+  input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 13 },
+  resultBox: { marginTop: 12, padding: 14, background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 8, fontSize: 13 },
+  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 14, marginBottom: 8 },
   rowTitle: { fontWeight: 600, fontSize: 14 },
   rowSub: { color: 'var(--text-muted)', fontSize: 12 },
-  badge: (status) => ({ fontSize: 11, color: bandColor(status), border: `1px solid ${bandColor(status)}44`, padding: '4px 8px', borderRadius: 4 }),
-  empty: { color: 'var(--text-muted)', fontStyle: 'italic' },
 };
