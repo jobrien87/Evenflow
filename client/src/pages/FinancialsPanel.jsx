@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
+import { ExportButton } from '../ui';
+import { downloadCsv, fetchAllPages } from '../lib/downloadCsv';
 
 const REVENUE_CATEGORIES = ['SUBSCRIPTION', 'TRANSFER_REVENUE', 'LEAD_REVENUE', 'OTHER'];
 const COST_CATEGORIES = ['VENDOR_LEAD_COST', 'TELEMARKETER_COST', 'TRANSFER_COST', 'API_COST', 'CREDIT', 'REFUND', 'OTHER'];
@@ -49,12 +51,29 @@ export default function FinancialsPanel() {
     }
   }
 
+  async function exportLedger() {
+    const events = await fetchAllPages(
+      (page, pageSize) => api.financialEvents(`?from=2000-01-01&to=2100-01-01&page=${page}&pageSize=${pageSize}`),
+      { itemsKey: 'events' }
+    );
+    downloadCsv('financial-ledger', events, [
+      { key: 'type', label: 'Type' },
+      { key: 'category', label: 'Category' },
+      { key: (e) => (e.amountCents / 100).toFixed(2), label: 'Amount ($)' },
+      { key: 'occurredAt', label: 'Date' },
+      { key: 'notes', label: 'Notes' },
+    ]);
+  }
+
   if (!summary) return <div style={{ color: 'var(--text-muted)' }}>Loading…</div>;
 
   return (
     <div style={s.wrap}>
-      <div style={s.periodLabel}>
-        {new Date(summary.period.from).toLocaleDateString()} – {new Date(summary.period.to).toLocaleDateString()}
+      <div style={s.periodHeaderRow}>
+        <div style={s.periodLabel}>
+          {new Date(summary.period.from).toLocaleDateString()} – {new Date(summary.period.to).toLocaleDateString()}
+        </div>
+        <ExportButton label="EXPORT FULL LEDGER" onExport={exportLedger} />
       </div>
 
       <div style={s.statsRow}>
@@ -111,7 +130,15 @@ export default function FinancialsPanel() {
       )}
 
       <section style={s.section}>
-        <h3 style={s.h3}>REVENUE BY CATEGORY</h3>
+        <div style={s.headerRow}>
+          <h3 style={s.h3}>REVENUE BY CATEGORY</h3>
+          {summary.revenueByCategory.length > 0 && (
+            <ExportButton onExport={() => downloadCsv('revenue-by-category', summary.revenueByCategory, [
+              { key: 'category', label: 'Category' },
+              { key: 'amount', label: 'Amount ($)' },
+            ])} />
+          )}
+        </div>
         {summary.revenueByCategory.length === 0 && <div style={s.empty}>No revenue events recorded this period.</div>}
         {summary.revenueByCategory.map((r) => (
           <div key={r.category} style={s.catRow}>
@@ -122,7 +149,15 @@ export default function FinancialsPanel() {
       </section>
 
       <section style={s.section}>
-        <h3 style={s.h3}>COST BY CATEGORY</h3>
+        <div style={s.headerRow}>
+          <h3 style={s.h3}>COST BY CATEGORY</h3>
+          {summary.costByCategory.length > 0 && (
+            <ExportButton onExport={() => downloadCsv('cost-by-category', summary.costByCategory, [
+              { key: 'category', label: 'Category' },
+              { key: 'amount', label: 'Amount ($)' },
+            ])} />
+          )}
+        </div>
         {summary.costByCategory.length === 0 && <div style={s.empty}>No cost events recorded this period.</div>}
         {summary.costByCategory.map((c) => (
           <div key={c.category} style={s.catRow}>
@@ -133,7 +168,19 @@ export default function FinancialsPanel() {
       </section>
 
       <section style={s.section}>
-        <h3 style={s.h3}>VENDOR COST PER LEAD</h3>
+        <div style={s.headerRow}>
+          <h3 style={s.h3}>VENDOR COST PER LEAD</h3>
+          {vendors.length > 0 && (
+            <ExportButton onExport={() => downloadCsv('vendor-cost-per-lead', vendors, [
+              { key: 'vendorName', label: 'Vendor' },
+              { key: 'product', label: 'Product' },
+              { key: 'status', label: 'Status' },
+              { key: 'leadsReceived', label: 'Leads Received' },
+              { key: 'totalCost', label: 'Total Cost ($)' },
+              { key: 'costPerLead', label: 'Cost Per Lead ($)' },
+            ])} />
+          )}
+        </div>
         {vendors.map((v) => (
           <div key={v.vendorId} style={s.vendorRow}>
             <div>
@@ -177,7 +224,8 @@ function Stat({ label, value, highlight, muted }) {
 
 const s = {
   wrap: {},
-  periodLabel: { color: 'var(--text-muted)', fontSize: 12, marginBottom: 16 },
+  periodHeaderRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 8, flexWrap: 'wrap' },
+  periodLabel: { color: 'var(--text-muted)', fontSize: 12 },
   statsRow: { display: 'flex', gap: 16, marginBottom: 16 },
   stat: { background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 16, flex: 1, textAlign: 'center' },
   statValue: { fontSize: 24, fontWeight: 700 },

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { ExportButton } from '../ui';
+import { downloadCsv } from '../lib/downloadCsv';
 
 // A real-time assembly view over data that already persists elsewhere
 // (Flow Score snapshots, funnel metrics, call analysis, goals) — every
@@ -35,7 +37,15 @@ export default function RunningReportPage({ scope = 'me', agencyId, onClose }) {
       </div>
 
       <section style={s.section}>
-        <div style={s.sectionLabel}>FLOW SCORE</div>
+        <div style={s.sectionLabelRow}>
+          <div style={s.sectionLabel}>FLOW SCORE</div>
+          {flowScore.trend.length > 0 && (
+            <ExportButton onExport={() => downloadCsv('flow-score-trend', flowScore.trend, [
+              { key: 'computedAt', label: 'Date' },
+              { key: 'score', label: 'Score' },
+            ])} />
+          )}
+        </div>
         {!flowScore.current ? (
           <div style={s.emptyState}>Not enough activity yet to compute a Flow Score.</div>
         ) : (
@@ -70,7 +80,17 @@ export default function RunningReportPage({ scope = 'me', agencyId, onClose }) {
 
       {scope === 'me' && (
         <section style={s.section}>
-          <div style={s.sectionLabel}>RECENT CALLS</div>
+          <div style={s.sectionLabelRow}>
+            <div style={s.sectionLabel}>RECENT CALLS</div>
+            {report.recentCalls.length > 0 && (
+              <ExportButton onExport={() => downloadCsv('recent-calls', report.recentCalls, [
+                { key: 'createdAt', label: 'Date' },
+                { key: 'overallScore', label: 'Score' },
+                { key: (r) => (r.strengths || []).join('; '), label: 'Strengths' },
+                { key: (r) => (r.coachingOpportunities || []).join('; '), label: 'Coaching Opportunities' },
+              ])} />
+            )}
+          </div>
           {report.recentCalls.length === 0 ? (
             <div style={s.emptyState}>No analyzed calls yet.</div>
           ) : (
@@ -94,7 +114,17 @@ export default function RunningReportPage({ scope = 'me', agencyId, onClose }) {
 
       {scope === 'agency' && (
         <section style={s.section}>
-          <div style={s.sectionLabel}>TEAM</div>
+          <div style={s.sectionLabelRow}>
+            <div style={s.sectionLabel}>TEAM</div>
+            {report.roster.length > 0 && (
+              <ExportButton onExport={() => downloadCsv('team-flow-scores', report.roster, [
+                { key: 'firstName', label: 'First Name' },
+                { key: 'lastName', label: 'Last Name' },
+                { key: 'score', label: 'Score' },
+                { key: 'trend', label: 'Trend' },
+              ])} />
+            )}
+          </div>
           {report.roster.length === 0 ? (
             <div style={s.emptyState}>No active producers yet.</div>
           ) : (
@@ -112,7 +142,19 @@ export default function RunningReportPage({ scope = 'me', agencyId, onClose }) {
       )}
 
       <section style={s.section}>
-        <div style={s.sectionLabel}>GOALS</div>
+        <div style={s.sectionLabelRow}>
+          <div style={s.sectionLabel}>GOALS</div>
+          {goals.length > 0 && (
+            <ExportButton onExport={() => downloadCsv('goals', goals, [
+              { key: 'metric', label: 'Metric' },
+              { key: 'targetValue', label: 'Target' },
+              { key: 'actual', label: 'Actual' },
+              { key: 'progressPercent', label: 'Progress %' },
+              { key: 'periodStart', label: 'Period Start' },
+              { key: 'periodEnd', label: 'Period End' },
+            ])} />
+          )}
+        </div>
         {goals.length === 0 ? (
           <div style={s.emptyState}>No active goals for this period.</div>
         ) : (
@@ -149,7 +191,8 @@ const s = {
   h2: { fontWeight: 400, color: 'var(--text-primary)', letterSpacing: 1, fontSize: 18 },
   closeButton: { padding: '6px 12px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, cursor: 'pointer', fontSize: 11 },
   section: { background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 10, padding: 20, marginBottom: 20 },
-  sectionLabel: { color: 'var(--text-secondary)', fontSize: 12, fontWeight: 700, letterSpacing: 1, marginBottom: 12 },
+  sectionLabel: { color: 'var(--text-secondary)', fontSize: 12, fontWeight: 700, letterSpacing: 1 },
+  sectionLabelRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8 },
   scoreRow: { display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 12 },
   score: { color: 'var(--accent)', fontSize: 40, fontWeight: 800, lineHeight: 1 },
   scoreMax: { color: 'var(--text-muted)', fontSize: 14 },

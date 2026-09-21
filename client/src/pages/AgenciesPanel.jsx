@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
-import { Card, Badge, Button, StatTile, SectionHeader, EmptyState } from '../ui';
+import { Card, Badge, Button, StatTile, SectionHeader, EmptyState, ExportButton } from '../ui';
+import { downloadCsv } from '../lib/downloadCsv';
 
 function statusTone(status) {
   if (status === 'ACTIVE') return 'accent';
@@ -66,7 +67,22 @@ export default function AgenciesPanel() {
   return (
     <div style={s.wrap}>
       <SectionHeader
-        right={<Button variant="primary" size="sm" onClick={() => setShowForm(!showForm)}>+ INVITE AGENCY</Button>}
+        right={
+          <div style={{ display: 'flex', gap: 8 }}>
+            {agencies.length > 0 && (
+              <ExportButton onExport={() => downloadCsv('agencies', agencies, [
+                { key: 'name', label: 'Agency' },
+                { key: 'status', label: 'Status' },
+                { key: (a) => a.plan?.name || '', label: 'Plan' },
+                { key: (a) => (a.mrrCents / 100).toFixed(2), label: 'MRR ($)' },
+                { key: 'producerCount', label: 'Producers' },
+                { key: 'managerCount', label: 'Managers' },
+                { key: 'telemarketerCount', label: 'Telemarketers' },
+              ])} />
+            )}
+            <Button variant="primary" size="sm" onClick={() => setShowForm(!showForm)}>+ INVITE AGENCY</Button>
+          </div>
+        }
       >
         AGENCIES
       </SectionHeader>

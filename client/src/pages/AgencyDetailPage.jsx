@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
-import { Card, Badge, Button, StatTile, SectionHeader, EmptyState, Modal } from '../ui';
+import { Card, Badge, Button, StatTile, SectionHeader, EmptyState, Modal, ExportButton } from '../ui';
+import { downloadCsv } from '../lib/downloadCsv';
 
 function statusTone(status) {
   if (status === 'ACTIVE') return 'accent';
@@ -119,6 +120,24 @@ export default function AgencyDetailPage() {
         </div>
       </Card>
 
+      <SectionHeader
+        right={
+          <ExportButton onExport={() => downloadCsv(`${agency.name}-roster`, [
+            ...roster.owners.map((u) => ({ ...u, roleLabel: 'Owner' })),
+            ...roster.managers.map((u) => ({ ...u, roleLabel: 'Manager' })),
+            ...roster.producers.map((u) => ({ ...u, roleLabel: 'Producer' })),
+            ...roster.telemarketers.map((u) => ({ ...u, roleLabel: 'Telemarketer' })),
+          ], [
+            { key: 'firstName', label: 'First Name' },
+            { key: 'lastName', label: 'Last Name' },
+            { key: 'email', label: 'Email' },
+            { key: 'roleLabel', label: 'Role' },
+            { key: 'status', label: 'Status' },
+          ])} />
+        }
+      >
+        ROSTER
+      </SectionHeader>
       <div style={s.rosterGrid}>
         <RosterSection title="OWNERS" users={roster.owners} />
         <RosterSection title="MANAGERS" users={roster.managers} />

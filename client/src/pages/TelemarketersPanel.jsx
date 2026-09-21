@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { Card, Badge, Button, SectionHeader, EmptyState } from '../ui';
+import { Card, Badge, Button, SectionHeader, EmptyState, ExportButton } from '../ui';
+import { downloadCsv } from '../lib/downloadCsv';
 
 function statusTone(status) {
   if (status === 'ACTIVE') return 'accent';
@@ -78,7 +79,20 @@ export default function TelemarketersPanel() {
   return (
     <div style={s.wrap}>
       <SectionHeader
-        right={<Button variant="primary" size="sm" onClick={() => setShowInvite(!showInvite)}>+ INVITE TM</Button>}
+        right={
+          <div style={{ display: 'flex', gap: 8 }}>
+            {tms.length > 0 && (
+              <ExportButton onExport={() => downloadCsv('telemarketers', tms, [
+                { key: 'firstName', label: 'First Name' },
+                { key: 'lastName', label: 'Last Name' },
+                { key: 'email', label: 'Email' },
+                { key: 'status', label: 'Status' },
+                { key: (tm) => tm.telemarketerAssignments.map((a) => a.agency.name).join('; '), label: 'Assigned Agencies' },
+              ])} />
+            )}
+            <Button variant="primary" size="sm" onClick={() => setShowInvite(!showInvite)}>+ INVITE TM</Button>
+          </div>
+        }
       >
         TELEMARKETERS ({tms.length})
       </SectionHeader>

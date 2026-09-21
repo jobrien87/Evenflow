@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { useIsMobile } from '../lib/useViewport';
-import { Card, Badge, Button, SectionHeader, EmptyState } from '../ui';
+import { Card, Badge, Button, SectionHeader, EmptyState, ExportButton } from '../ui';
+import { downloadCsv, fetchAllPages } from '../lib/downloadCsv';
 import ChatThread from './ChatThread';
 
 const LEAD_STATUSES = [
@@ -74,6 +75,39 @@ export default function YieldTransfersPanel() {
     }
   }
 
+  // GET /leads is server-paginated (25/page) — the leads array in state
+  // is only whatever's currently loaded, so an export needs every page,
+  // not just what's on screen.
+  async function exportAllLeads() {
+    const allLeads = await fetchAllPages(
+      (page, pageSize) => api.leads(`?source=telemarketer&page=${page}&pageSize=${pageSize}`),
+      { itemsKey: 'leads' }
+    );
+    downloadCsv('yield-transfers-leads', allLeads, [
+      { key: (l) => l.customer?.firstName || '', label: 'First Name' },
+      { key: (l) => l.customer?.lastName || '', label: 'Last Name' },
+      { key: (l) => l.customer?.phone || '', label: 'Phone' },
+      { key: (l) => l.customer?.email || '', label: 'Email' },
+      { key: 'product', label: 'Product' },
+      { key: 'status', label: 'Status' },
+      { key: (l) => l.createdBy ? `${l.createdBy.firstName} ${l.createdBy.lastName}` : '', label: 'Submitted By' },
+      { key: 'receivedAt', label: 'Received At' },
+      { key: 'address', label: 'Address' },
+      { key: 'city', label: 'City' },
+      { key: 'state', label: 'State' },
+      { key: 'zip', label: 'Zip' },
+      { key: 'vehicleYear', label: 'Vehicle Year' },
+      { key: 'vehicleMake', label: 'Vehicle Make' },
+      { key: 'vehicleModel', label: 'Vehicle Model' },
+      { key: 'currentInsurance', label: 'Current Insurance' },
+      { key: 'currentPremium', label: 'Current Premium' },
+      { key: 'callbackTime', label: 'Callback Time' },
+      { key: 'tmNotes', label: 'TM Notes' },
+      { key: 'saleProduct', label: 'Sale Product' },
+      { key: (l) => l.salePremiumCents ? (l.salePremiumCents / 100).toFixed(2) : '', label: 'Sale Premium ($)' },
+    ]);
+  }
+
   const telemarketers = useMemo(() => {
     const byId = new Map();
     for (const lead of leads) {
@@ -115,7 +149,7 @@ export default function YieldTransfersPanel() {
 
   return (
     <div style={s.wrap}>
-      <SectionHeader>YIELD TRANSFERS</SectionHeader>
+      <SectionHeader right={leads.length > 0 && <ExportButton onExport={exportAllLeads} />}>YIELD TRANSFERS</SectionHeader>
       {error && <div style={s.error}>{error}</div>}
 
       {telemarketers.length > 1 && (
