@@ -153,6 +153,37 @@ router.post('/:userId/resend-invite', requireRole('AGENCY_OWNER', 'AGENCY_MANAGE
   }
 });
 
+const updateUserSchema = z.object({
+  firstName: z.string().min(1).optional(),
+  lastName: z.string().min(1).optional(),
+});
+
+// Fix a typo'd name — no edit of any kind existed on a user record after
+// invite before this (email/role intentionally stay out of scope here).
+router.patch('/:userId', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const parsed = updateUserSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+    const target = await prisma.user.findUnique({ where: { id: req.params.userId } });
+    if (!target) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (req.user.role !== 'PLATFORM_OWNER' && target.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    const updated = await prisma.user.update({ where: { id: target.id }, data: parsed.data });
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: target.agencyId,
+      action: 'user.updated', entityType: 'User', entityId: target.id,
+      before: { firstName: target.firstName, lastName: target.lastName },
+      after: parsed.data, correlationId: req.correlationId,
+    });
+    return res.json({ success: true, user: { id: updated.id, firstName: updated.firstName, lastName: updated.lastName } });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Deactivate a user — preserves all historical attribution, just blocks login.
 router.post('/:userId/deactivate', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
   try {

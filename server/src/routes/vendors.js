@@ -170,6 +170,39 @@ router.post('/:id/revoke-credential', requireRole('AGENCY_OWNER', 'PLATFORM_OWNE
   }
 });
 
+const updateVendorSchema = z.object({
+  name: z.string().min(1).optional(),
+  email: z.string().email().optional(),
+  product: z.string().min(1).optional(),
+  costPerLeadCents: z.number().int().positive().nullable().optional(),
+});
+
+// General field edit — separate from /status below, since a status
+// change has its own real side effects (notifications) that a plain
+// field edit shouldn't trigger. Vendors were permanently fixed after
+// creation except for status before this.
+router.patch('/:id', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const parsed = updateVendorSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    const vendor = await prisma.vendor.findUnique({ where: { id: req.params.id } });
+    if (!vendor) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (req.user.role !== 'PLATFORM_OWNER' && vendor.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    const updated = await prisma.vendor.update({ where: { id: vendor.id }, data: parsed.data });
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: vendor.agencyId,
+      action: 'vendor.updated', entityType: 'Vendor', entityId: vendor.id,
+      before: { name: vendor.name, email: vendor.email, product: vendor.product, costPerLeadCents: vendor.costPerLeadCents },
+      after: parsed.data, correlationId: req.correlationId,
+    });
+    return res.json({ success: true, vendor: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
 const statusSchema = z.object({ status: z.enum(['PENDING', 'TESTING', 'VERIFIED', 'LIVE', 'PAUSED']) });
 
 router.patch('/:id/status', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res, next) => {

@@ -98,6 +98,41 @@ router.get('/by-vendor', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (r
   }
 });
 
+// The raw ledger — every RevenueEvent/CostEvent row individually, merged
+// and paginated. Until now these were create-only (POST below); this is
+// the one export case that can't just reuse already-loaded client state,
+// since there was no list endpoint at all.
+router.get('/events', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const agencyId = scopedAgencyId(req);
+    if (req.user.role !== 'PLATFORM_OWNER' && !agencyId) {
+      return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+    }
+    const { from, to } = parseDateRange(req);
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const pageSize = Math.min(Math.max(parseInt(req.query.pageSize, 10) || 50, 1), 200);
+
+    const whereBase = { occurredAt: { gte: from, lte: to }, ...(agencyId ? { agencyId } : {}) };
+
+    const [revenueEvents, costEvents] = await Promise.all([
+      prisma.revenueEvent.findMany({ where: whereBase, orderBy: { occurredAt: 'desc' } }),
+      prisma.costEvent.findMany({ where: whereBase, orderBy: { occurredAt: 'desc' } }),
+    ]);
+
+    const merged = [
+      ...revenueEvents.map((e) => ({ ...e, type: 'REVENUE' })),
+      ...costEvents.map((e) => ({ ...e, type: 'COST' })),
+    ].sort((a, b) => new Date(b.occurredAt) - new Date(a.occurredAt));
+
+    const total = merged.length;
+    const events = merged.slice((page - 1) * pageSize, page * pageSize);
+
+    return res.json({ success: true, period: { from: from.toISOString(), to: to.toISOString() }, page, pageSize, total, events });
+  } catch (err) {
+    next(err);
+  }
+});
+
 const revenueEventSchema = z.object({
   agencyId: z.string().uuid().optional(),
   category: z.enum(['SUBSCRIPTION', 'TRANSFER_REVENUE', 'LEAD_REVENUE', 'OTHER']),

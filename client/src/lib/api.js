@@ -39,9 +39,15 @@ export const api = {
   agencies: () => request('/agencies'),
   createAgency: (payload) => request('/agencies', { method: 'POST', body: payload }),
   resendAgencyInvite: (agencyId) => request(`/agencies/${agencyId}/resend-invite`, { method: 'POST' }),
+  agencyDetail: (agencyId) => request(`/agencies/${agencyId}`),
+  agencyActivity: (agencyId, params = '') => request(`/agencies/${agencyId}/activity${params}`),
+  updateAgency: (agencyId, payload) => request(`/agencies/${agencyId}`, { method: 'PATCH', body: payload }),
+  updateAgencyEntitlements: (agencyId, payload) => request(`/agencies/${agencyId}/entitlements`, { method: 'PATCH', body: payload }),
+  inviteAgencyOwner: (agencyId, payload) => request(`/agencies/${agencyId}/invite-owner`, { method: 'POST', body: payload }),
 
   users: (params = '') => request(`/users${params}`),
   inviteUser: (payload) => request('/users/invite', { method: 'POST', body: payload }),
+  updateUser: (userId, payload) => request(`/users/${userId}`, { method: 'PATCH', body: payload }),
   deactivateUser: (userId) => request(`/users/${userId}/deactivate`, { method: 'POST' }),
   resendUserInvite: (userId) => request(`/users/${userId}/resend-invite`, { method: 'POST' }),
 
@@ -64,10 +70,12 @@ export const api = {
   rotateVendorCredential: (id) => request(`/vendors/${id}/rotate-credential`, { method: 'POST' }),
   revokeVendorCredential: (id) => request(`/vendors/${id}/revoke-credential`, { method: 'POST' }),
   setVendorStatus: (id, status) => request(`/vendors/${id}/status`, { method: 'PATCH', body: { status } }),
+  updateVendor: (id, payload) => request(`/vendors/${id}`, { method: 'PATCH', body: payload }),
   vendorTransactions: (id) => request(`/vendors/${id}/transactions`),
 
   financialSummary: (params = '') => request(`/financials/summary${params}`),
   financialByVendor: (params = '') => request(`/financials/by-vendor${params}`),
+  financialEvents: (params = '') => request(`/financials/events${params}`),
   createRevenueEvent: (payload) => request('/financials/revenue-events', { method: 'POST', body: payload }),
   createCostEvent: (payload) => request('/financials/cost-events', { method: 'POST', body: payload }),
 
