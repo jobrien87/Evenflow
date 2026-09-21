@@ -68,12 +68,22 @@ async function enrichAgencies(agencies) {
 }
 
 // List agencies — Platform Owner sees all (enriched with real roster/plan
-// data); Agency roles see only their own.
+// data, paginated + optionally name-filtered for scale — see the
+// GET /:agencyId/activity route below for the same page/pageSize pattern);
+// Agency roles see only their own.
 router.get('/', async (req, res, next) => {
   try {
     if (req.user.role === 'PLATFORM_OWNER') {
-      const agencies = await prisma.agency.findMany({ orderBy: { createdAt: 'desc' } });
-      return res.json({ success: true, agencies: await enrichAgencies(agencies) });
+      const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+      const pageSize = Math.min(Math.max(parseInt(req.query.pageSize, 10) || 50, 1), 100);
+      const search = (req.query.search || '').trim();
+      const where = search ? { name: { contains: search, mode: 'insensitive' } } : {};
+
+      const [total, agencies] = await Promise.all([
+        prisma.agency.count({ where }),
+        prisma.agency.findMany({ where, orderBy: { createdAt: 'desc' }, skip: (page - 1) * pageSize, take: pageSize }),
+      ]);
+      return res.json({ success: true, page, pageSize, total, agencies: await enrichAgencies(agencies) });
     }
     if (!req.user.agencyId) return res.json({ success: true, agencies: [] });
     const agency = await prisma.agency.findUnique({ where: { id: req.user.agencyId } });

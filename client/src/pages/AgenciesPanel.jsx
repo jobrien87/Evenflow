@@ -12,6 +12,13 @@ function statusTone(status) {
 
 export default function AgenciesPanel() {
   const [agencies, setAgencies] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
+  const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: '', ownerFirstName: '', ownerLastName: '', ownerEmail: '' });
   const [status, setStatus] = useState('');
@@ -19,11 +26,29 @@ export default function AgenciesPanel() {
 
   useEffect(() => {
     refresh();
-  }, []);
+  }, [page, search]);
+
+  // Debounce the search box rather than refetching on every keystroke.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setPage(1);
+      setSearch(searchInput);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   async function refresh() {
-    const data = await api.agencies();
-    setAgencies(data.agencies);
+    setLoadError('');
+    try {
+      const params = `?page=${page}&pageSize=${PAGE_SIZE}${search ? `&search=${encodeURIComponent(search)}` : ''}`;
+      const data = await api.agencies(params);
+      setAgencies(data.agencies);
+      setTotal(data.total ?? data.agencies.length);
+    } catch (err) {
+      setLoadError(err.data?.message || 'Could not load agencies. Try refreshing.');
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function resendAgency(agencyId) {
@@ -58,11 +83,31 @@ export default function AgenciesPanel() {
     }
   }
 
+  // Only real when every agency is actually loaded (no pagination in
+  // effect) — summing producers/TMs/MRR across just the current page
+  // would silently understate the real platform totals, which this app
+  // never does for a number labeled as a total.
+  const fullyLoaded = agencies.length === total;
   const totals = useMemo(() => agencies.reduce((acc, a) => ({
     producers: acc.producers + (a.producerCount || 0),
     telemarketers: acc.telemarketers + (a.telemarketerCount || 0),
     mrrCents: acc.mrrCents + (a.mrrCents || 0),
   }), { producers: 0, telemarketers: 0, mrrCents: 0 }), [agencies]);
+
+  if (loading) {
+    return <div style={s.wrap}>Loading…</div>;
+  }
+
+  if (loadError) {
+    return (
+      <div style={s.wrap}>
+        <div style={s.loadErrorBox}>
+          {loadError}
+          <Button variant="secondary" size="sm" onClick={refresh}>RETRY</Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={s.wrap}>
@@ -88,11 +133,18 @@ export default function AgenciesPanel() {
       </SectionHeader>
 
       <div style={s.statsRow}>
-        <StatTile label="Agencies" value={agencies.length} />
-        <StatTile label="Producers" value={totals.producers} />
-        <StatTile label="Telemarketers" value={totals.telemarketers} />
-        <StatTile label="MRR" value={`$${(totals.mrrCents / 100).toFixed(0)}`} />
+        <StatTile label="Agencies" value={total} />
+        {fullyLoaded && <StatTile label="Producers" value={totals.producers} />}
+        {fullyLoaded && <StatTile label="Telemarketers" value={totals.telemarketers} />}
+        {fullyLoaded && <StatTile label="MRR" value={`$${(totals.mrrCents / 100).toFixed(0)}`} />}
       </div>
+
+      <input
+        style={s.searchInput}
+        placeholder="Search agencies by name…"
+        value={searchInput}
+        onChange={(e) => setSearchInput(e.target.value)}
+      />
 
       {showForm && (
         <Card style={s.formCard}>
@@ -115,7 +167,10 @@ export default function AgenciesPanel() {
       )}
 
       {agencies.length === 0 ? (
-        <EmptyState title="EvenFlow is ready" description="Invite your first agency to get started." />
+        <EmptyState
+          title={search ? 'No agencies match' : 'EvenFlow is ready'}
+          description={search ? `No agency name contains "${search}".` : 'Invite your first agency to get started.'}
+        />
       ) : (
         <Card style={s.tableCard}>
           <div style={{ ...s.tableRow, ...s.tableHeader }}>
@@ -146,13 +201,27 @@ export default function AgenciesPanel() {
           ))}
         </Card>
       )}
+
+      {total > PAGE_SIZE && (
+        <div style={s.pagination}>
+          <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>PREV</Button>
+          <span style={s.pageLabel}>
+            Page {page} of {Math.max(1, Math.ceil(total / PAGE_SIZE))} · {total} agencies
+          </span>
+          <Button variant="secondary" size="sm" disabled={page * PAGE_SIZE >= total} onClick={() => setPage((p) => p + 1)}>NEXT</Button>
+        </div>
+      )}
     </div>
   );
 }
 
 const s = {
   wrap: { color: 'var(--text-primary)' },
+  loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   statsRow: { display: 'flex', gap: 32, marginBottom: 24, flexWrap: 'wrap' },
+  searchInput: { width: '100%', maxWidth: 360, padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', marginBottom: 16 },
+  pagination: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, marginTop: 16 },
+  pageLabel: { color: 'var(--text-muted)', fontSize: 12 },
   formCard: { marginBottom: 16 },
   form: { display: 'flex', flexDirection: 'column', gap: 10 },
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },

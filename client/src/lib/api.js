@@ -36,7 +36,7 @@ export const api = {
 
   completeTask: (id, payload) => request(`/tasks/${id}/complete`, { method: 'POST', body: payload }),
 
-  agencies: () => request('/agencies'),
+  agencies: (params = '') => request(`/agencies${params}`),
   createAgency: (payload) => request('/agencies', { method: 'POST', body: payload }),
   resendAgencyInvite: (agencyId) => request(`/agencies/${agencyId}/resend-invite`, { method: 'POST' }),
   agencyDetail: (agencyId) => request(`/agencies/${agencyId}`),
