@@ -2,8 +2,9 @@ const express = require('express');
 const { z } = require('zod');
 const rateLimit = require('express-rate-limit');
 const { prisma } = require('../lib/db');
-const { hashPassword, verifyPassword, createSession, revokeSession, SESSION_COOKIE } = require('../lib/auth');
+const { hashPassword, verifyPassword, createSession, revokeSession, revokeAllSessionsForUser, generateRawToken, hashToken, SESSION_COOKIE } = require('../lib/auth');
 const { recordAudit } = require('../lib/audit');
+const { sendPasswordResetEmail } = require('../lib/email');
 
 const router = express.Router();
 
@@ -20,6 +21,26 @@ const loginLimiter = rateLimit({
 // brute force is infeasible, but a rate limit here is still cheap
 // defense in depth against an unlimited-attempt public endpoint.
 const acceptInvitationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'RATE_LIMITED', message: 'Too many attempts. Try again later.' },
+});
+
+// Same reasoning as acceptInvitationLimiter — public, unauthenticated,
+// and (for /forgot-password specifically) also a potential account-
+// enumeration/spam vector against real inboxes, so a tighter window than
+// login's.
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'RATE_LIMITED', message: 'Too many attempts. Try again later.' },
+});
+
+const resetPasswordLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
   standardHeaders: true,
@@ -178,6 +199,107 @@ router.post('/accept-invitation', acceptInvitationLimiter, async (req, res, next
     });
 
     return res.json({ success: true, message: 'Account activated. You may now log in.' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const RESET_TOKEN_HOURS = 1;
+
+const forgotPasswordSchema = z.object({ email: z.string().email() });
+
+router.post('/forgot-password', forgotPasswordLimiter, async (req, res, next) => {
+  try {
+    const parsed = forgotPasswordSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+    const email = parsed.data.email.trim().toLowerCase();
+
+    // Always the same response whether the email matches a real, active
+    // account or not — never let this endpoint confirm/deny account
+    // existence to an unauthenticated caller.
+    const genericResponse = { success: true, message: "If that email has an account, we've sent a reset link." };
+
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user || user.status !== 'ACTIVE') {
+      return res.json(genericResponse);
+    }
+
+    // A fresh request supersedes any still-outstanding one — only one
+    // reset link should ever be live at a time.
+    await prisma.passwordResetToken.updateMany({
+      where: { userId: user.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+
+    const rawToken = generateRawToken();
+    await prisma.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        tokenHash: hashToken(rawToken),
+        expiresAt: new Date(Date.now() + RESET_TOKEN_HOURS * 60 * 60 * 1000),
+      },
+    });
+
+    const emailResult = await sendPasswordResetEmail({ to: user.email, token: rawToken });
+    if (emailResult.status !== 'SENT') {
+      console.warn(`[auth:forgot-password] email not sent (status=${emailResult.status}) for ${user.email}`);
+    }
+
+    return res.json(genericResponse);
+  } catch (err) {
+    next(err);
+  }
+});
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(10),
+  password: z.string().min(10, 'Password must be at least 10 characters.'),
+});
+
+router.post('/reset-password', resetPasswordLimiter, async (req, res, next) => {
+  try {
+    const parsed = resetPasswordSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+
+    const tokenHash = hashToken(parsed.data.token);
+    const resetToken = await prisma.passwordResetToken.findUnique({ where: { tokenHash } });
+    if (!resetToken) {
+      return res.status(404).json({ success: false, error: 'RESET_TOKEN_NOT_FOUND' });
+    }
+    if (resetToken.usedAt) {
+      return res.status(409).json({ success: false, error: 'RESET_TOKEN_ALREADY_USED' });
+    }
+    if (resetToken.expiresAt < new Date()) {
+      return res.status(410).json({ success: false, error: 'RESET_TOKEN_EXPIRED' });
+    }
+
+    const passwordHash = await hashPassword(parsed.data.password);
+
+    const user = await prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({ where: { id: resetToken.userId }, data: { passwordHash } });
+      await tx.passwordResetToken.update({ where: { id: resetToken.id }, data: { usedAt: new Date() } });
+      return updated;
+    });
+
+    // A password reset is exactly the moment a stolen/leaked session
+    // should stop working, not just future logins.
+    await revokeAllSessionsForUser(user.id);
+
+    await recordAudit({
+      actorId: user.id,
+      actorRole: user.role,
+      agencyId: user.agencyId,
+      action: 'user.password_reset',
+      entityType: 'User',
+      entityId: user.id,
+      correlationId: req.correlationId,
+    });
+
+    return res.json({ success: true, message: 'Password updated. You may now log in.' });
   } catch (err) {
     next(err);
   }

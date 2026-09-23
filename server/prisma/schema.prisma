@@ -230,9 +230,22 @@ model User {
   trainingAssignments TrainingAssignment[]
   conversationParticipants ConversationParticipant[]
   messagesAuthored   Message[]
+  passwordResetTokens PasswordResetToken[]
 
   @@index([agencyId])
   @@index([role])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
 }
 
 model Invitation {

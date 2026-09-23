@@ -5,6 +5,7 @@ import RoleGate from './layout/RoleGate';
 import AppLayout from './layout/AppLayout';
 import Login from './pages/Login';
 import AcceptInvitation from './pages/AcceptInvitation';
+import ResetPassword from './pages/ResetPassword';
 
 import ProducerDashboard from './pages/ProducerDashboard';
 import CallsPanel from './pages/CallsPanel';
@@ -46,6 +47,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/accept-invitation" element={<AcceptInvitation />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
 
       <Route element={<RequireAuth />}>
         <Route index element={<RoleRedirect />} />

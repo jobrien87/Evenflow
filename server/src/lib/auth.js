@@ -54,6 +54,15 @@ async function revokeSession(rawToken) {
   });
 }
 
+// Used on password reset — a stolen session shouldn't survive the account
+// owner locking them out by changing the password.
+async function revokeAllSessionsForUser(userId) {
+  await prisma.session.updateMany({
+    where: { userId, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+}
+
 module.exports = {
   SESSION_COOKIE,
   hashPassword,
@@ -61,6 +70,7 @@ module.exports = {
   createSession,
   getSessionUser,
   revokeSession,
+  revokeAllSessionsForUser,
   generateRawToken,
   hashToken,
 };
