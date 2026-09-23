@@ -1,4 +1,5 @@
 const { prisma } = require('./db');
+const { isConfigured, sendEmail } = require('./email');
 
 async function getAgencyOwnerIds(agencyId) {
   const owners = await prisma.user.findMany({
@@ -18,20 +19,11 @@ async function notifyUser({ userId, agencyId, type, severity = 'INFO', title, bo
   });
 
   const emailEnabled = !pref || pref.emailEnabled;
-  if (emailEnabled && process.env.RESEND_API_KEY) {
+  if (emailEnabled && isConfigured()) {
     try {
       const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
       if (user) {
-        await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            from: process.env.EMAIL_FROM || 'EvenFlow <no-reply@evenflow.app>',
-            to: user.email,
-            subject: title,
-            html: `<p>${body || title}</p>`,
-          }),
-        });
+        await sendEmail({ to: user.email, subject: title, html: `<p>${body || title}</p>` });
       }
     } catch (err) {
       console.error('[notifications] email send failed', err.message);

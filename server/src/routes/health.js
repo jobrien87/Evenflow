@@ -1,5 +1,6 @@
 const express = require('express');
 const { prisma } = require('../lib/db');
+const { isConfigured: emailConfigured } = require('../lib/email');
 
 const router = express.Router();
 
@@ -13,7 +14,7 @@ router.get('/', async (req, res) => {
     status.database = 'DOWN';
   }
 
-  status.email = process.env.RESEND_API_KEY ? 'HEALTHY' : 'NOT_CONFIGURED';
+  status.email = emailConfigured() ? 'HEALTHY' : 'NOT_CONFIGURED';
 
   const overall = status.database === 'HEALTHY' ? 'ok' : 'degraded';
   res.status(overall === 'ok' ? 200 : 503).json({ status: overall, checks: status, time: new Date().toISOString() });
