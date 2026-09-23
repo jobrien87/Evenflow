@@ -1,8 +1,11 @@
 // Email service adapter — Brevo transactional email API (plain fetch, no
-// SDK, same pattern this codebase already uses for Resend/Anthropic calls).
-// If BREVO_API_KEY is not configured, we do NOT pretend the email sent. We
-// record it as NOT_CONFIGURED so the UI can show an honest state instead of
-// a false success.
+// SDK, same pattern this codebase already uses for the Anthropic calls).
+// Uses Brevo's HTTPS API rather than its SMTP relay: this dev sandbox's
+// outbound network only proxies HTTPS (see /root/.ccr/README.md), and SMTP
+// ports are commonly throttled/blocked on other hosts too — HTTPS is the
+// reliable path everywhere. If BREVO_API_KEY is not configured, we do NOT
+// pretend the email sent. We record it as NOT_CONFIGURED so the UI can show
+// an honest state instead of a false success.
 
 const APP_URL = process.env.APP_URL || 'http://localhost:5173';
 const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
