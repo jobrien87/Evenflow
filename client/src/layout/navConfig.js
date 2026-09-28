@@ -1,6 +1,10 @@
 // Role -> ordered nav items. `primary: true` marks the items promoted to
 // the mobile bottom tab bar (kept to a handful per role so the brief's
-// critical mobile workflows are each one tap away).
+// critical mobile workflows are each one tap away). `secondary: true`
+// marks items rendered in their own block at the BOTTOM of the desktop
+// sidebar/mobile drawer, just above the account controls (Log out) —
+// utility/admin tabs that don't need to compete with daily work tabs for
+// top-of-list attention.
 
 export const NAV_BY_ROLE = {
   PRODUCER: [
@@ -16,18 +20,18 @@ export const NAV_BY_ROLE = {
     { label: 'Record Store', to: '/telemarketer/record-store', icon: 'vinyl', stub: true },
   ],
   AGENCY_OWNER: [
-    { label: 'Team & Leads', to: '/agency', icon: 'home', primary: true },
+    { label: 'Main Stage', to: '/agency', icon: 'home', primary: true },
     { label: 'Yield Transfers', to: '/agency/transfers', icon: 'transfer', primary: true },
     { label: 'Financials', to: '/agency/financials', icon: 'dollar', primary: true },
     { label: 'Goals', to: '/agency/goals', icon: 'flag', primary: true },
     { label: 'Vendors', to: '/agency/vendors', icon: 'vendor' },
     { label: 'Support', to: '/agency/support', icon: 'support' },
-    { label: 'Coaching', to: '/agency/coaching', icon: 'phone' },
-    { label: 'Billing', to: '/agency/billing', icon: 'card' },
     { label: 'Training', to: '/agency/training', icon: 'book' },
     { label: 'Winbacks & Cross-Sells', to: '/agency/opportunities', icon: 'target' },
     { label: 'Transfer History', to: '/agency/transfer-history', icon: 'transfer' },
-    { label: 'Record Store', to: '/agency/record-store', icon: 'vinyl', stub: true },
+    { label: 'Billing', to: '/agency/billing', icon: 'card', secondary: true },
+    { label: 'Record Store', to: '/agency/record-store', icon: 'vinyl', stub: true, secondary: true },
+    { label: 'Coaching', to: '/agency/coaching', icon: 'phone', secondary: true },
   ],
   PLATFORM_OWNER: [
     { label: 'Agencies', to: '/platform', icon: 'agencies', primary: true },
@@ -49,6 +53,16 @@ export function navForRole(role) {
 
 export function primaryNavForRole(role) {
   return navForRole(role).filter((item) => item.primary);
+}
+
+// The two blocks the desktop Sidebar / mobile drawer render separately —
+// main work tabs up top, secondary/utility tabs pinned above Log out.
+export function mainNavForRole(role) {
+  return navForRole(role).filter((item) => !item.secondary);
+}
+
+export function secondaryNavForRole(role) {
+  return navForRole(role).filter((item) => item.secondary);
 }
 
 // Which nav item hosts the agency-wide team chat for a given role — used

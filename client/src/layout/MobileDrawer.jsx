@@ -1,14 +1,30 @@
 import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
-import { navForRole } from './navConfig';
+import { mainNavForRole, secondaryNavForRole } from './navConfig';
 import { Icon, Button, ComingSoonModal } from '../ui';
 
 export default function MobileDrawer({ open, onClose }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const items = navForRole(user?.role);
+  const mainItems = mainNavForRole(user?.role);
+  const secondaryItems = secondaryNavForRole(user?.role);
   const [stubOpen, setStubOpen] = useState(false);
+
+  function renderItem(item) {
+    return (
+      <NavLink
+        key={item.to}
+        to={item.to}
+        end={item.to.split('/').length === 2}
+        className={({ isActive }) => `ui-nav-link${isActive ? ' active' : ''}`}
+        onClick={item.stub ? (e) => { e.preventDefault(); setStubOpen(true); onClose(); } : onClose}
+      >
+        <Icon name={item.icon} size={17} />
+        {item.label}
+      </NavLink>
+    );
+  }
 
   return (
     <>
@@ -25,19 +41,14 @@ export default function MobileDrawer({ open, onClose }) {
         </div>
 
         <nav style={s.nav}>
-          {items.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.to.split('/').length === 2}
-              className={({ isActive }) => `ui-nav-link${isActive ? ' active' : ''}`}
-              onClick={item.stub ? (e) => { e.preventDefault(); setStubOpen(true); onClose(); } : onClose}
-            >
-              <Icon name={item.icon} size={17} />
-              {item.label}
-            </NavLink>
-          ))}
+          {mainItems.map(renderItem)}
         </nav>
+
+        {secondaryItems.length > 0 && (
+          <nav style={s.secondaryNav}>
+            {secondaryItems.map(renderItem)}
+          </nav>
+        )}
 
         <div style={s.bottom}>
           <div style={s.userLabel}>{user?.firstName} · {user?.role.replace('_', ' ')}</div>
@@ -86,6 +97,7 @@ const s = {
   },
   closeButton: { background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex' },
   nav: { flex: 1, overflowY: 'auto', padding: '0 var(--space-3)', display: 'flex', flexDirection: 'column', gap: 2 },
+  secondaryNav: { padding: '0 var(--space-3) var(--space-2)', borderTop: '1px solid var(--border-hairline)', paddingTop: 'var(--space-2)', display: 'flex', flexDirection: 'column', gap: 2 },
   bottom: { padding: 'var(--space-4)', borderTop: '1px solid var(--border-hairline)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' },
   userLabel: { color: 'var(--text-muted)', fontSize: 11 },
 };

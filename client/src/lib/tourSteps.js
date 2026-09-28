@@ -23,7 +23,7 @@ const STEPS_BY_ROLE = {
   ],
   AGENCY_OWNER: [
     { icon: 'home', title: 'Welcome to EvenFlow', body: "Quick lap around the app — under a minute, skip anytime." },
-    { icon: 'home', title: 'Team & Leads', body: 'Your home base — full roster, live leads, and your Agency Flow Score.' },
+    { icon: 'home', title: 'Main Stage', body: 'Your home base — full roster, live leads, and your Agency Flow Score.' },
     { icon: 'trophy', title: 'Leaderboards', body: 'Vendor and producer rankings, right on your dashboard — see who is actually earning their keep.' },
     { icon: 'transfer', title: 'Yield Transfers', body: 'Every telemarketer-submitted lead lands here instantly, with a live team chat right alongside it.' },
     { icon: 'dollar', title: 'Financials', body: 'Revenue, cost, margin, and vendor cost-efficiency — real numbers, not vibes.' },

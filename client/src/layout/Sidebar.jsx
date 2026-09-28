@@ -2,17 +2,34 @@ import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { useTeamChatUnread } from '../lib/useTeamChatUnread';
-import { navForRole, teamChatNavPath } from './navConfig';
+import { mainNavForRole, secondaryNavForRole, teamChatNavPath } from './navConfig';
 import { Icon, Button, ComingSoonModal } from '../ui';
 import NotificationBell from '../pages/NotificationBell';
 
 export default function Sidebar({ onTakeTour }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const items = navForRole(user?.role);
+  const mainItems = mainNavForRole(user?.role);
+  const secondaryItems = secondaryNavForRole(user?.role);
   const chatUnread = useTeamChatUnread();
   const chatPath = teamChatNavPath(user?.role);
   const [stubOpen, setStubOpen] = useState(false);
+
+  function renderItem(item) {
+    return (
+      <NavLink
+        key={item.to}
+        to={item.to}
+        end={item.to.split('/').length === 2}
+        className={({ isActive }) => `ui-nav-link${isActive ? ' active' : ''}`}
+        onClick={item.stub ? (e) => { e.preventDefault(); setStubOpen(true); } : undefined}
+      >
+        <Icon name={item.icon} size={17} />
+        {item.label}
+        {chatUnread && item.to === chatPath && <span style={s.unreadDot} />}
+      </NavLink>
+    );
+  }
 
   return (
     <aside style={s.wrap}>
@@ -21,20 +38,14 @@ export default function Sidebar({ onTakeTour }) {
       </div>
 
       <nav style={s.nav}>
-        {items.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.to.split('/').length === 2}
-            className={({ isActive }) => `ui-nav-link${isActive ? ' active' : ''}`}
-            onClick={item.stub ? (e) => { e.preventDefault(); setStubOpen(true); } : undefined}
-          >
-            <Icon name={item.icon} size={17} />
-            {item.label}
-            {chatUnread && item.to === chatPath && <span style={s.unreadDot} />}
-          </NavLink>
-        ))}
+        {mainItems.map(renderItem)}
       </nav>
+
+      {secondaryItems.length > 0 && (
+        <nav style={s.secondaryNav}>
+          {secondaryItems.map(renderItem)}
+        </nav>
+      )}
 
       <div style={s.bottom}>
         <div style={s.bellRow}>
@@ -97,6 +108,7 @@ const s = {
     color: 'transparent',
   },
   nav: { flex: 1, overflowY: 'auto', padding: '0 var(--space-3)', display: 'flex', flexDirection: 'column', gap: 2 },
+  secondaryNav: { padding: '0 var(--space-3) var(--space-2)', borderTop: '1px solid var(--border-hairline)', paddingTop: 'var(--space-2)', display: 'flex', flexDirection: 'column', gap: 2 },
   unreadDot: {
     display: 'inline-block', width: 7, height: 7, borderRadius: '50%',
     background: 'var(--accent-gradient)', marginLeft: 'auto',
