@@ -44,6 +44,13 @@ app.use(
     credentials: true,
   })
 );
+// Stripe webhook signature verification needs the exact raw request bytes,
+// so this one route is mounted with express.raw() before the app-wide
+// express.json() below (which would otherwise parse/re-serialize the body
+// and break the signature check).
+app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+  billingRoutes.handleStripeWebhook(req, res);
+});
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));

@@ -5,6 +5,7 @@ const { prisma } = require('../lib/db');
 const { hashPassword, verifyPassword, createSession, revokeSession, revokeAllSessionsForUser, generateRawToken, hashToken, SESSION_COOKIE } = require('../lib/auth');
 const { recordAudit } = require('../lib/audit');
 const { sendPasswordResetEmail } = require('../lib/email');
+const { syncSeatCountForAgency } = require('../lib/seatBilling');
 
 const router = express.Router();
 
@@ -213,6 +214,8 @@ router.post('/accept-invitation', acceptInvitationLimiter, async (req, res, next
       entityId: result.id,
       correlationId: req.correlationId,
     });
+
+    if (result.agencyId) await syncSeatCountForAgency(result.agencyId);
 
     return res.json({ success: true, message: 'Account activated. You may now log in.' });
   } catch (err) {

@@ -299,6 +299,10 @@ model Agency {
   // Fee EvenFlow/Yield charges this agency per accepted transfer, in integer cents.
   // Null = not configured; no revenue event is fabricated if unset.
   transferFeeCents  Int?
+  // The one Stripe Customer object for this agency's self-serve seat
+  // subscription (routes/billing.js's self-serve section). Null until the
+  // agency's owner starts a checkout — never fabricated.
+  stripeCustomerId String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   archivedAt     DateTime?
@@ -864,6 +868,14 @@ model Plan {
   transfersEnabled Boolean      @default(false)
   coachingEnabled  Boolean      @default(false)
   isActive         Boolean      @default(true)
+  // When true, priceCents is a PER-SEAT price (billed by active user count)
+  // rather than a flat fee — used by the Agency Owner self-serve Stripe
+  // checkout flow, not the Platform-Owner-assigned flat plans.
+  perSeat          Boolean      @default(false)
+  // The Stripe Price object this plan's self-serve checkout sells. Null
+  // until Stripe is configured and the price is created (see lib/stripe.js
+  // ensureSeatPriceId) — never fabricated.
+  stripePriceId    String?
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
@@ -884,6 +896,14 @@ model AgencySubscription {
   // Placeholder for a real payment processor's customer/subscription ID.
   // Null in this build since no processor is configured — never fabricated.
   externalCustomerId String?
+  // Set only for a self-serve Stripe subscription (see routes/billing.js's
+  // self-serve section) — distinguishes it from a Platform-Owner-assigned
+  // flat plan sharing this same table. Null for the latter.
+  stripeSubscriptionId String?
+  // Snapshot of the seat count Stripe was last told to bill for — kept in
+  // sync inline (no job queue in this app) whenever a User's status flips
+  // to/from ACTIVE on this agency. See lib/seatBilling.js.
+  seatCount          Int?
   assignedById       String?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt

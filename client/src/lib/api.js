@@ -130,6 +130,9 @@ export const api = {
   agencySubscription: (agencyId) => request(`/billing/agencies/${agencyId}/subscription`),
   assignSubscription: (agencyId, payload) => request(`/billing/agencies/${agencyId}/subscription`, { method: 'POST', body: payload }),
   cancelSubscription: (agencyId) => request(`/billing/agencies/${agencyId}/subscription/cancel`, { method: 'POST' }),
+  selfServeBillingStatus: () => request('/billing/self-serve/status'),
+  startSelfServeCheckout: () => request('/billing/self-serve/checkout', { method: 'POST' }),
+  openBillingPortal: () => request('/billing/self-serve/portal', { method: 'POST' }),
 
   trainingCourses: () => request('/training/courses'),
   createTrainingCourse: (payload) => request('/training/courses', { method: 'POST', body: payload }),

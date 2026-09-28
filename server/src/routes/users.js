@@ -6,6 +6,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { sendInvitationEmail } = require('../lib/email');
 const { reissueInvitation } = require('../lib/invitations');
+const { syncSeatCountForAgency } = require('../lib/seatBilling');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -207,6 +208,7 @@ router.post('/:userId/deactivate', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER',
       after: { status: updated.status },
       correlationId: req.correlationId,
     });
+    if (target.agencyId) await syncSeatCountForAgency(target.agencyId);
     return res.json({ success: true, user: { id: updated.id, status: updated.status } });
   } catch (err) {
     next(err);
