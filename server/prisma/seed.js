@@ -41,15 +41,26 @@ async function main() {
     });
 
     if (!existingInvite && user.status !== 'ACTIVE') {
+      // userId is @unique on Invitation — a prior unaccepted invite for
+      // this same self-bootstrapped user can still exist as a row even
+      // after it expired (the query above only finds a currently-VALID
+      // one). upsert (keyed on that unique userId) renews it with a fresh
+      // token/expiry instead of colliding on create().
       const token = crypto.randomBytes(24).toString('hex');
-      await prisma.invitation.create({
-        data: {
+      await prisma.invitation.upsert({
+        where: { userId: user.id },
+        create: {
           email,
           role: 'PLATFORM_OWNER',
           token,
           invitedById: user.id, // self-bootstrapped
           userId: user.id,
           expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        },
+        update: {
+          token,
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          acceptedAt: null,
         },
       });
       console.log(`Activation link for ${email}:`);
