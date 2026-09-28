@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { useAuth } from '../lib/AuthContext';
 import FlowScoreCard from './FlowScoreCard';
 import FunnelMetricsCard from './FunnelMetricsCard';
+import PerformanceLeaderboards from './PerformanceLeaderboards';
 import RunningReportPage from './RunningReportPage';
 
 export default function ProducerDashboard() {
+  const { user } = useAuth();
   const [recap, setRecap] = useState(null);
   const [queue, setQueue] = useState(null);
   const [started, setStarted] = useState(false);
@@ -79,6 +82,10 @@ export default function ProducerDashboard() {
 
       <section style={s.section}>
         <FunnelMetricsCard scope="me" title="MY FUNNEL" />
+      </section>
+
+      <section style={s.section}>
+        <PerformanceLeaderboards agencyId={user?.agencyId} title="AGENCY LEADERBOARD" highlightUserId={user?.id} showVendors={false} />
       </section>
 
       <section style={s.section}>

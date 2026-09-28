@@ -130,7 +130,7 @@ router.get('/by-vendor', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (r
 // of the app already computes from, just grouped per producer instead of
 // per vendor. revenue is the sum of real, entered salePremiumCents on
 // their SOLD leads (never a fabricated commission calculation).
-router.get('/by-agent', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
+router.get('/by-agent', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER', 'PLATFORM_OWNER'), async (req, res, next) => {
   try {
     const agencyId = scopedAgencyId(req);
     // Always required, even for PLATFORM_OWNER — see /by-vendor above for

@@ -16,7 +16,7 @@ const pct = (v) => (v === null || v === undefined ? '—' : `${v}%`);
 // /financials/by-agent — real Lead/CostEvent/salePremiumCents data, same
 // "quoted or beyond" definition funnelMetrics.js's quoteRate uses. No
 // second, divergent computation of the same KPI.
-export default function PerformanceLeaderboards({ agencyId, title = 'PERFORMANCE' }) {
+export default function PerformanceLeaderboards({ agencyId, title = 'PERFORMANCE', highlightUserId, showVendors = true }) {
   const [periodKey, setPeriodKey] = useState('month');
   const [vendors, setVendors] = useState(null);
   const [agents, setAgents] = useState(null);
@@ -33,7 +33,12 @@ export default function PerformanceLeaderboards({ agencyId, title = 'PERFORMANCE
       const from = period.from().toISOString();
       const to = new Date().toISOString();
       const params = `?agencyId=${agencyId}&from=${from}&to=${to}`;
-      const [vendorRes, agentRes] = await Promise.all([api.financialByVendor(params), api.financialByAgent(params)]);
+      // Vendor cost data (cost-per-lead/quote/sale) is owner/manager business
+      // info — Producers only get their own leaderboard's visibility.
+      const [vendorRes, agentRes] = await Promise.all([
+        showVendors ? api.financialByVendor(params) : Promise.resolve({ vendors: [] }),
+        api.financialByAgent(params),
+      ]);
       setVendors([...vendorRes.vendors].sort((a, b) => b.revenue - a.revenue || b.salesCount - a.salesCount));
       setAgents([...agentRes.agents].sort((a, b) => b.revenue - a.revenue || b.salesCount - a.salesCount));
       setError('');
@@ -59,8 +64,8 @@ export default function PerformanceLeaderboards({ agencyId, title = 'PERFORMANCE
       </SectionHeader>
       {error && <div style={s.error}>{error}</div>}
 
-      <div style={s.grid}>
-        <Card style={s.card}>
+      <div style={showVendors ? s.grid : s.gridSingle}>
+        {showVendors && <Card style={s.card}>
           <div style={s.cardHeaderRow}>
             <div style={s.cardTitle}>VENDOR LEADERBOARD</div>
             {vendors?.length > 0 && (
@@ -112,7 +117,7 @@ export default function PerformanceLeaderboards({ agencyId, title = 'PERFORMANCE
               ))}
             </div>
           )}
-        </Card>
+        </Card>}
 
         <Card style={s.card}>
           <div style={s.cardHeaderRow}>
@@ -135,6 +140,11 @@ export default function PerformanceLeaderboards({ agencyId, title = 'PERFORMANCE
             <EmptyState title="No producer activity yet" description="Leads assigned to a producer in this period will rank here." />
           ) : (
             <div style={s.tableWrap}>
+              {highlightUserId && agents.some((a) => a.userId === highlightUserId) && (
+                <div style={s.yourRankBanner}>
+                  You're ranked #{agents.findIndex((a) => a.userId === highlightUserId) + 1} of {agents.length} producers this period.
+                </div>
+              )}
               <div style={{ ...s.agentRow, ...s.tableHeader }}>
                 <div style={s.colRank}>#</div>
                 <div style={s.colName}>Producer</div>
@@ -145,9 +155,9 @@ export default function PerformanceLeaderboards({ agencyId, title = 'PERFORMANCE
                 <div style={s.colNum}>Flow Score</div>
               </div>
               {agents.map((a, i) => (
-                <div key={a.userId} style={s.agentRow}>
+                <div key={a.userId} style={a.userId === highlightUserId ? { ...s.agentRow, ...s.agentRowMe } : s.agentRow}>
                   <div style={s.colRank}><RankBadge n={i + 1} /></div>
-                  <div style={s.colName}>{a.firstName} {a.lastName}</div>
+                  <div style={s.colName}>{a.firstName} {a.lastName}{a.userId === highlightUserId && <span style={s.meTag}>YOU</span>}</div>
                   <div style={s.colNum}>{a.leadsAssigned}</div>
                   <div style={s.colNum}>{a.salesCount}</div>
                   <div style={s.colNum}>{pct(a.conversionRate)}</div>
@@ -182,6 +192,7 @@ const s = {
   periodRow: { display: 'flex', gap: 6, flexWrap: 'wrap' },
   error: { color: 'var(--danger)', fontSize: 13, marginBottom: 12 },
   grid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 },
+  gridSingle: { display: 'grid', gridTemplateColumns: '1fr', gap: 16 },
   card: { padding: 0, overflow: 'hidden' },
   cardHeaderRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', borderBottom: '1px solid var(--border-hairline)' },
   cardTitle: { color: 'var(--text-secondary)', fontSize: 11, letterSpacing: 1.5, fontWeight: 700 },
@@ -194,4 +205,7 @@ const s = {
   colName: { color: 'var(--text-primary)', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
   colNum: { color: 'var(--text-secondary)', textAlign: 'right' },
   productTag: { color: 'var(--text-muted)', fontWeight: 400, fontSize: 10, marginLeft: 6 },
+  yourRankBanner: { padding: '10px 16px', background: 'var(--accent-gradient-soft)', color: 'var(--accent)', fontSize: 12, fontWeight: 700, borderBottom: '1px solid var(--border-hairline)' },
+  agentRowMe: { background: 'rgba(198, 255, 46, 0.06)' },
+  meTag: { color: 'var(--accent)', fontWeight: 700, fontSize: 9, letterSpacing: 0.5, marginLeft: 6, border: '1px solid var(--accent)', borderRadius: 3, padding: '1px 4px' },
 };
