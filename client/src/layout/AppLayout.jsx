@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { useIsMobile } from '../lib/useViewport';
-import { GradientDefs } from '../ui';
+import { useAuth } from '../lib/AuthContext';
+import { api } from '../lib/api';
+import { GradientDefs, TourOverlay } from '../ui';
+import { stepsForRole } from '../lib/tourSteps';
 import Sidebar from './Sidebar';
 import MobileTopBar from './MobileTopBar';
 import MobileDrawer from './MobileDrawer';
@@ -14,13 +17,31 @@ export default function AppLayout() {
   // the very first render already picks the right shell — no layout flash.
   const isMobile = useIsMobile();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const { user, refreshUser } = useAuth();
+  const [tourDismissed, setTourDismissed] = useState(false);
+  const [manualTourOpen, setManualTourOpen] = useState(false);
+  const roleSteps = user ? stepsForRole(user.role) : null;
+  const tourSteps = manualTourOpen ? roleSteps : (user && !user.tourCompletedAt && !tourDismissed ? roleSteps : null);
+
+  async function finishTour() {
+    setTourDismissed(true);
+    setManualTourOpen(false);
+    if (!user?.tourCompletedAt) {
+      try {
+        await api.completeTour();
+        await refreshUser();
+      } catch {
+        // Non-fatal — worst case the tour offers itself again next login.
+      }
+    }
+  }
 
   return (
     <div style={{ minHeight: '100vh' }}>
       <GradientDefs />
       <ImpersonationBar />
       <div style={{ display: 'flex' }}>
-        {!isMobile && <Sidebar />}
+        {!isMobile && <Sidebar onTakeTour={() => setManualTourOpen(true)} />}
         <div style={{ flex: 1, minWidth: 0 }}>
           {isMobile && <MobileTopBar onMenuClick={() => setDrawerOpen(true)} />}
           <main
@@ -38,6 +59,7 @@ export default function AppLayout() {
       {isMobile && <MobileBottomNav />}
       {isMobile && <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />}
       <EdWidget />
+      {tourSteps && <TourOverlay steps={tourSteps} onDone={finishTour} />}
     </div>
   );
 }

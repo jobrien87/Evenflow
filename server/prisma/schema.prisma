@@ -213,6 +213,9 @@ model User {
   // next briefing's "what changed" deltas against this timestamp, and gates
   // showing it as the opening message to once per day.
   lastBriefingAt DateTime?
+  // Set once the first-login product tour is dismissed (finished or
+  // skipped) — null means "show it next time this user logs in."
+  tourCompletedAt DateTime?
 
   invitations       Invitation[]     @relation("InvitationsSent")
   ownInvitation     Invitation?      @relation("InvitationForUser")

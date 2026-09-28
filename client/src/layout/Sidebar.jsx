@@ -6,7 +6,7 @@ import { navForRole, teamChatNavPath } from './navConfig';
 import { Icon, Button, ComingSoonModal } from '../ui';
 import NotificationBell from '../pages/NotificationBell';
 
-export default function Sidebar() {
+export default function Sidebar({ onTakeTour }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const items = navForRole(user?.role);
@@ -55,6 +55,9 @@ export default function Sidebar() {
           <Icon name="logout" size={14} style={{ marginRight: 6 }} />
           Log out
         </Button>
+        {onTakeTour && (
+          <button style={s.tourLink} onClick={onTakeTour}>Take the tour again</button>
+        )}
       </div>
 
       {stubOpen && (
@@ -101,4 +104,5 @@ const s = {
   bottom: { padding: 'var(--space-4)', borderTop: '1px solid var(--border-hairline)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' },
   bellRow: { display: 'flex', alignItems: 'center', gap: 10 },
   userLabel: { color: 'var(--text-muted)', fontSize: 11 },
+  tourLink: { background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 11, textAlign: 'center', cursor: 'pointer', textDecoration: 'underline', padding: 2 },
 };

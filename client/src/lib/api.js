@@ -24,6 +24,7 @@ export const api = {
   login: (email, password) => request('/auth/login', { method: 'POST', body: { email, password } }),
   logout: () => request('/auth/logout', { method: 'POST' }),
   me: () => request('/auth/me'),
+  completeTour: () => request('/auth/complete-tour', { method: 'POST' }),
   acceptInvitation: (token, password) => request('/auth/accept-invitation', { method: 'POST', body: { token, password } }),
   forgotPassword: (email) => request('/auth/forgot-password', { method: 'POST', body: { email } }),
   resetPassword: (token, password) => request('/auth/reset-password', { method: 'POST', body: { token, password } }),

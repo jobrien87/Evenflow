@@ -129,6 +129,22 @@ router.get('/me', async (req, res) => {
   return res.json({ success: true, user: publicUser(req.user) });
 });
 
+// Marks the first-login product tour dismissed (finished or skipped) so it
+// doesn't show again. Uses req.realUser (not req.user) so an impersonated
+// session never writes to the target's own tour state.
+router.post('/complete-tour', async (req, res, next) => {
+  if (!req.user) return res.status(401).json({ success: false, error: 'UNAUTHENTICATED' });
+  try {
+    const updated = await prisma.user.update({
+      where: { id: req.realUser.id },
+      data: { tourCompletedAt: new Date() },
+    });
+    return res.json({ success: true, user: publicUser(updated) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 const acceptInvitationSchema = z.object({
   token: z.string().min(10),
   password: z.string().min(10, 'Password must be at least 10 characters.'),
@@ -314,6 +330,7 @@ function publicUser(user) {
     role: user.role,
     agencyId: user.agencyId,
     status: user.status,
+    tourCompletedAt: user.tourCompletedAt,
   };
 }
 
