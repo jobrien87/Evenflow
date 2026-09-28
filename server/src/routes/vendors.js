@@ -28,6 +28,20 @@ function maskString(s) {
   return s.slice(0, 2) + '*'.repeat(Math.max(s.length - 2, 1));
 }
 
+// Never trust client-supplied agent ids blindly — confirm every one is a
+// real ACTIVE producer in this exact agency before letting a vendor route
+// leads to them.
+async function validateSelectedAgentIds(agencyId, ids) {
+  if (!ids || ids.length === 0) return { valid: true, invalid: [] };
+  const found = await prisma.user.findMany({
+    where: { id: { in: ids }, agencyId, role: 'PRODUCER', status: 'ACTIVE' },
+    select: { id: true },
+  });
+  const foundIds = new Set(found.map((u) => u.id));
+  const invalid = ids.filter((id) => !foundIds.has(id));
+  return { valid: invalid.length === 0, invalid };
+}
+
 router.get('/', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
   try {
     const agencyId = scopedAgencyId(req);
@@ -48,6 +62,8 @@ const createVendorSchema = z.object({
   email: z.string().email(),
   product: z.string().min(1),
   costPerLeadCents: z.number().int().positive().nullable().optional(),
+  distributionMode: z.enum(['ROUND_ROBIN', 'SELECTED_AGENTS', 'MOSHPIT']).optional(),
+  selectedAgentIds: z.array(z.string().uuid()).optional(),
 });
 
 router.post('/', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res, next) => {
@@ -58,6 +74,13 @@ router.post('/', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res,
     }
     const agencyId = req.user.role === 'PLATFORM_OWNER' ? parsed.data.agencyId : req.user.agencyId;
     if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+
+    const distributionMode = parsed.data.distributionMode || 'ROUND_ROBIN';
+    const selectedAgentIds = distributionMode === 'SELECTED_AGENTS' ? (parsed.data.selectedAgentIds || []) : [];
+    if (selectedAgentIds.length > 0) {
+      const { valid } = await validateSelectedAgentIds(agencyId, selectedAgentIds);
+      if (!valid) return res.status(400).json({ success: false, error: 'INVALID_AGENTS', message: 'One or more selected agents are not active producers in this agency.' });
+    }
 
     const { prefix, rawKey, secretHash } = generateCredential();
 
@@ -71,6 +94,8 @@ router.post('/', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res,
           status: 'PENDING',
           createdById: req.user.id,
           costPerLeadCents: parsed.data.costPerLeadCents ?? null,
+          distributionMode,
+          selectedAgentIds,
         },
       });
       const credential = await tx.vendorCredential.create({
@@ -175,6 +200,8 @@ const updateVendorSchema = z.object({
   email: z.string().email().optional(),
   product: z.string().min(1).optional(),
   costPerLeadCents: z.number().int().positive().nullable().optional(),
+  distributionMode: z.enum(['ROUND_ROBIN', 'SELECTED_AGENTS', 'MOSHPIT']).optional(),
+  selectedAgentIds: z.array(z.string().uuid()).optional(),
 });
 
 // General field edit — separate from /status below, since a status
@@ -190,12 +217,25 @@ router.patch('/:id', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, 
     if (req.user.role !== 'PLATFORM_OWNER' && vendor.agencyId !== req.user.agencyId) {
       return res.status(403).json({ success: false, error: 'FORBIDDEN' });
     }
-    const updated = await prisma.vendor.update({ where: { id: vendor.id }, data: parsed.data });
+
+    const data = { ...parsed.data };
+    const nextMode = data.distributionMode || vendor.distributionMode;
+    if (nextMode === 'SELECTED_AGENTS' && data.selectedAgentIds) {
+      const { valid } = await validateSelectedAgentIds(vendor.agencyId, data.selectedAgentIds);
+      if (!valid) return res.status(400).json({ success: false, error: 'INVALID_AGENTS', message: 'One or more selected agents are not active producers in this agency.' });
+    }
+    // Switching away from SELECTED_AGENTS with no explicit new list clears
+    // the stale selection rather than leaving it silently unused.
+    if (data.distributionMode && data.distributionMode !== 'SELECTED_AGENTS' && !data.selectedAgentIds) {
+      data.selectedAgentIds = [];
+    }
+
+    const updated = await prisma.vendor.update({ where: { id: vendor.id }, data });
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role, agencyId: vendor.agencyId,
       action: 'vendor.updated', entityType: 'Vendor', entityId: vendor.id,
-      before: { name: vendor.name, email: vendor.email, product: vendor.product, costPerLeadCents: vendor.costPerLeadCents },
-      after: parsed.data, correlationId: req.correlationId,
+      before: { name: vendor.name, email: vendor.email, product: vendor.product, costPerLeadCents: vendor.costPerLeadCents, distributionMode: vendor.distributionMode, selectedAgentIds: vendor.selectedAgentIds },
+      after: data, correlationId: req.correlationId,
     });
     return res.json({ success: true, vendor: updated });
   } catch (err) {

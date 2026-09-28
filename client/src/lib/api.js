@@ -36,6 +36,8 @@ export const api = {
   leadFunnel: (params = '') => request(`/leads/funnel${params}`),
   createLead: (payload) => request('/leads', { method: 'POST', body: payload }),
   dispositionLead: (id, payload) => request(`/leads/${id}/disposition`, { method: 'POST', body: payload }),
+  moshpitLeads: () => request('/leads/moshpit'),
+  claimLead: (id) => request(`/leads/${id}/claim`, { method: 'POST' }),
 
   completeTask: (id, payload) => request(`/tasks/${id}/complete`, { method: 'POST', body: payload }),
 

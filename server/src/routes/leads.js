@@ -299,6 +299,103 @@ router.get('/funnel', async (req, res, next) => {
   }
 });
 
+// Registered before /:leadId for the same anti-shadowing reason as /funnel.
+// The claimable pool: unassigned leads from vendors configured for MOSHPIT
+// distribution, agency-scoped.
+router.get('/moshpit', async (req, res, next) => {
+  try {
+    const agencyId = scopeAgencyId(req);
+    if (req.user.role !== 'PLATFORM_OWNER' && !agencyId) {
+      return res.json({ success: true, leads: [] });
+    }
+
+    const leads = await prisma.lead.findMany({
+      where: {
+        assignedToId: null,
+        archivedAt: null,
+        vendor: { distributionMode: 'MOSHPIT' },
+        ...(agencyId ? { agencyId } : {}),
+      },
+      include: {
+        customer: true,
+        vendor: { select: { id: true, name: true } },
+      },
+      orderBy: [{ priorityScore: 'desc' }, { receivedAt: 'desc' }],
+    });
+
+    return res.json({ success: true, leads });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Atomic optimistic claim — the updateMany's assignedToId: null guard is
+// what makes this race-safe: if two producers claim the same lead at
+// the same instant, only one updateMany can match assignedToId: null
+// (the other loses the race and gets 409, never a double-assignment).
+router.post('/:leadId/claim', async (req, res, next) => {
+  try {
+    if (req.user.role !== 'PRODUCER') {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'Only producers can claim Moshpit leads.' });
+    }
+
+    const lead = await prisma.lead.findUnique({
+      where: { id: req.params.leadId },
+      include: { vendor: { select: { distributionMode: true } } },
+    });
+    if (!lead) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (lead.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    if (!lead.vendor || lead.vendor.distributionMode !== 'MOSHPIT') {
+      return res.status(400).json({ success: false, error: 'NOT_CLAIMABLE', message: 'This lead is not in the Moshpit.' });
+    }
+
+    const now = new Date();
+    const claim = await prisma.lead.updateMany({
+      where: { id: lead.id, assignedToId: null },
+      data: { assignedToId: req.user.id, assignedAt: now, status: 'ASSIGNED' },
+    });
+
+    if (claim.count === 0) {
+      return res.status(409).json({ success: false, error: 'ALREADY_CLAIMED', message: 'Another producer already claimed this lead.' });
+    }
+
+    const updated = await prisma.lead.findUnique({
+      where: { id: lead.id },
+      include: {
+        customer: true,
+        assignedTo: { select: { id: true, firstName: true, lastName: true } },
+      },
+    });
+
+    await prisma.leadEvent.create({
+      data: {
+        leadId: lead.id,
+        type: 'lead.claimed',
+        fromStatus: lead.status,
+        toStatus: 'ASSIGNED',
+        metadata: { claimedById: req.user.id },
+      },
+    });
+
+    await recordAudit({
+      actorId: req.user.id,
+      actorRole: req.user.role,
+      agencyId: lead.agencyId,
+      action: 'lead.claimed',
+      entityType: 'Lead',
+      entityId: lead.id,
+      after: { assignedToId: req.user.id },
+      correlationId: req.correlationId,
+    });
+
+    return res.json({ success: true, lead: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/:leadId', async (req, res, next) => {
   try {
     const lead = await prisma.lead.findUnique({

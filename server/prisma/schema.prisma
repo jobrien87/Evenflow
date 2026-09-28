@@ -139,6 +139,17 @@ enum CredentialStatus {
   REVOKED
 }
 
+// How a vendor's inbound leads get handed to producers.
+// ROUND_ROBIN: cycle through every ACTIVE producer in the agency.
+// SELECTED_AGENTS: cycle through only Vendor.selectedAgentIds.
+// MOSHPIT: leave unassigned — any eligible producer can claim it (see
+// leadDistribution.js / GET /leads/moshpit).
+enum LeadDistributionMode {
+  ROUND_ROBIN
+  SELECTED_AGENTS
+  MOSHPIT
+}
+
 enum RevenueCategory {
   SUBSCRIPTION
   TRANSFER_REVENUE
@@ -642,6 +653,14 @@ model Vendor {
   createdById  String?
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
+
+  // Per-vendor lead distribution control (agency owner configurable).
+  // roundRobinCursor advances via an atomic increment on every assignment
+  // (ROUND_ROBIN and SELECTED_AGENTS modes) so concurrent inbound leads
+  // never double-assign the same "next" agent.
+  distributionMode LeadDistributionMode @default(ROUND_ROBIN)
+  selectedAgentIds String[]             @default([])
+  roundRobinCursor Int                  @default(0)
 
   credentials     VendorCredential[]
   leads           Lead[]

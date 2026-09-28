@@ -26,6 +26,12 @@ export function notificationTarget(notification, role) {
 
   switch (entityKey) {
     case 'Lead':
+      // lead.moshpit_available -> the Producer's claim pool, not their
+      // normal queue (an unassigned Moshpit lead won't show up there at all
+      // until someone claims it).
+      if (notification.type === 'lead.moshpit_available' && role === 'PRODUCER') {
+        return { path: '/producer/moshpit', highlightId: id, openChat: false };
+      }
       // lead.assigned -> the Producer's own dashboard queue;
       // lead.new (vendor lead) -> the Agency Owner's Team & Leads list.
       // No lead-level chat UI exists anywhere yet, so a chat.message

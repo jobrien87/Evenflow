@@ -12,6 +12,7 @@ export const NAV_BY_ROLE = {
     { label: 'Team Chat', to: '/producer/team-chat', icon: 'chat', primary: true },
     { label: 'Coaching', to: '/producer/coaching', icon: 'phone', primary: true },
     { label: 'Training', to: '/producer/training', icon: 'book', primary: true },
+    { label: 'Moshpit', to: '/producer/moshpit', icon: 'flame', primary: true },
     { label: 'Winbacks & Cross-Sells', to: '/producer/opportunities', icon: 'target' },
     { label: 'Record Store', to: '/producer/record-store', icon: 'vinyl', stub: true },
   ],

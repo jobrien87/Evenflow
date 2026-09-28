@@ -8,7 +8,8 @@ const { normalizePhone, normalizeEmail } = require('../lib/normalize');
 const { scoreLead } = require('../lib/priority');
 const { recordAudit } = require('../lib/audit');
 const { recordVendorLeadCost } = require('../lib/financialEvents');
-const { notifyAgencyOwners } = require('../lib/notifications');
+const { notifyAgencyOwners, notifyUser, notifyUsers } = require('../lib/notifications');
+const { resolveVendorAssignment } = require('../lib/leadDistribution');
 
 const router = express.Router();
 
@@ -122,6 +123,8 @@ router.post('/leads', requireVendorAuth, async (req, res) => {
         });
       }
 
+      const assignment = await resolveVendorAssignment(tx, req.vendor);
+
       const lead = await tx.lead.create({
         data: {
           agencyId: req.vendor.agencyId,
@@ -131,7 +134,9 @@ router.post('/leads', requireVendorAuth, async (req, res) => {
           rawPayload: req.body,
           source: `vendor:${req.vendor.name}`,
           product: data.product,
-          status: 'NEW',
+          status: assignment.assignedToId ? 'ASSIGNED' : 'NEW',
+          assignedToId: assignment.assignedToId,
+          assignedAt: assignment.assignedToId ? new Date() : null,
           customFields: {
             currentCarrier: data.current_carrier,
             subId: data.sub_id,
@@ -144,28 +149,35 @@ router.post('/leads', requireVendorAuth, async (req, res) => {
       const updatedLead = await tx.lead.update({ where: { id: lead.id }, data: { priorityScore, priorityReason } });
 
       await tx.leadEvent.create({
-        data: { leadId: lead.id, type: 'lead.created.vendor_api', toStatus: 'NEW', metadata: { vendorId: req.vendor.id } },
+        data: {
+          leadId: lead.id,
+          type: 'lead.created.vendor_api',
+          toStatus: updatedLead.status,
+          metadata: { vendorId: req.vendor.id, distributionMode: assignment.mode, distributionReason: assignment.reason },
+        },
       });
 
-      return updatedLead;
+      return { lead: updatedLead, assignment };
     });
+
+    const { lead, assignment } = result;
 
     await logTransaction({
       vendorId: req.vendor.id, method: 'POST', endpoint, statusCode: 201, startedAt,
-      resultCode: 'SUCCESS', leadId: result.id, correlationId, rawPayload: req.body,
+      resultCode: 'SUCCESS', leadId: lead.id, correlationId, rawPayload: req.body,
     });
 
     await recordAudit({
       agencyId: req.vendor.agencyId,
       action: 'lead.created.vendor_api',
       entityType: 'Lead',
-      entityId: result.id,
-      after: { vendorId: req.vendor.id, product: data.product },
+      entityId: lead.id,
+      after: { vendorId: req.vendor.id, product: data.product, distributionMode: assignment.mode },
       correlationId,
     });
 
     // Record the real vendor lead cost, if this vendor connection has one configured.
-    await recordVendorLeadCost(result, req.vendor);
+    await recordVendorLeadCost(lead, req.vendor);
 
     await notifyAgencyOwners(req.vendor.agencyId, {
       type: 'lead.new',
@@ -173,14 +185,41 @@ router.post('/leads', requireVendorAuth, async (req, res) => {
       title: `New lead from ${req.vendor.name}`,
       body: `${data.first_name} ${data.last_name} — ${data.product}`,
       relatedEntityType: 'Lead',
-      relatedEntityId: result.id,
+      relatedEntityId: lead.id,
     });
+
+    if (assignment.assignedToId) {
+      await notifyUser({
+        userId: assignment.assignedToId,
+        agencyId: req.vendor.agencyId,
+        type: 'lead.assigned',
+        severity: 'INFO',
+        title: 'New lead assigned to you',
+        body: `${data.first_name} ${data.last_name} — ${data.product} (from ${req.vendor.name})`,
+        relatedEntityType: 'Lead',
+        relatedEntityId: lead.id,
+      });
+    } else if (assignment.mode === 'MOSHPIT') {
+      const eligibleProducers = await prisma.user.findMany({
+        where: { agencyId: req.vendor.agencyId, role: 'PRODUCER', status: 'ACTIVE' },
+        select: { id: true },
+      });
+      await notifyUsers(eligibleProducers.map((u) => u.id), {
+        agencyId: req.vendor.agencyId,
+        type: 'lead.moshpit_available',
+        severity: 'INFO',
+        title: `New Moshpit lead from ${req.vendor.name}`,
+        body: `${data.first_name} ${data.last_name} — ${data.product}. First to claim it gets it.`,
+        relatedEntityType: 'Lead',
+        relatedEntityId: lead.id,
+      });
+    }
 
     return res.status(201).json({
       success: true,
-      lead_id: result.id,
-      status: result.status,
-      timestamp: result.createdAt.toISOString(),
+      lead_id: lead.id,
+      status: lead.status,
+      timestamp: lead.createdAt.toISOString(),
       correlation_id: correlationId,
     });
   } catch (err) {

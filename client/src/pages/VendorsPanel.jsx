@@ -1,14 +1,47 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
-import { StatTile, BarRow, SectionHeader } from '../ui';
+import { StatTile, BarRow, SectionHeader, Badge } from '../ui';
+
+const DISTRIBUTION_MODES = [
+  { value: 'ROUND_ROBIN', label: 'Round Robin', hint: 'Cycles evenly through every active producer.' },
+  { value: 'SELECTED_AGENTS', label: 'Select Agents', hint: 'Cycles only through the agents you pick below.' },
+  { value: 'MOSHPIT', label: 'Moshpit', hint: 'Unassigned — any active producer can claim it first.' },
+];
+
+const distributionTone = (mode) => (mode === 'MOSHPIT' ? 'warning' : mode === 'SELECTED_AGENTS' ? 'info' : 'accent');
+const distributionLabel = (mode) => DISTRIBUTION_MODES.find((m) => m.value === mode)?.label || 'Round Robin';
+
+function AgentPicker({ producers, selectedIds, onChange }) {
+  if (producers.length === 0) {
+    return <div style={s.pickerEmpty}>No active producers to select yet.</div>;
+  }
+  return (
+    <div style={s.pickerBox}>
+      {producers.map((p) => {
+        const checked = selectedIds.includes(p.id);
+        return (
+          <label key={p.id} style={s.pickerRow}>
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={() => onChange(checked ? selectedIds.filter((id) => id !== p.id) : [...selectedIds, p.id])}
+            />
+            {p.firstName} {p.lastName}
+          </label>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function VendorsPanel() {
   const [vendors, setVendors] = useState([]);
+  const [producers, setProducers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', email: '', product: 'Auto', costPerLeadCents: '' });
+  const [form, setForm] = useState({ name: '', email: '', product: 'Auto', costPerLeadCents: '', distributionMode: 'ROUND_ROBIN', selectedAgentIds: [] });
   const [formError, setFormError] = useState('');
   const [newKeyResult, setNewKeyResult] = useState(null);
   const [selectedVendor, setSelectedVendor] = useState(null);
@@ -37,8 +70,9 @@ export default function VendorsPanel() {
   async function load() {
     setLoadError('');
     try {
-      const data = await api.vendors();
-      setVendors(data.vendors);
+      const [vendorData, userData] = await Promise.all([api.vendors(), api.users()]);
+      setVendors(vendorData.vendors);
+      setProducers((userData.users || []).filter((u) => u.role === 'PRODUCER' && u.status === 'ACTIVE'));
     } catch (err) {
       setLoadError(err.data?.message || 'Could not load vendors. Try refreshing.');
     } finally {
@@ -53,9 +87,10 @@ export default function VendorsPanel() {
       const res = await api.createVendor({
         ...form,
         costPerLeadCents: form.costPerLeadCents ? Math.round(parseFloat(form.costPerLeadCents) * 100) : undefined,
+        selectedAgentIds: form.distributionMode === 'SELECTED_AGENTS' ? form.selectedAgentIds : undefined,
       });
       setNewKeyResult(res);
-      setForm({ name: '', email: '', product: 'Auto', costPerLeadCents: '' });
+      setForm({ name: '', email: '', product: 'Auto', costPerLeadCents: '', distributionMode: 'ROUND_ROBIN', selectedAgentIds: [] });
       setShowForm(false);
       await load();
     } catch (err) {
@@ -93,7 +128,14 @@ export default function VendorsPanel() {
 
   function startEdit(v) {
     setEditingId(v.id);
-    setEditForm({ name: v.name, email: v.email, product: v.product, costPerLeadCents: v.costPerLeadCents ? (v.costPerLeadCents / 100).toFixed(2) : '' });
+    setEditForm({
+      name: v.name,
+      email: v.email,
+      product: v.product,
+      costPerLeadCents: v.costPerLeadCents ? (v.costPerLeadCents / 100).toFixed(2) : '',
+      distributionMode: v.distributionMode || 'ROUND_ROBIN',
+      selectedAgentIds: v.selectedAgentIds || [],
+    });
   }
 
   async function saveEdit(id) {
@@ -104,6 +146,8 @@ export default function VendorsPanel() {
         email: editForm.email,
         product: editForm.product,
         costPerLeadCents: editForm.costPerLeadCents ? Math.round(parseFloat(editForm.costPerLeadCents) * 100) : null,
+        distributionMode: editForm.distributionMode,
+        selectedAgentIds: editForm.distributionMode === 'SELECTED_AGENTS' ? editForm.selectedAgentIds : [],
       });
       setEditingId(null);
       await load();
@@ -194,6 +238,22 @@ export default function VendorsPanel() {
             value={form.costPerLeadCents}
             onChange={(e) => setForm({ ...form, costPerLeadCents: e.target.value })}
           />
+
+          <div style={s.distributionSection}>
+            <div style={s.distributionLabel}>LEAD DISTRIBUTION</div>
+            <select style={s.input} value={form.distributionMode} onChange={(e) => setForm({ ...form, distributionMode: e.target.value })}>
+              {DISTRIBUTION_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+            <div style={s.distributionHint}>{DISTRIBUTION_MODES.find((m) => m.value === form.distributionMode)?.hint}</div>
+            {form.distributionMode === 'SELECTED_AGENTS' && (
+              <AgentPicker
+                producers={producers}
+                selectedIds={form.selectedAgentIds}
+                onChange={(ids) => setForm({ ...form, selectedAgentIds: ids })}
+              />
+            )}
+          </div>
+
           <button style={s.submitButton} type="submit">Create Vendor & Send Instructions</button>
           {formError && <div style={s.formError}>{formError}</div>}
         </form>
@@ -215,6 +275,12 @@ export default function VendorsPanel() {
               <div style={s.rowTitle}>{v.name} · {v.product}</div>
               <div style={s.rowSub}>
                 {v.email} · {v.costPerLeadCents ? `$${(v.costPerLeadCents / 100).toFixed(2)}/lead` : 'cost not set'}
+              </div>
+              <div style={{ marginTop: 6 }}>
+                <Badge tone={distributionTone(v.distributionMode)}>
+                  {distributionLabel(v.distributionMode)}
+                  {v.distributionMode === 'SELECTED_AGENTS' ? ` (${(v.selectedAgentIds || []).length})` : ''}
+                </Badge>
               </div>
             </div>
             <select style={s.miniInput} value={v.status} onChange={(e) => setStatus(v.id, e.target.value)}>
@@ -242,6 +308,22 @@ export default function VendorsPanel() {
                 <option>Auto</option><option>Home</option><option>Life</option><option>Health</option>
               </select>
               <input style={s.input} type="number" step="0.01" min="0" value={editForm.costPerLeadCents} onChange={(e) => setEditForm({ ...editForm, costPerLeadCents: e.target.value })} placeholder="Cost per lead ($)" />
+
+              <div style={s.distributionSection}>
+                <div style={s.distributionLabel}>LEAD DISTRIBUTION</div>
+                <select style={s.input} value={editForm.distributionMode} onChange={(e) => setEditForm({ ...editForm, distributionMode: e.target.value })}>
+                  {DISTRIBUTION_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                </select>
+                <div style={s.distributionHint}>{DISTRIBUTION_MODES.find((m) => m.value === editForm.distributionMode)?.hint}</div>
+                {editForm.distributionMode === 'SELECTED_AGENTS' && (
+                  <AgentPicker
+                    producers={producers}
+                    selectedIds={editForm.selectedAgentIds}
+                    onChange={(ids) => setEditForm({ ...editForm, selectedAgentIds: ids })}
+                  />
+                )}
+              </div>
+
               <div style={{ display: 'flex', gap: 8 }}>
                 <button style={s.smallButton} onClick={() => saveEdit(v.id)}>SAVE</button>
                 <button style={s.smallButtonOutline} onClick={() => setEditingId(null)}>CANCEL</button>
@@ -352,4 +434,10 @@ const s = {
   modal: { background: 'var(--bg-elevated)', border: '1px solid var(--border-strong)', borderRadius: 12, padding: 20, maxWidth: 560, width: '90%', maxHeight: '80vh', overflowY: 'auto' },
   instructionsBlock: { color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6 },
   pre: { background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 6, padding: 12, fontSize: 11, color: 'var(--accent)', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' },
+  distributionSection: { display: 'flex', flexDirection: 'column', gap: 6, background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 12 },
+  distributionLabel: { color: 'var(--text-secondary)', fontSize: 11, letterSpacing: 1, fontWeight: 700 },
+  distributionHint: { color: 'var(--text-muted)', fontSize: 11 },
+  pickerBox: { display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 160, overflowY: 'auto', marginTop: 4, padding: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 6 },
+  pickerRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-primary)', cursor: 'pointer' },
+  pickerEmpty: { color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 12, marginTop: 4 },
 };
