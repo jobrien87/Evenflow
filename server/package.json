@@ -13,6 +13,7 @@
     "build": "prisma generate",
     "release": "prisma db push --accept-data-loss=false",
     "seed": "node prisma/seed.js",
+    "import:training-drills": "node scripts/import-training-drills.js",
     "test": "node --test src/**/*.test.js"
   },
   "dependencies": {
