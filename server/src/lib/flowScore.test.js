@@ -1,7 +1,15 @@
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { combineComponents, explainScore, computeTelemarketerScore, computeAgencyScore } = require('./flowScore');
+const { combineComponents, explainScore, computeTelemarketerScore, computeAgencyScore, COMPONENT_LABELS, DEFAULT_WEIGHTS } = require('./flowScore');
 const { prisma } = require('./db');
+
+test('COMPONENT_LABELS has exactly the same component keys as DEFAULT_WEIGHTS for every role (never drifts)', () => {
+  for (const role of Object.keys(DEFAULT_WEIGHTS)) {
+    const weightKeys = Object.keys(DEFAULT_WEIGHTS[role]).sort();
+    const labelKeys = Object.keys(COMPONENT_LABELS[role]).sort();
+    assert.deepEqual(labelKeys, weightKeys, `COMPONENT_LABELS.${role} keys must match DEFAULT_WEIGHTS.${role} keys`);
+  }
+});
 
 test('combineComponents excludes zero-sample components and renormalizes the rest', () => {
   const weights = { a: 50, b: 30, c: 20 };

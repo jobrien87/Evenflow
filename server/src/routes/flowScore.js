@@ -1,7 +1,14 @@
 const express = require('express');
 const { prisma } = require('../lib/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
-const { explainScore } = require('../lib/flowScore');
+const { explainScore, COMPONENT_LABELS } = require('../lib/flowScore');
+
+// Turns { key: 'Label' } into [{ key, label }] — the shape the client's
+// "no data yet" placeholder rows render, matching explainScore's own
+// component shape closely enough to reuse the same rendering code.
+function componentPlaceholders(role) {
+  return Object.entries(COMPONENT_LABELS[role] || {}).map(([key, label]) => ({ key, label }));
+}
 
 const router = express.Router();
 router.use(requireAuth);
@@ -21,7 +28,11 @@ router.get('/me', async (req, res, next) => {
     }
     const snapshot = await latestSnapshot('USER', req.user.id);
     if (!snapshot) {
-      return res.json({ success: true, snapshot: null, message: 'Not enough activity yet to compute a Flow Score.' });
+      return res.json({
+        success: true, snapshot: null,
+        message: 'Not enough activity yet to compute a Flow Score.',
+        componentPlaceholders: componentPlaceholders(req.user.role),
+      });
     }
     return res.json({ success: true, snapshot, explanation: explainScore(snapshot) });
   } catch (err) {
@@ -41,7 +52,11 @@ router.get('/user/:userId', async (req, res, next) => {
     }
     const snapshot = await latestSnapshot('USER', target.id);
     if (!snapshot) {
-      return res.json({ success: true, snapshot: null, message: 'Not enough activity yet to compute a Flow Score.' });
+      return res.json({
+        success: true, snapshot: null,
+        message: 'Not enough activity yet to compute a Flow Score.',
+        componentPlaceholders: componentPlaceholders(target.role),
+      });
     }
     return res.json({ success: true, snapshot, explanation: explainScore(snapshot) });
   } catch (err) {
@@ -56,7 +71,11 @@ router.get('/agency/:agencyId', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'P
     }
     const snapshot = await latestSnapshot('AGENCY', req.params.agencyId);
     if (!snapshot) {
-      return res.json({ success: true, snapshot: null, message: 'Not enough activity yet to compute an Agency Flow Score.' });
+      return res.json({
+        success: true, snapshot: null,
+        message: 'Not enough activity yet to compute an Agency Flow Score.',
+        componentPlaceholders: componentPlaceholders('AGENCY'),
+      });
     }
     return res.json({ success: true, snapshot, explanation: explainScore(snapshot) });
   } catch (err) {

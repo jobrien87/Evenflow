@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { Card, SectionHeader, Button, EmptyState, ExportButton } from '../ui';
+import { Card, SectionHeader, Button, ExportButton } from '../ui';
 import { downloadCsv } from '../lib/downloadCsv';
 
 const PERIODS = [
@@ -85,8 +85,6 @@ export default function PerformanceLeaderboards({ agencyId, title = 'PERFORMANCE
           </div>
           {!vendors ? (
             <div style={s.muted}>Loading…</div>
-          ) : vendors.length === 0 ? (
-            <EmptyState title="No vendor activity yet" description="Leads received from a connected vendor in this period will rank here." />
           ) : (
             <div style={s.tableWrap}>
               <div style={{ ...s.vendorRow, ...s.tableHeader }}>
@@ -101,6 +99,9 @@ export default function PerformanceLeaderboards({ agencyId, title = 'PERFORMANCE
                 <div style={s.colNum}>Cost/Sale</div>
                 <div style={s.colNum}>Revenue</div>
               </div>
+              {vendors.length === 0 && (
+                <div style={s.noDataRow}>No vendor activity yet — leads received from a connected vendor in this period will rank here.</div>
+              )}
               {vendors.map((v, i) => (
                 <div key={v.vendorId} style={s.vendorRow}>
                   <div style={s.colRank}><RankBadge n={i + 1} /></div>
@@ -136,8 +137,6 @@ export default function PerformanceLeaderboards({ agencyId, title = 'PERFORMANCE
           </div>
           {!agents ? (
             <div style={s.muted}>Loading…</div>
-          ) : agents.length === 0 ? (
-            <EmptyState title="No producer activity yet" description="Leads assigned to a producer in this period will rank here." />
           ) : (
             <div style={s.tableWrap}>
               {highlightUserId && agents.some((a) => a.userId === highlightUserId) && (
@@ -154,6 +153,9 @@ export default function PerformanceLeaderboards({ agencyId, title = 'PERFORMANCE
                 <div style={s.colNum}>Revenue</div>
                 <div style={s.colNum}>Flow Score</div>
               </div>
+              {agents.length === 0 && (
+                <div style={s.noDataRow}>No producer activity yet — leads assigned to a producer in this period will rank here.</div>
+              )}
               {agents.map((a, i) => (
                 <div key={a.userId} style={a.userId === highlightUserId ? { ...s.agentRow, ...s.agentRowMe } : s.agentRow}>
                   <div style={s.colRank}><RankBadge n={i + 1} /></div>
@@ -208,4 +210,5 @@ const s = {
   yourRankBanner: { padding: '10px 16px', background: 'var(--accent-gradient-soft)', color: 'var(--accent)', fontSize: 12, fontWeight: 700, borderBottom: '1px solid var(--border-hairline)' },
   agentRowMe: { background: 'rgba(198, 255, 46, 0.06)' },
   meTag: { color: 'var(--accent)', fontWeight: 700, fontSize: 9, letterSpacing: 0.5, marginLeft: 6, border: '1px solid var(--accent)', borderRadius: 3, padding: '1px 4px' },
+  noDataRow: { padding: '16px', color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic', textAlign: 'center' },
 };

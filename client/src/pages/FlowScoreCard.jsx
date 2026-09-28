@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { Card, SectionHeader, ProgressRing, Button, EmptyState } from '../ui';
+import { Card, SectionHeader, ProgressRing, Button } from '../ui';
 
 // A real Flow Score card — reads a computed snapshot, never fabricates a
 // number. Shows an honest "not enough activity yet" state instead of a
@@ -29,7 +29,26 @@ export default function FlowScoreCard({ scope = 'me', agencyId, title = 'FLOW SC
     return (
       <Card>
         <SectionHeader>{title}</SectionHeader>
-        <EmptyState description={data.message || 'Not enough activity yet to compute a Flow Score.'} />
+        <div style={s.scoreRow}>
+          <ProgressRing value={null} size={88} strokeWidth={7} />
+          <div style={s.driversWrap}>
+            <div style={s.section}>
+              <div style={s.sectionLabel}>WHAT THIS TRACKS</div>
+              {(data.componentPlaceholders || []).map((c) => (
+                <div key={c.key} style={s.driverRow}>
+                  <span>{c.label}</span>
+                  <span style={s.noDataYet}>No data yet</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div style={s.excludedNote}>{data.message || 'Not enough activity yet to compute a Flow Score.'}</div>
+        {onViewReport && (
+          <Button variant="ghost" style={{ marginTop: 12 }} onClick={onViewReport}>
+            View full report →
+          </Button>
+        )}
       </Card>
     );
   }
@@ -95,6 +114,7 @@ const s = {
   driverRow: { display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--text-secondary)', padding: '4px 0' },
   driverValuePositive: { color: 'var(--accent)', fontWeight: 700 },
   driverValueNegative: { color: 'var(--warning)', fontWeight: 700 },
+  noDataYet: { color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 12 },
   excludedNote: { color: 'var(--text-muted)', fontSize: 11, marginTop: 8, fontStyle: 'italic' },
   muted: { color: 'var(--text-muted)', fontSize: 13 },
   error: { color: 'var(--danger)', fontSize: 13 },

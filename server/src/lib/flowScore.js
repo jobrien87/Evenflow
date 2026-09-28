@@ -20,6 +20,29 @@ const DEFAULT_WEIGHTS = {
   AGENCY: { responseSpeed: 20, funnelHealth: 45, teamCallQuality: 35 },
 };
 
+// The same component labels used inside each computeXScore's rawComponents
+// below, kept here as the one static lookup a caller can use WITHOUT running
+// a full computation — e.g. to show "what this score tracks" (each real
+// component, honestly marked "no data yet") when no snapshot has ever been
+// saved at all, rather than hiding the breakdown entirely.
+const COMPONENT_LABELS = {
+  PRODUCER: {
+    responsiveness: 'Speed to first attempt',
+    pipelineDiscipline: 'Follow-up / task discipline',
+    conversion: 'Lead-to-sale conversion',
+    callQuality: 'Call quality',
+  },
+  TELEMARKETER: {
+    leadQuality: 'Lead quality (real contacts, not bad numbers or duplicates)',
+    downstreamQuality: 'Downstream sale rate (quality over quantity)',
+  },
+  AGENCY: {
+    responseSpeed: 'Team speed to first attempt',
+    funnelHealth: 'Lead-to-sale conversion',
+    teamCallQuality: 'Team call quality',
+  },
+};
+
 async function getActiveWeightConfig(role) {
   const existing = await prisma.flowScoreWeightConfig.findFirst({ where: { role, isActive: true } });
   const defaultKeys = Object.keys(DEFAULT_WEIGHTS[role]).sort().join(',');
@@ -284,4 +307,6 @@ module.exports = {
   explainScore,
   getActiveWeightConfig,
   combineComponents,
+  COMPONENT_LABELS,
+  DEFAULT_WEIGHTS,
 };

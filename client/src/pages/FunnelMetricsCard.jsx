@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { Card, SectionHeader, Button, StatTile, EmptyState } from '../ui';
+import { Card, SectionHeader, Button, StatTile } from '../ui';
 
 const PERIODS = [
   { key: 'month', label: 'This month', from: () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); } },
@@ -8,13 +8,19 @@ const PERIODS = [
   { key: 'today', label: 'Today', from: () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); } },
 ];
 
-function Rate({ label, value, sampleSize, onClick }) {
+// isDuration: true for the one non-percentage tile (speed to first
+// attempt, in minutes) — a literal "0" there would misleadingly read as
+// "instant," so it keeps the neutral dash and just says "No leads yet."
+// Every percentage tile (contact/quote/close rate) shows an honest 0%
+// instead, since "0 out of 0" is a fair, non-misleading starting value.
+function Rate({ label, value, sampleSize, onClick, isDuration }) {
   const clickable = onClick && sampleSize > 0;
-  const sub = sampleSize === 0 ? 'no data yet' : sampleSize < 3 ? `limited data (${sampleSize})` : null;
+  const sub = sampleSize === 0 ? 'No leads yet' : sampleSize < 3 ? `Limited data (${sampleSize})` : null;
+  const displayValue = value !== null ? (isDuration ? value : `${value}%`) : isDuration ? '—' : '0%';
   return (
     <StatTile
       label={label}
-      value={value === null ? '—' : `${value}%`}
+      value={displayValue}
       sub={sub}
       onClick={clickable ? onClick : undefined}
     />
@@ -51,7 +57,8 @@ export default function FunnelMetricsCard({ scope = 'me', title = 'FUNNEL', onSe
   if (error) return <Card><div style={s.error}>{error}</div></Card>;
   if (!data) return <Card><div style={s.muted}>Loading…</div></Card>;
 
-  const primary = scope === 'me' ? data.mine : data.agency;
+  const ZERO_FUNNEL = { totalLeads: 0, speedToFirstAttemptMedianMinutes: null, speedToFirstAttemptSampleSize: 0, contactRate: null, contactRateSampleSize: 0, quoteRate: null, quoteRateSampleSize: 0, closeRate: null, closeRateSampleSize: 0 };
+  const primary = (scope === 'me' ? data.mine : data.agency) || ZERO_FUNNEL;
   const comparison = scope === 'me' ? data.agency : null;
 
   return (
@@ -69,22 +76,22 @@ export default function FunnelMetricsCard({ scope = 'me', title = 'FUNNEL', onSe
       >
         {title}
       </SectionHeader>
-      {!primary || primary.totalLeads === 0 ? (
-        <EmptyState description="No leads in this period yet." />
-      ) : (
-        <>
-          <div style={s.ratesRow}>
-            <Rate label="Speed to first attempt" value={primary.speedToFirstAttemptMedianMinutes !== null ? Math.round(primary.speedToFirstAttemptMedianMinutes) : null} sampleSize={primary.speedToFirstAttemptSampleSize} />
-            <Rate label="Contact rate" value={primary.contactRate} sampleSize={primary.contactRateSampleSize} onClick={onSelectStage && (() => onSelectStage('contacted', range))} />
-            <Rate label="Quote rate" value={primary.quoteRate} sampleSize={primary.quoteRateSampleSize} onClick={onSelectStage && (() => onSelectStage('quoted', range))} />
-            <Rate label="Close rate" value={primary.closeRate} sampleSize={primary.closeRateSampleSize} onClick={onSelectStage && (() => onSelectStage('sold', range))} />
-          </div>
-          {comparison && comparison.totalLeads > 0 && (
-            <div style={s.comparisonNote}>
-              Agency average: {comparison.contactRate ?? '—'}% contact · {comparison.quoteRate ?? '—'}% quote · {comparison.closeRate ?? '—'}% close ({comparison.totalLeads} leads)
-            </div>
-          )}
-        </>
+      <div style={s.ratesRow}>
+        <Rate
+          label="Speed to first attempt"
+          value={primary.speedToFirstAttemptMedianMinutes !== null ? Math.round(primary.speedToFirstAttemptMedianMinutes) : null}
+          sampleSize={primary.speedToFirstAttemptSampleSize}
+          isDuration
+        />
+        <Rate label="Contact rate" value={primary.contactRate} sampleSize={primary.contactRateSampleSize} onClick={onSelectStage && (() => onSelectStage('contacted', range))} />
+        <Rate label="Quote rate" value={primary.quoteRate} sampleSize={primary.quoteRateSampleSize} onClick={onSelectStage && (() => onSelectStage('quoted', range))} />
+        <Rate label="Close rate" value={primary.closeRate} sampleSize={primary.closeRateSampleSize} onClick={onSelectStage && (() => onSelectStage('sold', range))} />
+      </div>
+      {primary.totalLeads === 0 && <div style={s.comparisonNote}>No Leads Yet — these will fill in as leads come through this period.</div>}
+      {comparison && comparison.totalLeads > 0 && (
+        <div style={s.comparisonNote}>
+          Agency average: {comparison.contactRate ?? '—'}% contact · {comparison.quoteRate ?? '—'}% quote · {comparison.closeRate ?? '—'}% close ({comparison.totalLeads} leads)
+        </div>
       )}
     </Card>
   );

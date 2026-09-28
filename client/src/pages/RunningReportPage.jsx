@@ -46,36 +46,27 @@ export default function RunningReportPage({ scope = 'me', agencyId, onClose }) {
             ])} />
           )}
         </div>
-        {!flowScore.current ? (
-          <div style={s.emptyState}>Not enough activity yet to compute a Flow Score.</div>
-        ) : (
-          <>
-            <div style={s.scoreRow}>
-              <div style={s.score}>{flowScore.current.score}</div>
-              <div style={s.scoreMax}>/ 100</div>
-            </div>
-            {flowScore.trend.length > 1 && (
-              <div style={s.trendRow}>
-                {flowScore.trend.map((snap) => (
-                  <div key={snap.id} style={s.trendBar(snap.score)} title={`${snap.score} on ${new Date(snap.computedAt).toLocaleDateString()}`} />
-                ))}
-              </div>
-            )}
-          </>
+        <div style={s.scoreRow}>
+          <div style={s.score}>{flowScore.current ? flowScore.current.score : '—'}</div>
+          <div style={s.scoreMax}>/ 100</div>
+        </div>
+        {!flowScore.current && <div style={s.emptyState}>Not enough activity yet to compute a Flow Score.</div>}
+        {flowScore.trend.length > 1 && (
+          <div style={s.trendRow}>
+            {flowScore.trend.map((snap) => (
+              <div key={snap.id} style={s.trendBar(snap.score)} title={`${snap.score} on ${new Date(snap.computedAt).toLocaleDateString()}`} />
+            ))}
+          </div>
         )}
       </section>
 
       <section style={s.section}>
         <div style={s.sectionLabel}>FUNNEL (THIS MONTH)</div>
-        {!funnel || funnel.totalLeads === 0 ? (
-          <div style={s.emptyState}>No leads this month yet.</div>
-        ) : (
-          <div style={s.ratesRow}>
-            <Rate label="Contact rate" value={funnel.contactRate} sampleSize={funnel.contactRateSampleSize} />
-            <Rate label="Quote rate" value={funnel.quoteRate} sampleSize={funnel.quoteRateSampleSize} />
-            <Rate label="Close rate" value={funnel.closeRate} sampleSize={funnel.closeRateSampleSize} />
-          </div>
-        )}
+        <div style={s.ratesRow}>
+          <Rate label="Contact rate" value={funnel?.contactRate ?? null} sampleSize={funnel?.contactRateSampleSize ?? 0} />
+          <Rate label="Quote rate" value={funnel?.quoteRate ?? null} sampleSize={funnel?.quoteRateSampleSize ?? 0} />
+          <Rate label="Close rate" value={funnel?.closeRate ?? null} sampleSize={funnel?.closeRateSampleSize ?? 0} />
+        </div>
       </section>
 
       {scope === 'me' && (
@@ -178,9 +169,10 @@ export default function RunningReportPage({ scope = 'me', agencyId, onClose }) {
 function Rate({ label, value, sampleSize }) {
   return (
     <div style={s.rate}>
-      <div style={s.rateValue}>{value === null ? '—' : `${value}%`}</div>
+      <div style={s.rateValue}>{value !== null ? `${value}%` : '0%'}</div>
       <div style={s.rateLabel}>{label}</div>
-      {sampleSize < 3 && sampleSize > 0 && <div style={s.lowSample}>limited data ({sampleSize})</div>}
+      {sampleSize === 0 && <div style={s.lowSample}>No Leads Yet</div>}
+      {sampleSize > 0 && sampleSize < 3 && <div style={s.lowSample}>Limited data ({sampleSize})</div>}
     </div>
   );
 }
