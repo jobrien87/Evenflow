@@ -19,6 +19,12 @@ const LEAD_STATUSES = [
 // entered numbers, never fabricated).
 const BULK_STATUSES = ['CONTACTED', 'FOLLOW_UP', 'LOST', 'BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT', 'ARCHIVED'];
 
+const TM_PERIODS = [
+  { key: 'month', label: 'This month', from: () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); } },
+  { key: 'quarter', label: 'This quarter', from: () => { const d = new Date(); return new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3, 1); } },
+  { key: 'week', label: 'This week', from: () => { const d = new Date(); const day = d.getDay(); return new Date(d.getFullYear(), d.getMonth(), d.getDate() - day); } },
+];
+
 function statusTone(status) {
   if (status === 'SOLD') return 'accent';
   if (['LOST', 'BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT'].includes(status)) return 'danger';
@@ -63,12 +69,32 @@ export default function YieldTransfersPanel() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkError, setBulkError] = useState('');
   const [view, setView] = useState('live');
+  const [tmPeriodKey, setTmPeriodKey] = useState('month');
+  const [tmPerformance, setTmPerformance] = useState(null);
+  const [tmPerfError, setTmPerfError] = useState('');
 
   useEffect(() => {
     load();
     const interval = setInterval(load, 8000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    loadTmPerformance();
+  }, [tmPeriodKey]);
+
+  async function loadTmPerformance() {
+    setTmPerfError('');
+    try {
+      const period = TM_PERIODS.find((p) => p.key === tmPeriodKey);
+      const from = period.from().toISOString();
+      const to = new Date().toISOString();
+      const res = await api.telemarketerPerformance(`?from=${from}&to=${to}`);
+      setTmPerformance(res.telemarketers);
+    } catch (err) {
+      setTmPerfError(err.data?.message || 'Could not load telemarketer performance.');
+    }
+  }
 
   async function load() {
     try {
@@ -186,6 +212,42 @@ export default function YieldTransfersPanel() {
       ) : (
         <>
       {error && <div style={s.error}>{error}</div>}
+
+      <section style={s.tmPerfSection}>
+        <div style={s.headerRow}>
+          <SectionHeader>Telemarketer Performance</SectionHeader>
+          <div style={s.periodRow}>
+            {TM_PERIODS.map((p) => (
+              <button key={p.key} type="button" style={s.periodBtn(tmPeriodKey === p.key)} onClick={() => setTmPeriodKey(p.key)}>{p.label}</button>
+            ))}
+          </div>
+        </div>
+        {tmPerfError && <div style={s.error}>{tmPerfError}</div>}
+        {!tmPerfError && (!tmPerformance || tmPerformance.length === 0) && (
+          <EmptyState title="No telemarketers assigned yet" description="Once a telemarketer is assigned to this agency, their submission and sale numbers show up here." />
+        )}
+        {tmPerformance && tmPerformance.length > 0 && (
+          <Card style={s.tableCard}>
+            <div style={s.tmTableHeaderRow}>
+              <span style={s.colVendor}>TELEMARKETER</span>
+              <span style={s.col}>LEADS SUBMITTED</span>
+              <span style={s.col}>SOLD</span>
+              <span style={s.col}>SOLD RATE</span>
+            </div>
+            {tmPerformance.map((tm) => (
+              <div key={tm.telemarketerId} style={s.tmTableRow}>
+                <span style={s.colVendor}>
+                  <span style={s.tmDot(tmColor(tm.telemarketerId))} />
+                  {tm.firstName} {tm.lastName}
+                </span>
+                <span style={s.col}>{tm.leadsSubmitted}</span>
+                <span style={s.col}>{tm.soldCount}</span>
+                <span style={s.col}>{tm.soldRate === null ? '—' : `${tm.soldRate}%`}</span>
+              </div>
+            ))}
+          </Card>
+        )}
+      </section>
 
       {leads.length > 0 && (
         <>
@@ -395,6 +457,18 @@ const s = {
   }),
   statsRow: { display: 'flex', gap: 32, marginBottom: 20, flexWrap: 'wrap' },
   breakdownCard: { marginBottom: 16 },
+  tmPerfSection: { marginBottom: 28 },
+  headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 },
+  periodRow: { display: 'flex', gap: 6 },
+  periodBtn: (active) => ({
+    padding: '8px 14px', borderRadius: 6, fontSize: 11, fontWeight: 700, letterSpacing: 0.3, cursor: 'pointer', border: 'none',
+    background: active ? 'var(--accent-gradient)' : 'var(--bg-elevated)', color: active ? 'var(--accent-on)' : 'var(--text-secondary)',
+  }),
+  tableCard: { padding: 0, overflow: 'hidden' },
+  tmTableHeaderRow: { display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', padding: '10px 16px', fontSize: 10, letterSpacing: 1, color: 'var(--text-muted)', fontWeight: 700, borderBottom: '1px solid var(--border-hairline)' },
+  tmTableRow: { display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', padding: '10px 16px', fontSize: 12, color: 'var(--text-primary)', borderBottom: '1px solid var(--border-hairline)', alignItems: 'center' },
+  colVendor: { fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 },
+  col: { color: 'var(--text-secondary)' },
   breakdownTitle: { color: 'var(--text-muted)', fontSize: 11, letterSpacing: 1.5, fontWeight: 700, marginBottom: 10 },
   tmFilterRow: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 },
   tmChip: (active) => ({

@@ -9,6 +9,7 @@
 export const NAV_BY_ROLE = {
   PRODUCER: [
     { label: 'Home', to: '/producer', icon: 'home', primary: true },
+    { label: 'My Leads', to: '/producer/my-leads', icon: 'leads', primary: true },
     { label: 'Team Chat', to: '/producer/team-chat', icon: 'chat', primary: true },
     { label: 'Coaching', to: '/producer/coaching', icon: 'phone', primary: true },
     { label: 'Training', to: '/producer/training', icon: 'book', primary: true },
@@ -23,6 +24,7 @@ export const NAV_BY_ROLE = {
   AGENCY_OWNER: [
     { label: 'Main Stage', to: '/agency', icon: 'home', primary: true },
     { label: 'Yield Transfers', to: '/agency/transfers', icon: 'transfer', primary: true },
+    { label: 'Moshpit', to: '/agency/moshpit', icon: 'flame' },
     { label: 'Winbacks & Cross-Sells', to: '/agency/opportunities', icon: 'target' },
     { label: 'Financials', to: '/agency/financials', icon: 'dollar', primary: true },
     { label: 'Goals', to: '/agency/goals', icon: 'flag', primary: true },

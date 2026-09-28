@@ -235,6 +235,7 @@ model User {
   tasksAssigned     Task[]           @relation("TaskAssignee")
   tasksCreated      Task[]           @relation("TaskCreatedBy")
   leadNotes         LeadNote[]
+  leadActivities    LeadActivity[]
   auditEvents       AuditEvent[]
   sessions          Session[]
   telemarketerAssignments TelemarketerAssignment[] @relation("TMAssignments")
@@ -419,10 +420,11 @@ model Lead {
   callbackTime      String?
   tmNotes           String?
 
-  events LeadEvent[]
-  notes  LeadNote[]
-  tasks  Task[]
-  calls  Call[]
+  events     LeadEvent[]
+  notes      LeadNote[]
+  tasks      Task[]
+  calls      Call[]
+  activities LeadActivity[]
 
   @@index([agencyId])
   @@index([assignedToId])
@@ -452,6 +454,36 @@ model LeadNote {
   author    User     @relation(fields: [authorId], references: [id])
   content   String
   createdAt DateTime @default(now())
+
+  @@index([leadId])
+}
+
+// A logged interaction with a lead — "I called them", "I emailed them",
+// "I texted them" — separate from LeadNote (freeform notes) and LeadEvent
+// (system-generated status-change audit trail). This is what "activity
+// count" on a lead means: real, producer-logged contact attempts.
+enum LeadActivityType {
+  CALL
+  EMAIL
+  TEXT
+}
+
+enum ActivityDirection {
+  OUTBOUND
+  INBOUND
+}
+
+model LeadActivity {
+  id          String            @id @default(uuid())
+  leadId      String
+  lead        Lead              @relation(fields: [leadId], references: [id])
+  type        LeadActivityType
+  direction   ActivityDirection @default(OUTBOUND)
+  outcome     String?
+  createdById String
+  createdBy   User              @relation(fields: [createdById], references: [id])
+  occurredAt  DateTime          @default(now())
+  createdAt   DateTime          @default(now())
 
   @@index([leadId])
 }

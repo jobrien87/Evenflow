@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Card, SectionHeader, Button, ExportButton } from '../ui';
 import { downloadCsv } from '../lib/downloadCsv';
@@ -16,7 +17,8 @@ const pct = (v) => (v === null || v === undefined ? '—' : `${v}%`);
 // /financials/by-agent — real Lead/CostEvent/salePremiumCents data, same
 // "quoted or beyond" definition funnelMetrics.js's quoteRate uses. No
 // second, divergent computation of the same KPI.
-export default function PerformanceLeaderboards({ agencyId, title = 'PERFORMANCE', highlightUserId, showVendors = true }) {
+export default function PerformanceLeaderboards({ agencyId, title = 'PERFORMANCE', highlightUserId, showVendors = true, linkToDetail = false }) {
+  const navigate = useNavigate();
   const [periodKey, setPeriodKey] = useState('month');
   const [vendors, setVendors] = useState(null);
   const [agents, setAgents] = useState(null);
@@ -157,7 +159,14 @@ export default function PerformanceLeaderboards({ agencyId, title = 'PERFORMANCE
                 <div style={s.noDataRow}>No producer activity yet — leads assigned to a producer in this period will rank here.</div>
               )}
               {agents.map((a, i) => (
-                <div key={a.userId} style={a.userId === highlightUserId ? { ...s.agentRow, ...s.agentRowMe } : s.agentRow}>
+                <div
+                  key={a.userId}
+                  style={{
+                    ...(a.userId === highlightUserId ? { ...s.agentRow, ...s.agentRowMe } : s.agentRow),
+                    ...(linkToDetail ? { cursor: 'pointer' } : {}),
+                  }}
+                  onClick={linkToDetail ? () => navigate(`/agency/producers/${a.userId}`) : undefined}
+                >
                   <div style={s.colRank}><RankBadge n={i + 1} /></div>
                   <div style={s.colName}>{a.firstName} {a.lastName}{a.userId === highlightUserId && <span style={s.meTag}>YOU</span>}</div>
                   <div style={s.colNum}>{a.leadsAssigned}</div>

@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
+import { useIsMobile } from '../lib/useViewport';
 import { Button, Modal, ProgressRing, EdSuggestionBox } from '../ui';
 import FlowScoreCard from './FlowScoreCard';
+import LeadsSnapshotBox from './LeadsSnapshotBox';
 import FunnelMetricsCard from './FunnelMetricsCard';
 import Customer360Modal from './Customer360Modal';
 import RunningReportPage from './RunningReportPage';
@@ -12,6 +14,7 @@ import PerformanceLeaderboards from './PerformanceLeaderboards';
 
 export default function AgencyOwnerDashboard() {
   const { user } = useAuth();
+  const isMobile = useIsMobile();
   const [searchParams, setSearchParams] = useSearchParams();
   const [leads, setLeads] = useState([]);
   const [users, setUsers] = useState([]);
@@ -175,7 +178,10 @@ export default function AgencyOwnerDashboard() {
         <div style={s.settingsRow}>
           <Button variant="secondary" size="sm" onClick={() => setShowSettings(true)}>AGENCY SETTINGS</Button>
         </div>
-        <FlowScoreCard scope="agency" agencyId={user?.agencyId} title="AGENCY FLOW SCORE" onViewReport={() => setShowReport(true)} />
+        <div style={isMobile ? s.topStacked : s.topSplit}>
+          <FlowScoreCard scope="agency" agencyId={user?.agencyId} title="AGENCY FLOW SCORE" onViewReport={() => setShowReport(true)} />
+          <LeadsSnapshotBox agencyId={user?.agencyId} />
+        </div>
       </section>
 
       <section style={s.section}>
@@ -187,7 +193,7 @@ export default function AgencyOwnerDashboard() {
       </section>
 
       <section style={s.section}>
-        <PerformanceLeaderboards agencyId={user?.agencyId} />
+        <PerformanceLeaderboards agencyId={user?.agencyId} linkToDetail />
       </section>
 
       <section style={s.section}>
@@ -346,6 +352,8 @@ const s = {
   editUserError: { color: 'var(--danger)', fontSize: 12, width: '100%', marginTop: 4 },
   section: { marginBottom: 32 },
   settingsRow: { display: 'flex', justifyContent: 'flex-end', marginBottom: 8 },
+  topSplit: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'stretch' },
+  topStacked: { display: 'flex', flexDirection: 'column', gap: 20 },
   inlineEditForm: { display: 'flex', gap: 8, alignItems: 'center', padding: '8px 14px', background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 8, marginTop: -4, marginBottom: 8 },
   trendRow: { display: 'flex', gap: 4, alignItems: 'flex-end', height: 40, justifyContent: 'center' },
   trendBar: (score) => ({ width: 10, height: `${Math.max(4, score) / 100 * 40}px`, background: 'var(--border-accent)', borderRadius: 2 }),

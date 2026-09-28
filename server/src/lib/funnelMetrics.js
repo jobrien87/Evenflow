@@ -17,11 +17,16 @@ function median(values) {
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 }
 
-// { agencyId, userId?, from, to } — userId omitted means agency-wide.
-async function computeFunnel({ agencyId, userId, from, to }) {
+// { agencyId, userId?, vendorId?, product?, from, to } — userId omitted
+// means agency-wide; vendorId/product further narrow to one vendor or
+// one product/lead-type (used by the per-vendor and per-product
+// performance breakdowns).
+async function computeFunnel({ agencyId, userId, vendorId, product, from, to }) {
   const where = {
     agencyId,
     ...(userId ? { assignedToId: userId } : {}),
+    ...(vendorId ? { vendorId } : {}),
+    ...(product ? { product } : {}),
     receivedAt: { gte: from, lte: to },
   };
   const leads = await prisma.lead.findMany({
@@ -54,4 +59,4 @@ async function computeFunnel({ agencyId, userId, from, to }) {
   };
 }
 
-module.exports = { computeFunnel };
+module.exports = { computeFunnel, pct };

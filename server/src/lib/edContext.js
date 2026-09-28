@@ -1,6 +1,7 @@
 const { prisma } = require('./db');
 const { computeProfitability, computeROI } = require('./financialCalc');
 const { computeGoalActual, assembleAgencyReport } = require('./runningReport');
+const { computeVendorBreakdown, computeTelemarketerPerformance } = require('./performanceBreakdown');
 
 // Everything in here is plain arithmetic against real rows — per spec,
 // "ED should use deterministic database calculations for goals, pace,
@@ -12,14 +13,19 @@ async function buildProducerContext(user) {
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
-  const [openLeads, openTasks, monthlySales, goal] = await Promise.all([
+  const [openLeads, untouchedLeads, openTasks, monthlySales, goal, vendorBreakdown] = await Promise.all([
     prisma.lead.count({ where: { assignedToId: user.id, status: { in: ['NEW', 'ASSIGNED', 'ATTEMPTED', 'CONTACTED', 'FOLLOW_UP'] } } }),
+    prisma.lead.count({ where: { assignedToId: user.id, firstAttemptAt: null, archivedAt: null } }),
     prisma.task.count({ where: { assignedToId: user.id, status: { in: ['OPEN', 'IN_PROGRESS'] } } }),
     // Same real "sales this month" count runningReport.js's goal-progress
     // math uses — one source of truth for what "actual" means, whether or
     // not a Goal row happens to exist.
     computeGoalActual({ metric: 'sales', userId: user.id, agencyId: user.agencyId, periodStart: monthStart, periodEnd: monthEnd }),
     prisma.goal.findFirst({ where: { userId: user.id, metric: 'sales', periodStart: { lte: now }, periodEnd: { gte: now } } }),
+    // Real per-vendor numbers for this producer's own leads this month —
+    // so Ed can answer "which vendor is working for me" grounded in the
+    // same numbers the My Leads tab shows, not a second computation.
+    user.agencyId ? computeVendorBreakdown({ agencyId: user.agencyId, userId: user.id, from: monthStart, to: monthEnd }) : [],
   ]);
 
   let pace = null;
@@ -39,9 +45,11 @@ async function buildProducerContext(user) {
     role: 'PRODUCER',
     firstName: user.firstName,
     openLeads,
+    untouchedLeads,
     openTasks,
     monthlySales,
     pace,
+    vendorBreakdown,
   };
 }
 
@@ -49,9 +57,11 @@ async function buildAgencyOwnerContext(agencyId) {
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  const [openLeads, overdueLeads, offeredTransfers, acceptedTransfers, rejectedTransfers, revenueAgg, costAgg, producerCount, agencyReport] = await Promise.all([
+  const [openLeads, overdueLeads, untouchedLeads, inMoshpit, offeredTransfers, acceptedTransfers, rejectedTransfers, revenueAgg, costAgg, producerCount, agencyReport, vendorBreakdown, telemarketerPerformance] = await Promise.all([
     prisma.lead.count({ where: { agencyId, status: { in: ['NEW', 'ASSIGNED', 'ATTEMPTED', 'CONTACTED', 'FOLLOW_UP'] } } }),
     prisma.lead.count({ where: { agencyId, status: { in: ['NEW', 'ASSIGNED'] }, receivedAt: { lt: new Date(now.getTime() - 60 * 60 * 1000) } } }),
+    prisma.lead.count({ where: { agencyId, firstAttemptAt: null, archivedAt: null, receivedAt: { gte: monthStart } } }),
+    prisma.lead.count({ where: { agencyId, assignedToId: null, archivedAt: null, vendor: { distributionMode: 'MOSHPIT' } } }),
     prisma.transfer.count({ where: { agencyId, createdAt: { gte: monthStart } } }),
     prisma.transfer.count({ where: { agencyId, status: { in: ['ACCEPTED', 'CONNECTED', 'COMPLETED', 'DISPOSITIONED'] }, createdAt: { gte: monthStart } } }),
     prisma.transfer.count({ where: { agencyId, status: 'REJECTED', createdAt: { gte: monthStart } } }),
@@ -63,6 +73,12 @@ async function buildAgencyOwnerContext(agencyId) {
     // second scoring pass — so Ed can answer "who needs attention" grounded
     // in real numbers instead of only aggregate agency totals.
     assembleAgencyReport(agencyId),
+    // Real agency-wide vendor performance this month — same numbers the
+    // Vendor Leaderboard/Financials pages show, not a second computation.
+    computeVendorBreakdown({ agencyId, from: monthStart, to: now }),
+    // Real per-TM submission/sold numbers this month — same numbers the
+    // Yield Transfers "Telemarketer Performance" section shows.
+    computeTelemarketerPerformance({ agencyId, from: monthStart, to: now }),
   ]);
 
   const revenueCents = revenueAgg._sum.amountCents || 0;
@@ -73,6 +89,8 @@ async function buildAgencyOwnerContext(agencyId) {
     role: 'AGENCY_OWNER',
     openLeads,
     overdueLeads,
+    untouchedLeads,
+    inMoshpit,
     producerCount,
     transfersThisMonth: offeredTransfers,
     transfersAccepted: acceptedTransfers,
@@ -83,6 +101,8 @@ async function buildAgencyOwnerContext(agencyId) {
     monthGrossProfit: profitability.grossProfit,
     marginPercent: profitability.marginPercent,
     producerRoster: agencyReport.roster,
+    vendorBreakdown,
+    telemarketerPerformance,
   };
 }
 

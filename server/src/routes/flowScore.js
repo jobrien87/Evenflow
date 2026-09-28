@@ -1,14 +1,7 @@
 const express = require('express');
 const { prisma } = require('../lib/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
-const { explainScore, COMPONENT_LABELS } = require('../lib/flowScore');
-
-// Turns { key: 'Label' } into [{ key, label }] — the shape the client's
-// "no data yet" placeholder rows render, matching explainScore's own
-// component shape closely enough to reuse the same rendering code.
-function componentPlaceholders(role) {
-  return Object.entries(COMPONENT_LABELS[role] || {}).map(([key, label]) => ({ key, label }));
-}
+const { explainScore, componentPlaceholders } = require('../lib/flowScore');
 
 const router = express.Router();
 router.use(requireAuth);

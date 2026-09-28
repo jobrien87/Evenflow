@@ -300,6 +300,13 @@ function explainScore(snapshot) {
   };
 }
 
+// Turns { key: 'Label' } into [{ key, label }] — the shape a "no data yet"
+// placeholder UI renders in place of real components, close enough to
+// explainScore's own component shape to reuse the same rendering code.
+function componentPlaceholders(role) {
+  return Object.entries(COMPONENT_LABELS[role] || {}).map(([key, label]) => ({ key, label }));
+}
+
 module.exports = {
   computeProducerScore,
   computeTelemarketerScore,
@@ -307,6 +314,7 @@ module.exports = {
   explainScore,
   getActiveWeightConfig,
   combineComponents,
+  componentPlaceholders,
   COMPONENT_LABELS,
   DEFAULT_WEIGHTS,
 };

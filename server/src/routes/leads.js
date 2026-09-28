@@ -61,6 +61,8 @@ router.get('/', async (req, res, next) => {
           customer: true,
           assignedTo: { select: { id: true, firstName: true, lastName: true } },
           createdBy: { select: { id: true, firstName: true, lastName: true } },
+          vendor: { select: { id: true, name: true } },
+          _count: { select: { activities: true, notes: true } },
         },
         orderBy: [{ priorityScore: 'desc' }, { receivedAt: 'desc' }],
         skip: (page - 1) * pageSize,
@@ -329,6 +331,42 @@ router.get('/moshpit', async (req, res, next) => {
   }
 });
 
+// Registered before /:leadId for the same anti-shadowing reason as /funnel.
+// The Main Stage "leads snapshot" box — total/Moshpit/untouched/quoted/sold
+// counts for a date range, all scoped to receivedAt so every number moves
+// together with the same date-range selector.
+router.get('/snapshot', async (req, res, next) => {
+  try {
+    if (!['AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'].includes(req.user.role)) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    const agencyId = scopeAgencyId(req);
+    if (req.user.role !== 'PLATFORM_OWNER' && !agencyId) {
+      return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+    }
+
+    const to = req.query.to ? new Date(req.query.to) : new Date();
+    const from = req.query.from ? new Date(req.query.from) : new Date(to.getFullYear(), to.getMonth(), 1);
+    const baseWhere = { agencyId, receivedAt: { gte: from, lte: to }, archivedAt: null };
+
+    const [totalLeads, untouched, quoted, sold, inMoshpit] = await Promise.all([
+      prisma.lead.count({ where: baseWhere }),
+      prisma.lead.count({ where: { ...baseWhere, firstAttemptAt: null } }),
+      prisma.lead.count({ where: { ...baseWhere, status: { in: ['QUOTE_STARTED', 'QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'] } } }),
+      prisma.lead.count({ where: { ...baseWhere, status: 'SOLD' } }),
+      prisma.lead.count({ where: { ...baseWhere, assignedToId: null, vendor: { distributionMode: 'MOSHPIT' } } }),
+    ]);
+
+    return res.json({
+      success: true,
+      period: { from: from.toISOString(), to: to.toISOString() },
+      totalLeads, untouched, quoted, sold, inMoshpit,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Atomic optimistic claim — the updateMany's assignedToId: null guard is
 // what makes this race-safe: if two producers claim the same lead at
 // the same instant, only one updateMany can match assignedToId: null
@@ -404,9 +442,11 @@ router.get('/:leadId', async (req, res, next) => {
         customer: true,
         assignedTo: { select: { id: true, firstName: true, lastName: true } },
         createdBy: { select: { id: true, firstName: true, lastName: true } },
+        vendor: { select: { id: true, name: true, product: true } },
         events: { orderBy: { createdAt: 'desc' } },
         notes: { include: { author: { select: { firstName: true, lastName: true } } }, orderBy: { createdAt: 'desc' } },
-        tasks: { orderBy: { createdAt: 'desc' } },
+        activities: { include: { createdBy: { select: { firstName: true, lastName: true } } }, orderBy: { occurredAt: 'desc' } },
+        tasks: { include: { assignedTo: { select: { id: true, firstName: true, lastName: true } } }, orderBy: { createdAt: 'desc' } },
       },
     });
     if (!lead) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
@@ -414,6 +454,86 @@ router.get('/:leadId', async (req, res, next) => {
       return res.status(403).json({ success: false, error: 'FORBIDDEN' });
     }
     return res.json({ success: true, lead });
+  } catch (err) {
+    next(err);
+  }
+});
+
+async function loadLeadWithAccessCheck(req) {
+  const lead = await prisma.lead.findUnique({ where: { id: req.params.leadId } });
+  if (!lead) return { lead: null, forbidden: false };
+  if (req.user.role !== 'PLATFORM_OWNER' && lead.agencyId !== req.user.agencyId) {
+    return { lead, forbidden: true };
+  }
+  return { lead, forbidden: false };
+}
+
+const activitySchema = z.object({
+  type: z.enum(['CALL', 'EMAIL', 'TEXT']),
+  direction: z.enum(['OUTBOUND', 'INBOUND']).optional().default('OUTBOUND'),
+  outcome: z.string().optional(),
+  occurredAt: z.string().datetime().optional(),
+});
+
+// Log a real interaction with a lead — "I called them", "I emailed them",
+// "I texted them" — distinct from LeadNote (freeform notes) and LeadEvent
+// (system-generated status-change history). This is what "activity count"
+// on a lead means.
+router.post('/:leadId/activities', async (req, res, next) => {
+  try {
+    const parsed = activitySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+    const { lead, forbidden } = await loadLeadWithAccessCheck(req);
+    if (!lead) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (forbidden) return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+
+    const activity = await prisma.leadActivity.create({
+      data: {
+        leadId: lead.id,
+        type: parsed.data.type,
+        direction: parsed.data.direction,
+        outcome: parsed.data.outcome || null,
+        createdById: req.user.id,
+        occurredAt: parsed.data.occurredAt ? new Date(parsed.data.occurredAt) : new Date(),
+      },
+      include: { createdBy: { select: { firstName: true, lastName: true } } },
+    });
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: lead.agencyId,
+      action: 'lead.activity_logged', entityType: 'Lead', entityId: lead.id,
+      after: { type: activity.type, direction: activity.direction }, correlationId: req.correlationId,
+    });
+
+    return res.status(201).json({ success: true, activity });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const noteSchema = z.object({ content: z.string().min(1) });
+
+// Standalone note creation — previously a note could only be attached as
+// a side effect of a disposition change; this lets a producer jot a note
+// without also changing the lead's status.
+router.post('/:leadId/notes', async (req, res, next) => {
+  try {
+    const parsed = noteSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+    const { lead, forbidden } = await loadLeadWithAccessCheck(req);
+    if (!lead) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (forbidden) return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+
+    const note = await prisma.leadNote.create({
+      data: { leadId: lead.id, authorId: req.user.id, content: parsed.data.content },
+      include: { author: { select: { firstName: true, lastName: true } } },
+    });
+
+    return res.status(201).json({ success: true, note });
   } catch (err) {
     next(err);
   }

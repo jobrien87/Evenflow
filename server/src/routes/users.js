@@ -7,6 +7,9 @@ const { recordAudit } = require('../lib/audit');
 const { sendInvitationEmail } = require('../lib/email');
 const { reissueInvitation } = require('../lib/invitations');
 const { syncSeatCountForAgency } = require('../lib/seatBilling');
+const { explainScore, componentPlaceholders } = require('../lib/flowScore');
+const { computeFunnel } = require('../lib/funnelMetrics');
+const { computeVendorBreakdown, computeProductBreakdown } = require('../lib/performanceBreakdown');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -210,6 +213,61 @@ router.post('/:userId/deactivate', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER',
     });
     if (target.agencyId) await syncSeatCountForAgency(target.agencyId);
     return res.json({ success: true, user: { id: updated.id, status: updated.status } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Full KPI breakdown for one Producer/Telemarketer — Flow Score + why,
+// funnel, per-vendor and per-lead-type numbers, all for one date range.
+// Used both by "My Leads" (a producer viewing their own id) and the
+// Agency Owner's Producer Detail drill-down (any producer in their own
+// agency). Reuses the exact same funnel/breakdown functions either way —
+// no second implementation for "my own numbers" vs "someone else's".
+router.get('/:userId/performance', async (req, res, next) => {
+  try {
+    const target = await prisma.user.findUnique({ where: { id: req.params.userId } });
+    if (!target) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    const isSelf = target.id === req.user.id;
+    if (!isSelf && req.user.role !== 'PLATFORM_OWNER' && target.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    if (!['PRODUCER', 'TELEMARKETER'].includes(target.role)) {
+      return res.status(400).json({ success: false, error: 'NOT_APPLICABLE', message: 'Performance breakdown applies to Producers and Telemarketers.' });
+    }
+
+    const to = req.query.to ? new Date(req.query.to) : new Date();
+    const from = req.query.from ? new Date(req.query.from) : new Date(to.getFullYear(), to.getMonth(), 1);
+
+    const snapshot = await prisma.flowScoreSnapshot.findFirst({
+      where: { subjectType: 'USER', subjectId: target.id },
+      orderBy: { computedAt: 'desc' },
+    });
+
+    // A Telemarketer has no agencyId of their own — vendor/product
+    // breakdown is a per-agency-lead-source concept that doesn't apply to
+    // them the same way (their own dedicated performance view is
+    // GET /telemarketers/:id/performance instead).
+    const agencyId = target.agencyId;
+    const [funnel, vendorBreakdown, productBreakdown] = agencyId
+      ? await Promise.all([
+          computeFunnel({ agencyId, userId: target.id, from, to }),
+          computeVendorBreakdown({ agencyId, userId: target.id, from, to }),
+          computeProductBreakdown({ agencyId, userId: target.id, from, to }),
+        ])
+      : [null, [], []];
+
+    return res.json({
+      success: true,
+      user: { id: target.id, firstName: target.firstName, lastName: target.lastName, role: target.role },
+      period: { from: from.toISOString(), to: to.toISOString() },
+      snapshot,
+      explanation: snapshot ? explainScore(snapshot) : null,
+      componentPlaceholders: snapshot ? null : componentPlaceholders(target.role),
+      funnel,
+      vendorBreakdown,
+      productBreakdown,
+    });
   } catch (err) {
     next(err);
   }

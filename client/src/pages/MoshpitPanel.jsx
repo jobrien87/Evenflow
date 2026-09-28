@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import { useAuth } from '../lib/AuthContext';
 import { Card, Badge, Button, SectionHeader, EmptyState } from '../ui';
 
 // Polls the claimable pool the same way NotificationBell polls unread
@@ -15,6 +16,8 @@ function InfoRow({ icon, children }) {
 }
 
 export default function MoshpitPanel() {
+  const { user } = useAuth();
+  const canClaim = user?.role === 'PRODUCER';
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -79,7 +82,9 @@ export default function MoshpitPanel() {
         <h3 style={s.h3}>MOSHPIT ({leads.length})</h3>
       </div>
       <div style={s.subhead}>
-        First to claim it gets it. These leads aren't assigned to anyone — grab one before someone else does.
+        {canClaim
+          ? "First to claim it gets it. These leads aren't assigned to anyone — grab one before someone else does."
+          : "Every unclaimed lead sitting in the Moshpit right now, agency-wide. Producers get notified the moment one lands and can claim it from their own Moshpit tab."}
       </div>
 
       {error && (
@@ -116,14 +121,16 @@ export default function MoshpitPanel() {
                 <InfoRow icon="📍">{[c?.state, c?.zip].filter(Boolean).join(' ') || null}</InfoRow>
               </div>
 
-              <Button
-                variant="primary"
-                style={s.claimButton}
-                disabled={claimingId === lead.id}
-                onClick={() => claim(lead.id)}
-              >
-                {claimingId === lead.id ? 'CLAIMING…' : 'CLAIM'}
-              </Button>
+              {canClaim && (
+                <Button
+                  variant="primary"
+                  style={s.claimButton}
+                  disabled={claimingId === lead.id}
+                  onClick={() => claim(lead.id)}
+                >
+                  {claimingId === lead.id ? 'CLAIMING…' : 'CLAIM'}
+                </Button>
+              )}
             </Card>
           );
         })}

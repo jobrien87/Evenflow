@@ -33,12 +33,18 @@ export const api = {
   startMyDay: () => request('/start-my-day'),
 
   leads: (params = '') => request(`/leads${params}`),
+  leadDetail: (id) => request(`/leads/${id}`),
   leadFunnel: (params = '') => request(`/leads/funnel${params}`),
+  leadsSnapshot: (params = '') => request(`/leads/snapshot${params}`),
   createLead: (payload) => request('/leads', { method: 'POST', body: payload }),
   dispositionLead: (id, payload) => request(`/leads/${id}/disposition`, { method: 'POST', body: payload }),
   moshpitLeads: () => request('/leads/moshpit'),
   claimLead: (id) => request(`/leads/${id}/claim`, { method: 'POST' }),
+  logLeadActivity: (id, payload) => request(`/leads/${id}/activities`, { method: 'POST', body: payload }),
+  createLeadNote: (id, content) => request(`/leads/${id}/notes`, { method: 'POST', body: { content } }),
 
+  tasks: (params = '') => request(`/tasks${params}`),
+  createTask: (payload) => request('/tasks', { method: 'POST', body: payload }),
   completeTask: (id, payload) => request(`/tasks/${id}/complete`, { method: 'POST', body: payload }),
 
   agencies: (params = '') => request(`/agencies${params}`),
@@ -55,8 +61,11 @@ export const api = {
   updateUser: (userId, payload) => request(`/users/${userId}`, { method: 'PATCH', body: payload }),
   deactivateUser: (userId) => request(`/users/${userId}/deactivate`, { method: 'POST' }),
   resendUserInvite: (userId) => request(`/users/${userId}/resend-invite`, { method: 'POST' }),
+  userPerformance: (userId, params = '') => request(`/users/${userId}/performance${params}`),
 
   telemarketers: () => request('/telemarketers'),
+  telemarketerAgencyRoster: (params = '') => request(`/telemarketers/agency-roster${params}`),
+  telemarketerPerformance: (params = '') => request(`/telemarketers/performance${params}`),
   myAssignments: () => request('/telemarketers/me/assignments'),
   inviteTelemarketer: (payload) => request('/telemarketers/invite', { method: 'POST', body: payload }),
   assignTelemarketer: (payload) => request('/telemarketers/assign', { method: 'POST', body: payload }),

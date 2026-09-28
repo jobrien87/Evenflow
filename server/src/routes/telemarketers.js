@@ -6,6 +6,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { sendInvitationEmail } = require('../lib/email');
 const { reissueInvitation } = require('../lib/invitations');
+const { computeTelemarketerPerformance } = require('../lib/performanceBreakdown');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -24,6 +25,50 @@ router.get('/', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
     });
     return res.json({ success: true, telemarketers: tms });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// An Agency Owner/Manager's own roster of TMs actively assigned to them —
+// telemarketers.js's GET / is Platform-Owner-only (every TM platform-wide),
+// but an agency needs to see just its own, to show performance for.
+router.get('/agency-roster', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const agencyId = req.user.role === 'PLATFORM_OWNER' ? req.query.agencyId : req.user.agencyId;
+    if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+
+    const assignments = await prisma.telemarketerAssignment.findMany({
+      where: { agencyId, status: 'ACTIVE' },
+      include: { telemarketer: { select: { id: true, firstName: true, lastName: true, email: true, status: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    return res.json({ success: true, telemarketers: assignments.map((a) => ({ ...a.telemarketer, assignedAt: a.createdAt })) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Per-TM performance for this agency's roster over a date range — leads
+// submitted (source: 'telemarketer', createdById: tm.id), sold count/rate.
+// Registered before /:id/resend-invite is irrelevant (different HTTP verb/
+// path shape) but kept above the param routes for consistency with this
+// app's usual anti-shadowing placement.
+router.get('/performance', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const agencyId = req.user.role === 'PLATFORM_OWNER' ? req.query.agencyId : req.user.agencyId;
+    if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+
+    const to = req.query.to ? new Date(req.query.to) : new Date();
+    const from = req.query.from ? new Date(req.query.from) : new Date(to.getFullYear(), to.getMonth(), 1);
+
+    const telemarketers = await computeTelemarketerPerformance({ agencyId, from, to });
+
+    return res.json({
+      success: true,
+      period: { from: from.toISOString(), to: to.toISOString() },
+      telemarketers,
+    });
   } catch (err) {
     next(err);
   }

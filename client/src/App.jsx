@@ -13,6 +13,8 @@ import TrainingPanel from './pages/TrainingPanel';
 import OpportunitiesPanel from './pages/OpportunitiesPanel';
 import TeamChatPanel from './pages/TeamChatPanel';
 import MoshpitPanel from './pages/MoshpitPanel';
+import MyLeadsPanel from './pages/MyLeadsPanel';
+import ProducerDetailPage from './pages/ProducerDetailPage';
 
 import AgencyOwnerDashboard from './pages/AgencyOwnerDashboard';
 import YieldTransfersPanel from './pages/YieldTransfersPanel';
@@ -59,11 +61,13 @@ export default function App() {
           <Route path="producer/training" element={<TrainingPanel />} />
           <Route path="producer/opportunities" element={<OpportunitiesPanel />} />
           <Route path="producer/moshpit" element={<MoshpitPanel />} />
+          <Route path="producer/my-leads" element={<MyLeadsPanel />} />
         </Route>
 
         <Route element={<RoleGate allow={['AGENCY_OWNER', 'AGENCY_MANAGER']} />}>
           <Route path="agency" element={<AgencyOwnerDashboard />} />
           <Route path="agency/transfers" element={<YieldTransfersPanel />} />
+          <Route path="agency/moshpit" element={<MoshpitPanel />} />
           <Route path="agency/vendors" element={<VendorsPanel />} />
           <Route path="agency/financials" element={<FinancialsPanel />} />
           <Route path="agency/support" element={<SupportPanel />} />
@@ -72,6 +76,7 @@ export default function App() {
           <Route path="agency/training" element={<CoursesAdminPanel />} />
           <Route path="agency/opportunities" element={<OpportunitiesPanel />} />
           <Route path="agency/goals" element={<GoalsPanel />} />
+          <Route path="agency/producers/:userId" element={<ProducerDetailPage />} />
         </Route>
 
         <Route element={<RoleGate allow={['PLATFORM_OWNER']} />}>
