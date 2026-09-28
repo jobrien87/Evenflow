@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
+import { EdSuggestionBox } from '../ui';
 import FlowScoreCard from './FlowScoreCard';
 import FunnelMetricsCard from './FunnelMetricsCard';
 import PerformanceLeaderboards from './PerformanceLeaderboards';
@@ -78,6 +79,10 @@ export default function ProducerDashboard() {
     <div style={s.wrap}>
       <section style={s.section}>
         <FlowScoreCard scope="me" onViewReport={() => setShowReport(true)} />
+      </section>
+
+      <section style={s.section}>
+        <EdSuggestionBox pageContext="producer_dashboard" />
       </section>
 
       <section style={s.section}>

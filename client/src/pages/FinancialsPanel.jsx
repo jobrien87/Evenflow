@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { ExportButton } from '../ui';
+import { ExportButton, EdSuggestionBox } from '../ui';
 import { downloadCsv, fetchAllPages } from '../lib/downloadCsv';
 
 const REVENUE_CATEGORIES = ['SUBSCRIPTION', 'TRANSFER_REVENUE', 'LEAD_REVENUE', 'OTHER'];
@@ -95,6 +95,10 @@ export default function FinancialsPanel() {
           {new Date(summary.period.from).toLocaleDateString()} – {new Date(summary.period.to).toLocaleDateString()}
         </div>
         <ExportButton label="EXPORT FULL LEDGER" onExport={exportLedger} />
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <EdSuggestionBox pageContext="financials" />
       </div>
 
       <div style={s.statsRow}>

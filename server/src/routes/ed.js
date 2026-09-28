@@ -4,7 +4,7 @@ const { z } = require('zod');
 const { prisma } = require('../lib/db');
 const { requireAuth } = require('../middleware/auth');
 const { buildContextForUser, buildBriefingContext } = require('../lib/edContext');
-const { buildSystemPrompt, buildBriefingPrompt } = require('../lib/edPersonality');
+const { buildSystemPrompt, buildBriefingPrompt, buildSuggestionPrompt } = require('../lib/edPersonality');
 const { callEd, isConfigured } = require('../lib/aiProvider');
 const { estimateCostMicros } = require('../lib/aiCost');
 const { recordAudit } = require('../lib/audit');
@@ -30,6 +30,16 @@ const briefingLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => req.user.id,
   message: { success: false, error: 'RATE_LIMITED', message: "You've hit today's ED briefing limit. It resets tomorrow." },
+});
+// Suggestion boxes are small/cheap and can load on several pages per
+// session, so the cap here is looser than /ask or /briefing.
+const suggestionLimiter = rateLimit({
+  windowMs: 24 * 60 * 60 * 1000,
+  max: 150,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user.id,
+  message: { success: false, error: 'RATE_LIMITED', message: "You've hit today's ED suggestion limit. It resets tomorrow." },
 });
 
 function deterministicSummary(context) {
@@ -68,6 +78,13 @@ function deterministicBriefing(context) {
     return `Since your last briefing: ${context.newAgencies} new agenc${context.newAgencies === 1 ? 'y' : 'ies'}, ${context.newTransfers} new transfer(s), ${context.missedTransfers} missed.`;
   }
   return 'No briefing available for this role yet.';
+}
+
+// The same honest-degradation summary /ask falls back to, reused here —
+// no page-specific fabrication when the language layer is unavailable,
+// just the real per-role numbers already computed.
+function deterministicSuggestion(context) {
+  return deterministicSummary(context);
 }
 
 router.get('/status', async (req, res) => {
@@ -212,6 +229,59 @@ router.get('/briefing', briefingLimiter, async (req, res, next) => {
       }),
       prisma.user.update({ where: { id: req.user.id }, data: { lastBriefingAt: new Date() } }),
     ]);
+
+    return res.json({ success: true, available: true, message: result.text, context });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const SUGGESTION_PAGE_CONTEXTS = ['agency_dashboard', 'producer_dashboard', 'financials', 'goals', 'vendors'];
+const suggestSchema = z.object({
+  pageContext: z.enum(SUGGESTION_PAGE_CONTEXTS),
+  humorLevel: z.enum(['LOW', 'NORMAL', 'SPICY']).optional(),
+});
+
+// One short, proactive suggestion box for whichever page is asking —
+// reuses the exact same real, role-grounded context /ask uses (no
+// second context-builder per page), just a different, shorter prompt.
+// Never persisted to EdMessage history — this isn't a conversation.
+router.post('/suggest', suggestionLimiter, async (req, res, next) => {
+  try {
+    const parsed = suggestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+
+    const context = await buildContextForUser(req.user);
+    const fallback = deterministicSuggestion(context);
+
+    if (!isConfigured()) {
+      return res.json({ success: true, available: false, message: fallback, context });
+    }
+
+    const systemPrompt = buildSuggestionPrompt({ context, pageContext: parsed.data.pageContext, humorLevel: parsed.data.humorLevel || 'NORMAL' });
+
+    let result;
+    try {
+      result = await callEd({ systemPrompt, userMessage: 'Give me the suggestion.', maxTokens: 200 });
+    } catch (err) {
+      console.error(`[ed] suggestion provider error correlationId=${req.correlationId}`, err.message);
+      return res.json({ success: true, available: false, message: fallback, context });
+    }
+
+    const estimatedCostMicros = estimateCostMicros(result.model, result.inputTokens, result.outputTokens);
+    await prisma.aiUsageLog.create({
+      data: {
+        feature: 'ed_suggestion',
+        agencyId: req.user.agencyId,
+        userId: req.user.id,
+        model: result.model,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        estimatedCostMicros,
+      },
+    });
 
     return res.json({ success: true, available: true, message: result.text, context });
   } catch (err) {

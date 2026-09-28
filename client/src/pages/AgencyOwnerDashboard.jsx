@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { Button, Modal, ProgressRing } from '../ui';
+import { Button, Modal, ProgressRing, EdSuggestionBox } from '../ui';
 import FlowScoreCard from './FlowScoreCard';
 import FunnelMetricsCard from './FunnelMetricsCard';
 import Customer360Modal from './Customer360Modal';
@@ -176,6 +176,10 @@ export default function AgencyOwnerDashboard() {
           <Button variant="secondary" size="sm" onClick={() => setShowSettings(true)}>AGENCY SETTINGS</Button>
         </div>
         <FlowScoreCard scope="agency" agencyId={user?.agencyId} title="AGENCY FLOW SCORE" onViewReport={() => setShowReport(true)} />
+      </section>
+
+      <section style={s.section}>
+        <EdSuggestionBox pageContext="agency_dashboard" />
       </section>
 
       <section style={s.section}>

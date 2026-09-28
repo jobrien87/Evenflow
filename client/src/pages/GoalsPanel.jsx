@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { ProgressBar } from '../ui';
+import { ProgressBar, EdSuggestionBox } from '../ui';
 
 const METRICS = ['sales', 'quotes', 'calls', 'contacts', 'premium_cents', 'cross_sells', 'winbacks', 'transfers'];
 
@@ -161,6 +161,10 @@ export default function GoalsPanel() {
       <div style={s.headerRow}>
         <h3 style={s.h3}>GOALS ({goals.length})</h3>
         <button style={s.smallButton} onClick={openForm}>+ SET GOAL</button>
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <EdSuggestionBox pageContext="goals" />
       </div>
 
       <div style={s.aiBox}>

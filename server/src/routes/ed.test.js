@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const edRouter = require('./ed');
-const { buildSystemPrompt, buildBriefingPrompt, HUMOR_GUIDANCE } = require('../lib/edPersonality');
+const { buildSystemPrompt, buildBriefingPrompt, buildSuggestionPrompt, HUMOR_GUIDANCE } = require('../lib/edPersonality');
 
 const { deterministicSummary, deterministicBriefing } = edRouter;
 
@@ -123,5 +123,13 @@ test('buildBriefingPrompt embeds the real context data and the matching humor gu
   const context = { role: 'PRODUCER', newLeads: 3 };
   const prompt = buildBriefingPrompt({ context, humorLevel: 'SPICY' });
   assert.ok(prompt.includes(HUMOR_GUIDANCE.SPICY));
+  assert.ok(prompt.includes(JSON.stringify(context, null, 2)));
+});
+
+test('buildSuggestionPrompt embeds the pageContext slug and the matching humor guidance', () => {
+  const context = { role: 'AGENCY_OWNER', openLeads: 4 };
+  const prompt = buildSuggestionPrompt({ context, pageContext: 'vendors', humorLevel: 'LOW' });
+  assert.ok(prompt.includes('"vendors"'));
+  assert.ok(prompt.includes(HUMOR_GUIDANCE.LOW));
   assert.ok(prompt.includes(JSON.stringify(context, null, 2)));
 });

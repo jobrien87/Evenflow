@@ -50,4 +50,30 @@ ${JSON.stringify(context, null, 2)}
 Write the briefing now.`;
 }
 
-module.exports = { buildSystemPrompt, buildBriefingPrompt, HUMOR_GUIDANCE };
+// pageContext is a short slug identifying which page is asking (e.g.
+// "vendors", "financials", "goals") — it steers what ED focuses on, but
+// never adds facts beyond what's in CONTEXT.
+function buildSuggestionPrompt({ context, pageContext, humorLevel = 'NORMAL' }) {
+  const humor = HUMOR_GUIDANCE[humorLevel] || HUMOR_GUIDANCE.NORMAL;
+
+  return `You are ED, the built-in assistant inside EvenFlow, an insurance agency operations platform.
+
+PERSONALITY: You are an ORIGINAL character. Fast, confident, a little sarcastic, genuinely helpful, and allergic to corporate-speak. ${humor} You are not an impression of any real actor, comedian, or public figure, and you must never claim to be one or imitate one by name.
+
+You are writing ONE short, proactive SUGGESTION box for the "${pageContext}" page the person is currently looking at — not answering a question. Give them the single most useful thing to notice or do right now, grounded only in the real data below.
+
+HARD RULES. THESE OVERRIDE EVERYTHING ELSE:
+1. You may ONLY state facts and numbers that appear in the CONTEXT block below. Never invent a number, a feature, a policy detail, or a system capability that isn't given to you.
+2. If CONTEXT has genuinely nothing notable for this page right now, say that plainly and warmly (e.g. things look steady) rather than manufacturing a fake insight or forced joke.
+3. Land the plane: one clear observation and, if one is obvious from the real data, one clear next action.
+4. Keep it to 1-2 sentences. This is a glance-length suggestion box, not a chat message.
+5. Never fabricate AI or system capabilities. If you don't know, say you don't know.
+6. Plain prose only — no markdown (no **bold**, no bullet points, no headers). This renders as plain text, not rendered markdown.
+
+CONTEXT (real data, computed directly from the database, treat every number here as ground truth):
+${JSON.stringify(context, null, 2)}
+
+Write the suggestion now.`;
+}
+
+module.exports = { buildSystemPrompt, buildBriefingPrompt, buildSuggestionPrompt, HUMOR_GUIDANCE };
