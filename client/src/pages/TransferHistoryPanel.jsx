@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { Card, Badge, SectionHeader, EmptyState, ExportButton, Modal } from '../ui';
+import { Card, Badge, StatTile, BarRow, SectionHeader, EmptyState, ExportButton, Modal } from '../ui';
 import { downloadCsv } from '../lib/downloadCsv';
 
 function statusTone(status) {
@@ -29,6 +29,20 @@ export default function TransferHistoryPanel() {
 
   if (transfers === null) return <div style={{ color: 'var(--text-muted)' }}>Loading…</div>;
 
+  const total = transfers.length;
+  const won = transfers.filter((t) => statusTone(t.status) === 'accent').length;
+  const lost = transfers.filter((t) => statusTone(t.status) === 'danger').length;
+  const winRate = total > 0 ? Math.round((won / total) * 100) : 0;
+  const totalPremiumCents = transfers.reduce((sum, t) => sum + (t.salePremiumCents || 0), 0);
+  const statusBreakdown = Object.entries(
+    transfers.reduce((acc, t) => {
+      acc[t.status] = (acc[t.status] || 0) + 1;
+      return acc;
+    }, {})
+  )
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6);
+
   return (
     <div style={{ color: 'var(--text-primary)' }}>
       <SectionHeader
@@ -48,6 +62,22 @@ export default function TransferHistoryPanel() {
       >
         TRANSFER HISTORY
       </SectionHeader>
+
+      <div style={s.statsRow}>
+        <StatTile label="Total Records" value={total} />
+        <StatTile label="Won" value={won} sub={`${winRate}% win rate`} />
+        <StatTile label="Lost / Missed" value={lost} />
+        <StatTile label="Sale Premium" value={`$${(totalPremiumCents / 100).toFixed(0)}`} sub="from the old workflow" />
+      </div>
+
+      {total > 0 && (
+        <Card style={s.breakdownCard}>
+          <div style={s.breakdownTitle}>BY STATUS</div>
+          {statusBreakdown.map(([status, count]) => (
+            <BarRow key={status} label={status.replace(/_/g, ' ')} value={count} max={total} valueLabel={count} />
+          ))}
+        </Card>
+      )}
 
       {transfers.length === 0 ? (
         <EmptyState title="No historical transfers" description="Records from the old Yield Transfers workflow (before the Lead-based rebuild) will show up here." />
@@ -93,6 +123,9 @@ export default function TransferHistoryPanel() {
 }
 
 const s = {
+  statsRow: { display: 'flex', gap: 32, marginBottom: 20, flexWrap: 'wrap' },
+  breakdownCard: { marginBottom: 16 },
+  breakdownTitle: { color: 'var(--text-muted)', fontSize: 11, letterSpacing: 1.5, fontWeight: 700, marginBottom: 10 },
   row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8, cursor: 'pointer' },
   rowTitle: { fontWeight: 600, fontSize: 14 },
   rowSub: { color: 'var(--text-muted)', fontSize: 11, marginTop: 2 },

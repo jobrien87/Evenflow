@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import { StatTile, BarRow, SectionHeader } from '../ui';
 
 export default function VendorsPanel() {
   const [vendors, setVendors] = useState([]);
@@ -126,12 +127,56 @@ export default function VendorsPanel() {
     );
   }
 
+  // At-a-glance summary — derived client-side from the vendors already
+  // loaded above, no extra fetch.
+  const totalVendors = vendors.length;
+  const liveVendors = vendors.filter((v) => v.status === 'LIVE').length;
+  const vendorsWithCost = vendors.filter((v) => v.costPerLeadCents != null);
+  const avgCostPerLeadCents = vendorsWithCost.length
+    ? Math.round(vendorsWithCost.reduce((sum, v) => sum + v.costPerLeadCents, 0) / vendorsWithCost.length)
+    : null;
+  const missingCostCount = totalVendors - vendorsWithCost.length;
+  const noActiveCredentialCount = vendors.filter((v) => !(v.credentials || []).some((c) => c.status === 'ACTIVE')).length;
+  const statusCounts = vendors.reduce((acc, v) => {
+    acc[v.status] = (acc[v.status] || 0) + 1;
+    return acc;
+  }, {});
+
   return (
     <div style={s.wrap}>
       <div style={s.headerRow}>
         <h3 style={s.h3}>VENDORS ({vendors.length})</h3>
         <button style={s.button} onClick={() => setShowForm(!showForm)}>+ SEND POSTING INSTRUCTIONS</button>
       </div>
+
+      <section style={s.atGlanceSection}>
+        <SectionHeader>At a Glance</SectionHeader>
+        <div style={s.statsRow}>
+          <StatTile label="Vendors" value={totalVendors} />
+          <StatTile
+            label="Live"
+            value={liveVendors}
+            sub={totalVendors ? `${Math.round((liveVendors / totalVendors) * 100)}% of roster` : 'nothing connected yet'}
+          />
+          <StatTile
+            label="Avg Cost / Lead"
+            value={avgCostPerLeadCents !== null ? `$${(avgCostPerLeadCents / 100).toFixed(2)}` : '—'}
+            sub={missingCostCount > 0 ? `${missingCostCount} vendor${missingCostCount === 1 ? '' : 's'} untracked` : 'fully tracked'}
+          />
+          <StatTile
+            label="No Active Key"
+            value={noActiveCredentialCount}
+            sub={noActiveCredentialCount > 0 ? "can't post leads right now" : 'all wired up'}
+          />
+        </div>
+        {totalVendors > 0 && (
+          <div style={{ marginTop: 'var(--space-4)' }}>
+            {Object.entries(statusCounts).map(([status, count]) => (
+              <BarRow key={status} label={status} value={count} max={totalVendors} valueLabel={`${count}`} />
+            ))}
+          </div>
+        )}
+      </section>
 
       {showForm && (
         <form onSubmit={submit} style={s.form}>
@@ -274,6 +319,8 @@ const s = {
   loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   formError: { color: 'var(--danger)', fontSize: 13, marginTop: 8 },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  atGlanceSection: { marginBottom: 20 },
+  statsRow: { display: 'flex', gap: 32, flexWrap: 'wrap' },
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2 },
   rowHighlighted: { outline: '2px solid var(--accent)', boxShadow: 'var(--shadow-glow-accent)', borderRadius: 'var(--radius-md)' },
   button: { padding: '10px 16px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },

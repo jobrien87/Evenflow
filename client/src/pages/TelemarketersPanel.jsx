@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { Card, Badge, Button, SectionHeader, EmptyState, ExportButton } from '../ui';
+import { Card, Badge, Button, StatTile, BarRow, SectionHeader, EmptyState, ExportButton } from '../ui';
 import { downloadCsv } from '../lib/downloadCsv';
+
+const TM_STATUS_ORDER = ['ACTIVE', 'INVITED', 'DEACTIVATED'];
 
 function statusTone(status) {
   if (status === 'ACTIVE') return 'accent';
@@ -100,6 +102,15 @@ export default function TelemarketersPanel() {
     );
   }
 
+  const total = tms.length;
+  const active = tms.filter((tm) => tm.status === 'ACTIVE').length;
+  const unassigned = tms.filter((tm) => tm.telemarketerAssignments.length === 0).length;
+  const coveredAgencyIds = new Set(tms.flatMap((tm) => tm.telemarketerAssignments.map((a) => a.agency.id)));
+  const statusCounts = TM_STATUS_ORDER.map((st) => ({
+    status: st,
+    count: tms.filter((tm) => tm.status === st).length,
+  })).filter((row) => row.count > 0);
+
   return (
     <div style={s.wrap}>
       <SectionHeader
@@ -120,6 +131,22 @@ export default function TelemarketersPanel() {
       >
         TELEMARKETERS ({tms.length})
       </SectionHeader>
+
+      <div style={s.statsRow}>
+        <StatTile label="Total TMs" value={total} />
+        <StatTile label="Active" value={active} />
+        <StatTile label="Unassigned" value={unassigned} sub={unassigned > 0 ? 'sitting idle' : 'everyone has a desk'} />
+        <StatTile label="Agencies Covered" value={`${coveredAgencyIds.size}/${agencies.length}`} />
+      </div>
+
+      {total > 0 && (
+        <Card style={s.breakdownCard}>
+          <div style={s.breakdownTitle}>BY STATUS</div>
+          {statusCounts.map((row) => (
+            <BarRow key={row.status} label={row.status} value={row.count} max={total} valueLabel={row.count} />
+          ))}
+        </Card>
+      )}
 
       {showInvite && (
         <Card style={s.formCard}>
@@ -183,6 +210,9 @@ export default function TelemarketersPanel() {
 const s = {
   wrap: {},
   loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  statsRow: { display: 'flex', gap: 32, marginBottom: 20, flexWrap: 'wrap' },
+  breakdownCard: { marginBottom: 16 },
+  breakdownTitle: { color: 'var(--text-muted)', fontSize: 11, letterSpacing: 1.5, fontWeight: 700, marginBottom: 10 },
   formCard: { marginBottom: 12 },
   form: { display: 'flex', flexDirection: 'column', gap: 10 },
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },

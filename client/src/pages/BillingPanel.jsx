@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
-import { Card, Badge, Button, SectionHeader } from '../ui';
+import { Card, Badge, Button, SectionHeader, StatTile, BarRow, EmptyState } from '../ui';
 
 export default function BillingPanel() {
   const [billingStatus, setBillingStatus] = useState(null);
   const [plans, setPlans] = useState([]);
   const [agencies, setAgencies] = useState([]);
+  const [agencyTotal, setAgencyTotal] = useState(0);
   const [showPlanForm, setShowPlanForm] = useState(false);
   const [planForm, setPlanForm] = useState({ name: '', priceCents: '', interval: 'MONTHLY', crmEnabled: true, transfersEnabled: false, coachingEnabled: false });
   const [selectedAgencyId, setSelectedAgencyId] = useState('');
@@ -25,6 +26,7 @@ export default function BillingPanel() {
       setBillingStatus(statusData);
       setPlans(planData.plans);
       setAgencies(agencyData.agencies);
+      setAgencyTotal(agencyData.total ?? agencyData.agencies.length);
     } catch (err) {
       setLoadError(err.data?.message || 'Could not load billing data. Try refreshing.');
     }
@@ -75,6 +77,25 @@ export default function BillingPanel() {
     await loadSubscription(selectedAgencyId);
   }
 
+  // Computed client-side from the agencies/plans this page already loads
+  // (mrrCents/subscriptionStatus/plan come from GET /agencies' enrichAgencies —
+  // see server/src/routes/agencies.js) — no extra fetch for a billing summary.
+  const billingSummary = useMemo(() => {
+    const totalMrrCents = agencies.reduce((sum, a) => sum + (a.mrrCents || 0), 0);
+    const payingCount = agencies.filter((a) => a.subscriptionStatus === 'ACTIVE').length;
+    const activePlanCount = plans.filter((p) => p.isActive).length;
+    const planCounts = new Map();
+    for (const a of agencies) {
+      if (a.subscriptionStatus === 'ACTIVE' && a.plan) {
+        planCounts.set(a.plan.name, (planCounts.get(a.plan.name) || 0) + 1);
+      }
+    }
+    const planBreakdown = [...planCounts.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+    return { totalMrrCents, payingCount, activePlanCount, planBreakdown };
+  }, [agencies, plans]);
+
   if (loadError) {
     return (
       <div style={{ color: 'var(--text-primary)' }}>
@@ -87,11 +108,47 @@ export default function BillingPanel() {
   }
   if (!billingStatus) return <div style={{ color: 'var(--text-muted)' }}>Loading…</div>;
 
+  const fullyLoadedAgencies = agencies.length === agencyTotal;
+
   return (
     <div style={s.wrap}>
       <div style={s.modeBanner(billingStatus.mode)}>
         {billingStatus.mode === 'MANUAL' ? billingStatus.note : 'Payment processor connected, automated billing active.'}
       </div>
+
+      <section style={s.section}>
+        <SectionHeader>AT A GLANCE</SectionHeader>
+        <div style={s.statsRow}>
+          <StatTile
+            label="MRR"
+            value={`$${(billingSummary.totalMrrCents / 100).toFixed(0)}`}
+            sub={fullyLoadedAgencies ? 'across all agencies' : `of ${agencies.length} loaded`}
+          />
+          <StatTile
+            label="Paying Agencies"
+            value={billingSummary.payingCount}
+            sub={`of ${agencies.length} total`}
+          />
+          <StatTile
+            label="Active Plans"
+            value={`${billingSummary.activePlanCount}/${plans.length}`}
+          />
+          <StatTile
+            label="Manual / Free Access"
+            value={agencies.length - billingSummary.payingCount}
+            sub="default CRM-only"
+          />
+        </div>
+
+        {billingSummary.planBreakdown.length > 0 && (
+          <Card style={s.breakdownCard}>
+            <div style={s.breakdownTitle}>PLAN MIX (PAYING AGENCIES)</div>
+            {billingSummary.planBreakdown.map((row) => (
+              <BarRow key={row.name} label={row.name} value={row.count} max={billingSummary.payingCount} valueLabel={row.count} />
+            ))}
+          </Card>
+        )}
+      </section>
 
       <section style={s.section}>
         <SectionHeader
@@ -123,22 +180,26 @@ export default function BillingPanel() {
           </Card>
         )}
 
-        {plans.map((p) => (
-          <Card key={p.id} style={s.planCard} className="ui-row-stack">
-            <div style={s.planRow}>
-              <div>
-                <div style={s.rowTitle}>{p.name} — ${(p.priceCents / 100).toFixed(2)}/{p.interval === 'MONTHLY' ? 'mo' : 'yr'}</div>
-                <div style={s.rowSub}>
-                  {[p.crmEnabled && 'CRM', p.transfersEnabled && 'Transfers', p.coachingEnabled && 'Coaching'].filter(Boolean).join(' · ')}
+        {plans.length === 0 ? (
+          <EmptyState title="No plans yet" description="Create one above — every agency is on default (CRM only) access until you do." />
+        ) : (
+          plans.map((p) => (
+            <Card key={p.id} style={s.planCard} className="ui-row-stack">
+              <div style={s.planRow}>
+                <div>
+                  <div style={s.rowTitle}>{p.name} — ${(p.priceCents / 100).toFixed(2)}/{p.interval === 'MONTHLY' ? 'mo' : 'yr'}</div>
+                  <div style={s.rowSub}>
+                    {[p.crmEnabled && 'CRM', p.transfersEnabled && 'Transfers', p.coachingEnabled && 'Coaching'].filter(Boolean).join(' · ')}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Badge tone={p.isActive ? 'accent' : 'neutral'}>{p.isActive ? 'ACTIVE' : 'INACTIVE'}</Badge>
+                  <Button variant="secondary" size="sm" onClick={() => togglePlanActive(p)}>{p.isActive ? 'DEACTIVATE' : 'ACTIVATE'}</Button>
                 </div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Badge tone={p.isActive ? 'accent' : 'neutral'}>{p.isActive ? 'ACTIVE' : 'INACTIVE'}</Badge>
-                <Button variant="secondary" size="sm" onClick={() => togglePlanActive(p)}>{p.isActive ? 'DEACTIVATE' : 'ACTIVATE'}</Button>
-              </div>
-            </div>
-          </Card>
-        ))}
+            </Card>
+          ))
+        )}
       </section>
 
       <section style={s.section}>
@@ -184,6 +245,9 @@ const s = {
     color: mode === 'MANUAL' ? 'var(--warning)' : 'var(--accent)', padding: 12, borderRadius: 8, fontSize: 12, marginBottom: 20,
   }),
   section: { marginBottom: 28 },
+  statsRow: { display: 'flex', gap: 32, marginBottom: 20, flexWrap: 'wrap' },
+  breakdownCard: { marginBottom: 8 },
+  breakdownTitle: { color: 'var(--text-muted)', fontSize: 11, letterSpacing: 1.5, fontWeight: 700, marginBottom: 10 },
   formCard: { marginBottom: 12 },
   form: { display: 'flex', flexDirection: 'column', gap: 10 },
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },

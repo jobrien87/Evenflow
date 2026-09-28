@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
+import { StatTile, BarRow, SectionHeader } from '../ui';
 
 const STATUS_COLOR = {
   UPLOADED: 'var(--text-secondary)', QUEUED: 'var(--text-secondary)', TRANSCRIBING: 'var(--warning)', TRANSCRIBED: 'var(--warning)',
@@ -99,8 +100,50 @@ export default function CallsPanel() {
     await load();
   }
 
+  // At-a-glance summary — computed client-side from the same `calls` array
+  // the list below renders, no extra fetch involved.
+  const totalCalls = calls.length;
+  const completeCalls = calls.filter((c) => c.status === 'COMPLETE').length;
+  const failedCalls = calls.filter((c) => c.status === 'FAILED').length;
+  const inProgressCalls = totalCalls - completeCalls - failedCalls;
+  const scoredCalls = calls.filter((c) => c.analysis && typeof c.analysis.overallScore === 'number');
+  const avgScore = scoredCalls.length
+    ? Math.round(scoredCalls.reduce((sum, c) => sum + c.analysis.overallScore, 0) / scoredCalls.length)
+    : null;
+  const flaggedForReview = calls.filter((c) => c.analysis?.reviewRecommended).length;
+
   return (
     <div style={s.wrap}>
+      <section style={s.section}>
+        <SectionHeader>At a Glance</SectionHeader>
+        <div style={s.statsRow}>
+          <StatTile label="Calls Logged" value={totalCalls} />
+          <StatTile
+            label="Fully Coached"
+            value={completeCalls}
+            sub={totalCalls ? `${Math.round((completeCalls / totalCalls) * 100)}% of the pile` : 'nothing uploaded yet'}
+          />
+          <StatTile
+            label="Avg Score"
+            value={avgScore !== null ? avgScore : '—'}
+            sub={avgScore === null ? 'no scored calls yet' : avgScore >= 80 ? 'closers, basically' : avgScore >= 60 ? 'coachable' : 'needs real coaching'}
+          />
+          <StatTile
+            label="Failed"
+            value={failedCalls}
+            sub={failedCalls > 0 ? 'retry or re-upload' : 'nothing broke'}
+          />
+          {flaggedForReview > 0 && <StatTile label="Flagged for Review" value={flaggedForReview} sub="manager eyes needed" />}
+        </div>
+        {totalCalls > 0 && (
+          <div style={{ marginTop: 'var(--space-4)' }}>
+            <BarRow label="Complete" value={completeCalls} max={totalCalls} valueLabel={`${completeCalls} / ${totalCalls}`} />
+            <BarRow label="In progress" value={inProgressCalls} max={totalCalls} valueLabel={`${inProgressCalls} / ${totalCalls}`} />
+            <BarRow label="Failed" value={failedCalls} max={totalCalls} valueLabel={`${failedCalls} / ${totalCalls}`} />
+          </div>
+        )}
+      </section>
+
       <section style={s.section}>
         <div style={s.headerRow}>
           <h3 style={s.h3}>UPLOAD CALL</h3>
@@ -356,6 +399,7 @@ const s = {
   reviewSaveButton: { padding: '8px 14px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
   wrap: {},
   section: { marginBottom: 28 },
+  statsRow: { display: 'flex', gap: 32, flexWrap: 'wrap' },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2 },
   uploadBox: { background: 'var(--bg-elevated)', border: '1px dashed var(--border-strong)', borderRadius: 8, padding: 20 },

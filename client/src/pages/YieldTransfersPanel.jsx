@@ -3,7 +3,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { useIsMobile } from '../lib/useViewport';
 import { useTeamChatUnread } from '../lib/useTeamChatUnread';
-import { Card, Badge, Button, SectionHeader, EmptyState, ExportButton } from '../ui';
+import { Card, Badge, Button, SectionHeader, EmptyState, ExportButton, StatTile, BarRow } from '../ui';
 import { downloadCsv, fetchAllPages } from '../lib/downloadCsv';
 import ChatThread from './ChatThread';
 
@@ -53,6 +53,7 @@ export default function YieldTransfersPanel() {
   const isMobile = useIsMobile();
   const chatUnread = useTeamChatUnread();
   const [leads, setLeads] = useState([]);
+  const [leadTotal, setLeadTotal] = useState(0);
   const [error, setError] = useState('');
   const [discussLead, setDiscussLead] = useState(null);
   const [tmFilter, setTmFilter] = useState(null);
@@ -71,6 +72,7 @@ export default function YieldTransfersPanel() {
     try {
       const data = await api.leads('?source=telemarketer');
       setLeads(data.leads);
+      setLeadTotal(data.total ?? data.leads.length);
       setError('');
     } catch (err) {
       setError(err.data?.message || 'Could not load leads.');
@@ -123,6 +125,25 @@ export default function YieldTransfersPanel() {
     [leads, tmFilter]
   );
 
+  // At-a-glance summary, computed client-side from the same leads this
+  // page already polls every 8s — no extra fetch. Always reflects the
+  // full loaded set (not the TM filter), so switching filters below
+  // doesn't make these headline numbers jump around.
+  const leadStats = useMemo(() => {
+    const total = leads.length;
+    const byStatus = new Map();
+    for (const lead of leads) {
+      byStatus.set(lead.status, (byStatus.get(lead.status) || 0) + 1);
+    }
+    const sold = byStatus.get('SOLD') || 0;
+    const closeRate = total > 0 ? Math.round((sold / total) * 100) : null;
+    const breakdown = [...byStatus.entries()]
+      .map(([status, count]) => ({ status, count }))
+      .sort((a, b) => b.count - a.count);
+    return { total, sold, closeRate, breakdown };
+  }, [leads]);
+  const leadsFullyLoaded = leads.length === leadTotal;
+
   function toggleSelected(leadId) {
     setSelectedIds((prev) => (prev.includes(leadId) ? prev.filter((id) => id !== leadId) : [...prev, leadId]));
   }
@@ -153,6 +174,33 @@ export default function YieldTransfersPanel() {
     <div style={s.wrap}>
       <SectionHeader right={leads.length > 0 && <ExportButton onExport={exportAllLeads} />}>YIELD TRANSFERS</SectionHeader>
       {error && <div style={s.error}>{error}</div>}
+
+      {leads.length > 0 && (
+        <>
+          <div style={s.statsRow}>
+            <StatTile
+              label="Leads"
+              value={leadStats.total}
+              sub={leadsFullyLoaded ? undefined : `of ${leadTotal} total`}
+            />
+            <StatTile label="Sold" value={leadStats.sold} sub={leadStats.sold > 0 ? 'cha-ching' : undefined} />
+            <StatTile label="Close Rate" value={leadStats.closeRate === null ? '—' : `${leadStats.closeRate}%`} />
+            <StatTile label="Telemarketers" value={telemarketers.length} />
+          </div>
+          <Card style={s.breakdownCard}>
+            <div style={s.breakdownTitle}>BY STATUS</div>
+            {leadStats.breakdown.map((row) => (
+              <BarRow
+                key={row.status}
+                label={row.status.replace(/_/g, ' ')}
+                value={row.count}
+                max={leadStats.total}
+                valueLabel={row.count}
+              />
+            ))}
+          </Card>
+        </>
+      )}
 
       {telemarketers.length > 1 && (
         <div style={s.tmFilterRow}>
@@ -326,6 +374,9 @@ function DispositionControl({ lead, onDone }) {
 const s = {
   wrap: {},
   error: { color: 'var(--danger)', marginBottom: 12, fontSize: 13 },
+  statsRow: { display: 'flex', gap: 32, marginBottom: 20, flexWrap: 'wrap' },
+  breakdownCard: { marginBottom: 16 },
+  breakdownTitle: { color: 'var(--text-muted)', fontSize: 11, letterSpacing: 1.5, fontWeight: 700, marginBottom: 10 },
   tmFilterRow: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 },
   tmChip: (active) => ({
     display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer',

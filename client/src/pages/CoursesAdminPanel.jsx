@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
+import { Card, StatTile, BarRow, EmptyState } from '../ui';
+
+const ASSIGNMENT_STATUS_ORDER = ['ASSIGNED', 'IN_PROGRESS', 'COMPLETED'];
 
 export default function CoursesAdminPanel() {
   const { user } = useAuth();
@@ -14,6 +17,7 @@ export default function CoursesAdminPanel() {
   const [status, setStatus] = useState('');
   const [notEntitled, setNotEntitled] = useState(false);
   const [loadError, setLoadError] = useState('');
+  const [loading, setLoading] = useState(true);
 
   const isPlatformOwner = user.role === 'PLATFORM_OWNER';
 
@@ -37,7 +41,13 @@ export default function CoursesAdminPanel() {
       } else {
         setLoadError(err.data?.message || 'Could not load training courses. Try refreshing.');
       }
+    } finally {
+      setLoading(false);
     }
+  }
+
+  if (loading) {
+    return <div style={s.wrap}>Loading…</div>;
   }
 
   if (notEntitled) {
@@ -118,8 +128,40 @@ export default function CoursesAdminPanel() {
     }
   }
 
+  const totalCourses = courses.length;
+  const totalLessons = courses.reduce((sum, c) => sum + c.lessons.length, 0);
+  const totalAssignments = teamAssignments.length;
+  const completedAssignments = teamAssignments.filter((a) => a.status === 'COMPLETED').length;
+  const lessonsCompleted = teamAssignments.reduce((sum, a) => sum + (a.progress?.completed || 0), 0);
+  const lessonsAssigned = teamAssignments.reduce((sum, a) => sum + (a.progress?.total || 0), 0);
+  const completionRate = lessonsAssigned > 0 ? Math.round((lessonsCompleted / lessonsAssigned) * 100) : 0;
+  const assignmentStatusCounts = ASSIGNMENT_STATUS_ORDER.map((st) => ({
+    status: st,
+    count: teamAssignments.filter((a) => a.status === st).length,
+  })).filter((row) => row.count > 0);
+
   return (
     <div style={s.wrap}>
+      <div style={s.statsRow}>
+        <StatTile label="Courses" value={totalCourses} sub={`${totalLessons} lesson${totalLessons === 1 ? '' : 's'} total`} />
+        <StatTile label="Team Assignments" value={totalAssignments} />
+        <StatTile label="Completed" value={completedAssignments} />
+        <StatTile
+          label="Lesson Completion"
+          value={`${completionRate}%`}
+          sub={totalAssignments > 0 ? `${lessonsCompleted}/${lessonsAssigned} lessons` : 'nobody assigned yet'}
+        />
+      </div>
+
+      {totalAssignments > 0 && (
+        <Card style={s.breakdownCard}>
+          <div style={s.h3}>ASSIGNMENTS BY STATUS</div>
+          {assignmentStatusCounts.map((row) => (
+            <BarRow key={row.status} label={row.status.replace('_', ' ')} value={row.count} max={totalAssignments} valueLabel={row.count} />
+          ))}
+        </Card>
+      )}
+
       {isPlatformOwner && (
         <section style={s.section}>
           <div style={s.headerRow}>
@@ -210,7 +252,9 @@ export default function CoursesAdminPanel() {
             <div style={s.badge(a.status)}>{a.status.replace('_', ' ')}</div>
           </div>
         ))}
-        {teamAssignments.length === 0 && <div style={s.empty}>No assignments yet.</div>}
+        {teamAssignments.length === 0 && (
+          <EmptyState title="No assignments yet" description="Assign a course above and progress will show up here — and in the stats at the top." />
+        )}
       </section>
     </div>
   );
@@ -220,6 +264,8 @@ const s = {
   wrap: {},
   loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   notEntitledBox: { background: 'var(--warning-soft)', border: '1px solid rgba(255, 184, 77, 0.4)', color: 'var(--warning)', padding: 20, borderRadius: 8, fontSize: 13, lineHeight: 1.6 },
+  statsRow: { display: 'flex', gap: 32, marginBottom: 20, flexWrap: 'wrap' },
+  breakdownCard: { marginBottom: 24 },
   section: { marginBottom: 28 },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2 },

@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { Card, Badge, Button, SectionHeader, EmptyState } from '../ui';
+import { Card, Badge, Button, StatTile, BarRow, SectionHeader, EmptyState } from '../ui';
 
 const CATEGORIES = ['general', 'billing', 'technical', 'transfer_issue', 'vendor_issue', 'other'];
+const STATUS_ORDER = ['OPEN', 'IN_PROGRESS', 'WAITING_ON_CUSTOMER', 'RESOLVED', 'CLOSED'];
 
 function statusTone(status) {
   if (status === 'OPEN') return 'warning';
@@ -82,6 +83,16 @@ export default function SupportPanel() {
     );
   }
 
+  const total = tickets.length;
+  const open = tickets.filter((t) => t.status === 'OPEN').length;
+  const inProgress = tickets.filter((t) => t.status === 'IN_PROGRESS').length;
+  const closedOut = tickets.filter((t) => t.status === 'RESOLVED' || t.status === 'CLOSED').length;
+  const closeRate = total > 0 ? Math.round((closedOut / total) * 100) : 0;
+  const statusCounts = STATUS_ORDER.map((st) => ({
+    status: st,
+    count: tickets.filter((t) => t.status === st).length,
+  })).filter((row) => row.count > 0);
+
   return (
     <div style={s.wrap}>
       <SectionHeader
@@ -89,6 +100,28 @@ export default function SupportPanel() {
       >
         SUPPORT TICKETS ({tickets.length})
       </SectionHeader>
+
+      <div style={s.statsRow}>
+        <StatTile label="Total Tickets" value={total} />
+        <StatTile label="Open" value={open} sub={open > 0 ? 'needs eyes' : 'inbox zero'} />
+        <StatTile label="In Progress" value={inProgress} />
+        <StatTile label="Closed Out" value={closedOut} sub={`${closeRate}% close rate`} />
+      </div>
+
+      {total > 0 && (
+        <Card style={s.breakdownCard}>
+          <div style={s.breakdownTitle}>BY STATUS</div>
+          {statusCounts.map((row) => (
+            <BarRow
+              key={row.status}
+              label={row.status.replace(/_/g, ' ')}
+              value={row.count}
+              max={total}
+              valueLabel={row.count}
+            />
+          ))}
+        </Card>
+      )}
 
       {showForm && (
         <Card style={s.formCard}>
@@ -136,6 +169,9 @@ const s = {
   wrap: {},
   loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   rowHighlighted: { outline: '2px solid var(--accent)', boxShadow: 'var(--shadow-glow-accent)' },
+  statsRow: { display: 'flex', gap: 32, marginBottom: 20, flexWrap: 'wrap' },
+  breakdownCard: { marginBottom: 16 },
+  breakdownTitle: { color: 'var(--text-muted)', fontSize: 11, letterSpacing: 1.5, fontWeight: 700, marginBottom: 10 },
   formCard: { marginBottom: 12 },
   form: { display: 'flex', flexDirection: 'column', gap: 10 },
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
+import { StatTile, BarRow, SectionHeader } from '../ui';
 
 export default function OpportunitiesPanel() {
   const { user } = useAuth();
@@ -63,6 +64,24 @@ export default function OpportunitiesPanel() {
     await load();
   }
 
+  // At-a-glance summary — derived client-side from the opportunities already
+  // loaded for the current tab (the list endpoint always excludes WON /
+  // DECLINED / INELIGIBLE, so "won" totals aren't derivable from this data
+  // without a separate fetch — skipped rather than faked).
+  const totalOpportunities = opportunities.length;
+  const winbackCount = opportunities.filter((o) => o.type === 'WINBACK').length;
+  const crossSellCount = opportunities.filter((o) => o.type === 'CROSS_SELL').length;
+  const avgPriority = totalOpportunities
+    ? Math.round(opportunities.reduce((sum, o) => sum + (o.priorityScore || 0), 0) / totalOpportunities)
+    : null;
+  const lapsedPremiumCents = opportunities
+    .filter((o) => o.type === 'WINBACK' && o.previousPremiumCents)
+    .reduce((sum, o) => sum + o.previousPremiumCents, 0);
+  const statusCounts = opportunities.reduce((acc, o) => {
+    acc[o.status] = (acc[o.status] || 0) + 1;
+    return acc;
+  }, {});
+
   return (
     <div style={s.wrap}>
       <div style={s.headerRow}>
@@ -75,6 +94,36 @@ export default function OpportunitiesPanel() {
           <button style={s.smallButton} onClick={() => setShowWinbackForm(!showWinbackForm)}>+ RECORD WINBACK</button>
         )}
       </div>
+
+      <section style={s.section}>
+        <SectionHeader>
+          At a Glance{tab !== 'all' ? ` — ${tab === 'WINBACK' ? 'Winbacks' : 'Cross-Sells'}` : ''}
+        </SectionHeader>
+        <div style={s.statsRow}>
+          <StatTile label="Open Opportunities" value={totalOpportunities} />
+          <StatTile label="Winbacks" value={winbackCount} />
+          <StatTile label="Cross-Sells" value={crossSellCount} />
+          <StatTile
+            label="Avg Priority"
+            value={avgPriority !== null ? avgPriority : '—'}
+            sub={avgPriority === null ? 'queue is empty' : 'out of 100'}
+          />
+          {lapsedPremiumCents > 0 && (
+            <StatTile
+              label="Lapsed Premium at Stake"
+              value={`$${(lapsedPremiumCents / 100).toLocaleString()}`}
+              sub="sitting in the winback queue"
+            />
+          )}
+        </div>
+        {totalOpportunities > 0 && (
+          <div style={{ marginTop: 'var(--space-4)' }}>
+            {Object.entries(statusCounts).map(([status, count]) => (
+              <BarRow key={status} label={status} value={count} max={totalOpportunities} valueLabel={`${count}`} />
+            ))}
+          </div>
+        )}
+      </section>
 
       {showWinbackForm && canCreateWinback && (
         <form onSubmit={submitWinback} style={s.form}>
@@ -153,6 +202,8 @@ function WonForm({ onWon }) {
 
 const s = {
   wrap: {},
+  section: { marginBottom: 20 },
+  statsRow: { display: 'flex', gap: 32, flexWrap: 'wrap' },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 },
   tabRow: { display: 'flex', gap: 8 },
   tab: (active) => ({

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import { StatTile, BarRow, SectionHeader } from '../ui';
 
 export default function TrainingPanel() {
   const [assignments, setAssignments] = useState([]);
@@ -45,8 +46,48 @@ export default function TrainingPanel() {
     return <CourseViewer assignment={openCourse} onBack={() => { setOpenCourse(null); load(); }} />;
   }
 
+  // At-a-glance summary — derived client-side from the assignments already
+  // loaded above, no extra fetch.
+  const totalAssignments = assignments.length;
+  const completedAssignments = assignments.filter((a) => a.status === 'COMPLETED').length;
+  const inProgressAssignments = assignments.filter((a) => a.status === 'IN_PROGRESS').length;
+  const notStartedAssignments = totalAssignments - completedAssignments - inProgressAssignments;
+  const totalLessons = assignments.reduce((sum, a) => sum + (a.progress?.total || 0), 0);
+  const completedLessons = assignments.reduce((sum, a) => sum + (a.progress?.completed || 0), 0);
+  const completionRate = totalLessons > 0 ? Math.round((completedLessons / totalLessons) * 100) : null;
+  const now = Date.now();
+  const overdueAssignments = assignments.filter(
+    (a) => a.dueAt && new Date(a.dueAt).getTime() < now && a.status !== 'COMPLETED'
+  ).length;
+
   return (
     <div style={s.wrap}>
+      <section style={s.section}>
+        <SectionHeader>At a Glance</SectionHeader>
+        <div style={s.statsRow}>
+          <StatTile label="Assigned" value={totalAssignments} />
+          <StatTile
+            label="Completed"
+            value={completedAssignments}
+            sub={totalAssignments ? `${Math.round((completedAssignments / totalAssignments) * 100)}% done` : 'nothing assigned yet'}
+          />
+          <StatTile label="In Progress" value={inProgressAssignments} />
+          <StatTile
+            label="Lesson Completion"
+            value={completionRate !== null ? `${completionRate}%` : '—'}
+            sub={completionRate === null ? 'no lessons assigned yet' : `${completedLessons}/${totalLessons} lessons`}
+          />
+          {overdueAssignments > 0 && <StatTile label="Overdue" value={overdueAssignments} sub="past the due date" />}
+        </div>
+        {totalAssignments > 0 && (
+          <div style={{ marginTop: 'var(--space-4)' }}>
+            <BarRow label="Completed" value={completedAssignments} max={totalAssignments} valueLabel={`${completedAssignments}/${totalAssignments}`} />
+            <BarRow label="In progress" value={inProgressAssignments} max={totalAssignments} valueLabel={`${inProgressAssignments}/${totalAssignments}`} />
+            <BarRow label="Not started" value={notStartedAssignments} max={totalAssignments} valueLabel={`${notStartedAssignments}/${totalAssignments}`} />
+          </div>
+        )}
+      </section>
+
       {recommended && recommended.recommended && (
         <section style={s.section}>
           <h3 style={s.h3}>RECOMMENDED FOR YOU</h3>
@@ -153,6 +194,7 @@ const s = {
   wrap: {},
   notEntitledBox: { background: 'var(--warning-soft)', border: '1px solid rgba(255, 184, 77, 0.4)', color: 'var(--warning)', padding: 20, borderRadius: 8, fontSize: 13 },
   section: { marginBottom: 28 },
+  statsRow: { display: 'flex', gap: 32, flexWrap: 'wrap' },
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2, marginBottom: 12 },
   recCard: { background: 'var(--accent-gradient-soft)', border: '1px solid var(--border-accent)', borderRadius: 8, padding: 16 },
   recTitle: { fontWeight: 700, fontSize: 15, color: 'var(--accent)' },

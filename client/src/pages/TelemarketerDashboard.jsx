@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { useIsMobile } from '../lib/useViewport';
-import { Card, Badge, Button, SectionHeader, EmptyState } from '../ui';
+import { Card, Badge, Button, SectionHeader, EmptyState, StatTile, BarRow } from '../ui';
 import ChatThread from './ChatThread';
 
 const PRODUCTS = ['Auto', 'Home', 'Life', 'Health'];
@@ -92,6 +92,22 @@ export default function TelemarketerDashboard() {
     }
   }
 
+  // Computed client-side from the submissions array this page already
+  // polls every 8s (api.leads()) — no extra fetch for a summary.
+  const submissionStats = useMemo(() => {
+    const total = submissions.length;
+    const byStatus = new Map();
+    for (const lead of submissions) {
+      byStatus.set(lead.status, (byStatus.get(lead.status) || 0) + 1);
+    }
+    const sold = byStatus.get('SOLD') || 0;
+    const closeRate = total > 0 ? Math.round((sold / total) * 100) : null;
+    const breakdown = [...byStatus.entries()]
+      .map(([status, count]) => ({ status, count }))
+      .sort((a, b) => b.count - a.count);
+    return { total, sold, closeRate, breakdown };
+  }, [submissions]);
+
   if (assignments === null) {
     if (assignmentsError) {
       return (
@@ -152,19 +168,38 @@ export default function TelemarketerDashboard() {
       <div style={s.section}>
         <h3 style={s.h3}>MY RECENT SUBMISSIONS</h3>
         {submissions.length === 0 ? (
-          <EmptyState title="No submissions yet" description="Leads you submit will show up here." />
+          <EmptyState title="No submissions yet" description="Leads you submit will show up here — and so will the SOLD count, once you land one." />
         ) : (
-          submissions.map((lead) => (
-            <Card key={lead.id} style={s.row}>
-              <div>
-                <div style={s.rowTitle}>
-                  {lead.customer ? `${lead.customer.firstName} ${lead.customer.lastName}` : 'Lead'} · {lead.product || ''} · {lead.state || ''}
-                </div>
-                <div style={s.rowSub}>{new Date(lead.receivedAt).toLocaleString()}</div>
-              </div>
-              <Badge tone={statusTone(lead.status)}>{lead.status.replace(/_/g, ' ')}</Badge>
+          <>
+            <div style={s.statsRow}>
+              <StatTile label="Submitted" value={submissionStats.total} />
+              <StatTile label="Sold" value={submissionStats.sold} sub={submissionStats.sold > 0 ? 'nice work' : undefined} />
+              <StatTile label="Close Rate" value={submissionStats.closeRate === null ? '—' : `${submissionStats.closeRate}%`} />
+            </div>
+            <Card style={s.breakdownCard}>
+              <div style={s.breakdownTitle}>BY STATUS</div>
+              {submissionStats.breakdown.map((row) => (
+                <BarRow
+                  key={row.status}
+                  label={row.status.replace(/_/g, ' ')}
+                  value={row.count}
+                  max={submissionStats.total}
+                  valueLabel={row.count}
+                />
+              ))}
             </Card>
-          ))
+            {submissions.map((lead) => (
+              <Card key={lead.id} style={s.row}>
+                <div>
+                  <div style={s.rowTitle}>
+                    {lead.customer ? `${lead.customer.firstName} ${lead.customer.lastName}` : 'Lead'} · {lead.product || ''} · {lead.state || ''}
+                  </div>
+                  <div style={s.rowSub}>{new Date(lead.receivedAt).toLocaleString()}</div>
+                </div>
+                <Badge tone={statusTone(lead.status)}>{lead.status.replace(/_/g, ' ')}</Badge>
+              </Card>
+            ))}
+          </>
         )}
       </div>
     </div>
@@ -259,6 +294,9 @@ const s = {
   loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   section: { marginTop: 32 },
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2, marginBottom: 12 },
+  statsRow: { display: 'flex', gap: 32, marginBottom: 16, flexWrap: 'wrap' },
+  breakdownCard: { marginBottom: 16 },
+  breakdownTitle: { color: 'var(--text-muted)', fontSize: 11, letterSpacing: 1.5, fontWeight: 700, marginBottom: 10 },
   noAssignmentBanner: { background: 'var(--warning-soft)', border: '1px solid rgba(255, 184, 77, 0.4)', color: 'var(--warning)', padding: 14, borderRadius: 8, fontSize: 13, lineHeight: 1.5 },
   officesRow: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 },
   officeChip: (active) => ({
