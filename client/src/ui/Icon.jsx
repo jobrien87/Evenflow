@@ -22,6 +22,7 @@ const PATHS = {
   close: 'M6 6l12 12M18 6L6 18',
   logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
   download: 'M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2',
+  vinyl: 'M4 12a8 8 0 1 0 16 0 8 8 0 1 0-16 0zM9 12a3 3 0 1 0 6 0 3 3 0 1 0-6 0zM11.25 12a0.75 0.75 0 1 0 1.5 0 0.75 0.75 0 1 0-1.5 0z',
 };
 
 export default function Icon({ name, size = 18, style }) {

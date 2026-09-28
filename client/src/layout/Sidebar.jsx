@@ -1,8 +1,9 @@
+import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { useTeamChatUnread } from '../lib/useTeamChatUnread';
 import { navForRole, teamChatNavPath } from './navConfig';
-import { Icon, Button } from '../ui';
+import { Icon, Button, ComingSoonModal } from '../ui';
 import NotificationBell from '../pages/NotificationBell';
 
 export default function Sidebar() {
@@ -11,6 +12,7 @@ export default function Sidebar() {
   const items = navForRole(user?.role);
   const chatUnread = useTeamChatUnread();
   const chatPath = teamChatNavPath(user?.role);
+  const [stubOpen, setStubOpen] = useState(false);
 
   return (
     <aside style={s.wrap}>
@@ -25,6 +27,7 @@ export default function Sidebar() {
             to={item.to}
             end={item.to.split('/').length === 2}
             className={({ isActive }) => `ui-nav-link${isActive ? ' active' : ''}`}
+            onClick={item.stub ? (e) => { e.preventDefault(); setStubOpen(true); } : undefined}
           >
             <Icon name={item.icon} size={17} />
             {item.label}
@@ -53,6 +56,14 @@ export default function Sidebar() {
           Log out
         </Button>
       </div>
+
+      {stubOpen && (
+        <ComingSoonModal
+          label="Record Store"
+          description="A marketplace to sell your leads directly to buyers via Boberdoo webhooks & APIs. We're building it — stay tuned."
+          onClose={() => setStubOpen(false)}
+        />
+      )}
     </aside>
   );
 }

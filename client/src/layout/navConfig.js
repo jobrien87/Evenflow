@@ -9,9 +9,11 @@ export const NAV_BY_ROLE = {
     { label: 'Coaching', to: '/producer/coaching', icon: 'phone', primary: true },
     { label: 'Training', to: '/producer/training', icon: 'book', primary: true },
     { label: 'Winbacks & Cross-Sells', to: '/producer/opportunities', icon: 'target' },
+    { label: 'Record Store', to: '/producer/record-store', icon: 'vinyl', stub: true },
   ],
   TELEMARKETER: [
     { label: 'Home', to: '/telemarketer', icon: 'home', primary: true },
+    { label: 'Record Store', to: '/telemarketer/record-store', icon: 'vinyl', stub: true },
   ],
   AGENCY_OWNER: [
     { label: 'Team & Leads', to: '/agency', icon: 'home', primary: true },
@@ -25,6 +27,7 @@ export const NAV_BY_ROLE = {
     { label: 'Training', to: '/agency/training', icon: 'book' },
     { label: 'Winbacks & Cross-Sells', to: '/agency/opportunities', icon: 'target' },
     { label: 'Transfer History', to: '/agency/transfer-history', icon: 'transfer' },
+    { label: 'Record Store', to: '/agency/record-store', icon: 'vinyl', stub: true },
   ],
   PLATFORM_OWNER: [
     { label: 'Agencies', to: '/platform', icon: 'agencies', primary: true },
@@ -33,6 +36,7 @@ export const NAV_BY_ROLE = {
     { label: 'Support', to: '/platform/support', icon: 'support', primary: true },
     { label: 'Billing', to: '/platform/billing', icon: 'card' },
     { label: 'Training', to: '/platform/training', icon: 'book' },
+    { label: 'Record Store', to: '/platform/record-store', icon: 'vinyl', stub: true },
   ],
 };
 

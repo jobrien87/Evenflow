@@ -1,12 +1,14 @@
+import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { navForRole } from './navConfig';
-import { Icon, Button } from '../ui';
+import { Icon, Button, ComingSoonModal } from '../ui';
 
 export default function MobileDrawer({ open, onClose }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const items = navForRole(user?.role);
+  const [stubOpen, setStubOpen] = useState(false);
 
   return (
     <>
@@ -29,7 +31,7 @@ export default function MobileDrawer({ open, onClose }) {
               to={item.to}
               end={item.to.split('/').length === 2}
               className={({ isActive }) => `ui-nav-link${isActive ? ' active' : ''}`}
-              onClick={onClose}
+              onClick={item.stub ? (e) => { e.preventDefault(); setStubOpen(true); onClose(); } : onClose}
             >
               <Icon name={item.icon} size={17} />
               {item.label}
@@ -53,6 +55,14 @@ export default function MobileDrawer({ open, onClose }) {
           </Button>
         </div>
       </div>
+
+      {stubOpen && (
+        <ComingSoonModal
+          label="Record Store"
+          description="A marketplace to sell your leads directly to buyers via Boberdoo webhooks & APIs. We're building it — stay tuned."
+          onClose={() => setStubOpen(false)}
+        />
+      )}
     </>
   );
 }

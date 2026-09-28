@@ -11,5 +11,6 @@ export { default as GradientDefs } from './GradientDefs';
 export { default as EmptyState } from './EmptyState';
 export { default as SectionHeader } from './SectionHeader';
 export { default as Modal } from './Modal';
+export { default as ComingSoonModal } from './ComingSoonModal';
 export { default as ExportButton } from './ExportButton';
 export * from './statusTones';
