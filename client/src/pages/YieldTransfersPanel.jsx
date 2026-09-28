@@ -6,6 +6,7 @@ import { useTeamChatUnread } from '../lib/useTeamChatUnread';
 import { Card, Badge, Button, SectionHeader, EmptyState, ExportButton, StatTile, BarRow } from '../ui';
 import { downloadCsv, fetchAllPages } from '../lib/downloadCsv';
 import ChatThread from './ChatThread';
+import TransferHistoryPanel from './TransferHistoryPanel';
 
 const LEAD_STATUSES = [
   'NEW', 'ASSIGNED', 'ATTEMPTED', 'CONTACTED', 'APPOINTMENT', 'QUOTE_STARTED',
@@ -61,6 +62,7 @@ export default function YieldTransfersPanel() {
   const [bulkStatus, setBulkStatus] = useState(BULK_STATUSES[0]);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkError, setBulkError] = useState('');
+  const [view, setView] = useState('live');
 
   useEffect(() => {
     load();
@@ -172,7 +174,17 @@ export default function YieldTransfersPanel() {
 
   return (
     <div style={s.wrap}>
-      <SectionHeader right={leads.length > 0 && <ExportButton onExport={exportAllLeads} />}>YIELD TRANSFERS</SectionHeader>
+      <SectionHeader right={view === 'live' && leads.length > 0 && <ExportButton onExport={exportAllLeads} />}>YIELD TRANSFERS</SectionHeader>
+
+      <div style={s.viewTabRow}>
+        <button type="button" style={s.viewTab(view === 'live')} onClick={() => setView('live')}>LIVE</button>
+        <button type="button" style={s.viewTab(view === 'history')} onClick={() => setView('history')}>HISTORY</button>
+      </div>
+
+      {view === 'history' ? (
+        <TransferHistoryPanel />
+      ) : (
+        <>
       {error && <div style={s.error}>{error}</div>}
 
       {leads.length > 0 && (
@@ -278,6 +290,8 @@ export default function YieldTransfersPanel() {
           onClose={() => setDiscussLead(null)}
         />
       )}
+        </>
+      )}
     </div>
   );
 }
@@ -374,6 +388,11 @@ function DispositionControl({ lead, onDone }) {
 const s = {
   wrap: {},
   error: { color: 'var(--danger)', marginBottom: 12, fontSize: 13 },
+  viewTabRow: { display: 'flex', gap: 6, marginBottom: 20 },
+  viewTab: (active) => ({
+    padding: '8px 18px', borderRadius: 6, fontSize: 12, fontWeight: 700, letterSpacing: 0.5, cursor: 'pointer', border: 'none',
+    background: active ? 'var(--accent-gradient)' : 'var(--bg-elevated)', color: active ? 'var(--accent-on)' : 'var(--text-secondary)',
+  }),
   statsRow: { display: 'flex', gap: 32, marginBottom: 20, flexWrap: 'wrap' },
   breakdownCard: { marginBottom: 16 },
   breakdownTitle: { color: 'var(--text-muted)', fontSize: 11, letterSpacing: 1.5, fontWeight: 700, marginBottom: 10 },

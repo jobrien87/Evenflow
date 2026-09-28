@@ -21,7 +21,6 @@ import SupportPanel from './pages/SupportPanel';
 import AgencyBillingPanel from './pages/AgencyBillingPanel';
 import CoursesAdminPanel from './pages/CoursesAdminPanel';
 import GoalsPanel from './pages/GoalsPanel';
-import TransferHistoryPanel from './pages/TransferHistoryPanel';
 
 import AgenciesPanel from './pages/AgenciesPanel';
 import AgencyDetailPage from './pages/AgencyDetailPage';
@@ -71,7 +70,6 @@ export default function App() {
           <Route path="agency/training" element={<CoursesAdminPanel />} />
           <Route path="agency/opportunities" element={<OpportunitiesPanel />} />
           <Route path="agency/goals" element={<GoalsPanel />} />
-          <Route path="agency/transfer-history" element={<TransferHistoryPanel />} />
         </Route>
 
         <Route element={<RoleGate allow={['PLATFORM_OWNER']} />}>

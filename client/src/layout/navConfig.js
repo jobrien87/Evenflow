@@ -22,16 +22,15 @@ export const NAV_BY_ROLE = {
   AGENCY_OWNER: [
     { label: 'Main Stage', to: '/agency', icon: 'home', primary: true },
     { label: 'Yield Transfers', to: '/agency/transfers', icon: 'transfer', primary: true },
+    { label: 'Winbacks & Cross-Sells', to: '/agency/opportunities', icon: 'target' },
     { label: 'Financials', to: '/agency/financials', icon: 'dollar', primary: true },
     { label: 'Goals', to: '/agency/goals', icon: 'flag', primary: true },
     { label: 'Vendors', to: '/agency/vendors', icon: 'vendor' },
-    { label: 'Support', to: '/agency/support', icon: 'support' },
     { label: 'Training', to: '/agency/training', icon: 'book' },
-    { label: 'Winbacks & Cross-Sells', to: '/agency/opportunities', icon: 'target' },
-    { label: 'Transfer History', to: '/agency/transfer-history', icon: 'transfer' },
     { label: 'Billing', to: '/agency/billing', icon: 'card', secondary: true },
     { label: 'Record Store', to: '/agency/record-store', icon: 'vinyl', stub: true, secondary: true },
     { label: 'Coaching', to: '/agency/coaching', icon: 'phone', secondary: true },
+    { label: 'Support', to: '/agency/support', icon: 'support', secondary: true },
   ],
   PLATFORM_OWNER: [
     { label: 'Agencies', to: '/platform', icon: 'agencies', primary: true },
