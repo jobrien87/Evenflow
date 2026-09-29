@@ -13,6 +13,8 @@ const { updateCustomerProductsAndDetectCrossSells } = require('../lib/opportunit
 const { computeProducerScore, computeAgencyScore, computeTelemarketerScore } = require('../lib/flowScore');
 const { computeFunnel } = require('../lib/funnelMetrics');
 const { parseLeadFile } = require('../lib/leadBulkImport');
+const { computeZipBreakdown } = require('../lib/zipBreakdown');
+const { sendZipReportEmail } = require('../lib/email');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -475,6 +477,73 @@ router.get('/snapshot', async (req, res, next) => {
       period: { from: from.toISOString(), to: to.toISOString() },
       totalLeads, untouched, quoted, sold, inMoshpit,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Zip code performance — one row per zip this agency has received leads
+// from. Requires agencyId unconditionally (even for PLATFORM_OWNER),
+// mirroring financials.js's /by-vendor: an unscoped call would mean
+// fanning the per-vendor cost lookups out across every agency on the
+// platform, which isn't a real product surface.
+router.get('/zip-report', async (req, res, next) => {
+  try {
+    if (!['AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'].includes(req.user.role)) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    const agencyId = scopeAgencyId(req);
+    if (!agencyId) {
+      return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+    }
+
+    const to = req.query.to ? new Date(req.query.to) : new Date();
+    const from = req.query.from ? new Date(req.query.from) : new Date(to.getFullYear(), to.getMonth(), 1);
+    const rows = await computeZipBreakdown({ agencyId, from, to });
+
+    return res.json({ success: true, period: { from: from.toISOString(), to: to.toISOString() }, rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const emailZipReportSchema = z.object({ to: z.string().email() });
+
+router.post('/zip-report/email', async (req, res, next) => {
+  try {
+    if (!['AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'].includes(req.user.role)) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    const agencyId = scopeAgencyId(req);
+    if (!agencyId) {
+      return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+    }
+    const parsed = emailZipReportSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Enter a valid email address.', fieldErrors: parsed.error.flatten() });
+    }
+
+    const agency = await prisma.agency.findUnique({ where: { id: agencyId }, select: { name: true } });
+    if (!agency) return res.status(404).json({ success: false, error: 'AGENCY_NOT_FOUND' });
+
+    const to = req.query.to ? new Date(req.query.to) : new Date();
+    const from = req.query.from ? new Date(req.query.from) : new Date(to.getFullYear(), to.getMonth(), 1);
+    const rows = await computeZipBreakdown({ agencyId, from, to });
+
+    const emailResult = await sendZipReportEmail({ to: parsed.data.to, agencyName: agency.name, rows });
+
+    await recordAudit({
+      actorId: req.user.id,
+      actorRole: req.user.role,
+      agencyId,
+      action: 'zip_report.emailed',
+      entityType: 'Agency',
+      entityId: agencyId,
+      after: { to: parsed.data.to, zipCount: rows.length },
+      correlationId: req.correlationId,
+    });
+
+    return res.json({ success: true, emailStatus: emailResult.status });
   } catch (err) {
     next(err);
   }

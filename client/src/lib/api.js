@@ -36,6 +36,8 @@ export const api = {
   leadDetail: (id) => request(`/leads/${id}`),
   leadFunnel: (params = '') => request(`/leads/funnel${params}`),
   leadsSnapshot: (params = '') => request(`/leads/snapshot${params}`),
+  zipReport: (params = '') => request(`/leads/zip-report${params}`),
+  emailZipReport: (to, params = '') => request(`/leads/zip-report/email${params}`, { method: 'POST', body: { to } }),
   createLead: (payload) => request('/leads', { method: 'POST', body: payload }),
   dispositionLead: (id, payload) => request(`/leads/${id}/disposition`, { method: 'POST', body: payload }),
   moshpitLeads: () => request('/leads/moshpit'),

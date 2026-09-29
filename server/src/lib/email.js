@@ -128,4 +128,48 @@ async function sendVendorPostingEmail({ to, instructions }) {
   }
 }
 
-module.exports = { isConfigured, sendEmail, sendInvitationEmail, sendPasswordResetEmail, sendVendorPostingEmail };
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// rows come from lib/zipBreakdown.js's computeZipBreakdown() — zip is
+// free-text intake data (bulk-uploaded or hand-entered), so it's escaped
+// like any other user-controlled string before landing in an email sent to
+// an external address.
+async function sendZipReportEmail({ to, agencyName, rows }) {
+  if (!isConfigured()) {
+    console.warn(`[email:NOT_CONFIGURED] Would send zip code report for "${agencyName}" to ${to} (${rows.length} zips).`);
+    return { status: 'NOT_CONFIGURED' };
+  }
+  try {
+    const tableRows = rows
+      .map(
+        (r) => `<tr>
+          <td>${escapeHtml(r.zip)}</td>
+          <td>${r.totalLeads}</td>
+          <td>${r.quotedCount}</td>
+          <td>${r.soldCount}</td>
+          <td>${r.cpa === null ? '—' : `$${r.cpa.toFixed(2)}`}</td>
+          <td>${r.costPerLead === null ? '—' : `$${r.costPerLead.toFixed(2)}`}</td>
+          <td>$${r.revenue.toFixed(2)}</td>
+        </tr>`
+      )
+      .join('');
+    const html = `
+      <h2>${escapeHtml(agencyName)} — Zip Code Performance Report</h2>
+      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-family:sans-serif;font-size:13px;">
+        <thead><tr>
+          <th>Zip</th><th>Leads</th><th>Quoted</th><th>Sold</th><th>CPA</th><th>Cost/Lead</th><th>Revenue</th>
+        </tr></thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    `;
+    await sendEmail({ to, subject: `${agencyName} — Zip Code Performance Report`, html });
+    return { status: 'SENT' };
+  } catch (err) {
+    console.error('[email:FAILED]', err.message);
+    return { status: 'FAILED' };
+  }
+}
+
+module.exports = { isConfigured, sendEmail, sendInvitationEmail, sendPasswordResetEmail, sendVendorPostingEmail, sendZipReportEmail };

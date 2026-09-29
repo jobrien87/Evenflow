@@ -6,6 +6,8 @@ import { useIsMobile } from '../lib/useViewport';
 import { Button, EdSuggestionBox, LeadTypeIcon } from '../ui';
 import FlowScoreCard from './FlowScoreCard';
 import LeadsSnapshotBox from './LeadsSnapshotBox';
+import ZipCodeBox from './ZipCodeBox';
+import ZipReportPage from './ZipReportPage';
 import FunnelMetricsCard from './FunnelMetricsCard';
 import LeadDetailModal from './LeadDetailModal';
 import RunningReportPage from './RunningReportPage';
@@ -32,6 +34,7 @@ export default function AgencyOwnerDashboard() {
   const [inviteLink, setInviteLink] = useState('');
   const [leadStatus, setLeadStatus] = useState('');
   const [showReport, setShowReport] = useState(false);
+  const [showZipReport, setShowZipReport] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showAnnounce, setShowAnnounce] = useState(false);
   const [agency, setAgency] = useState(null);
@@ -207,6 +210,10 @@ export default function AgencyOwnerDashboard() {
       </section>
 
       <section style={s.section}>
+        <ZipCodeBox agencyId={user?.agencyId} onViewReport={() => setShowZipReport(true)} />
+      </section>
+
+      <section style={s.section}>
         <TeamClockStatusBox />
       </section>
 
@@ -355,6 +362,14 @@ export default function AgencyOwnerDashboard() {
         </div>
       )}
 
+      {showZipReport && (
+        <div style={s.reportOverlay} onClick={() => setShowZipReport(false)}>
+          <div style={s.reportModalWide} onClick={(e) => e.stopPropagation()}>
+            <ZipReportPage agencyId={user?.agencyId} onClose={() => setShowZipReport(false)} />
+          </div>
+        </div>
+      )}
+
       {showSettings && agency && (
         <AgencySettingsModal agency={agency} onClose={() => setShowSettings(false)} onSaved={() => { setShowSettings(false); load(); }} />
       )}
@@ -407,4 +422,5 @@ const s = {
   empty: { color: 'var(--text-muted)', fontStyle: 'italic' },
   reportOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2500, padding: 20, overflowY: 'auto' },
   reportModal: { background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 12, maxWidth: 680, width: '100%', maxHeight: '85vh', overflowY: 'auto' },
+  reportModalWide: { background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 12, maxWidth: 1080, width: '100%', maxHeight: '85vh', overflowY: 'auto' },
 };
