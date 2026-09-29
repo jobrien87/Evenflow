@@ -8,6 +8,7 @@ const PRODUCTS = ['Auto', 'Home', 'Life', 'Health'];
 
 const EMPTY_FORM = {
   product: 'Auto',
+  isLiveTransfer: false,
   firstName: '', lastName: '', phone: '', email: '',
   dob: '', address: '', city: '', state: '', zip: '',
   vehicleYear: '', vehicleMake: '', vehicleModel: '', additionalDrivers: '', autoClaims: '', violations: '',
@@ -227,6 +228,14 @@ function LeadForm({ form, setField, onSubmit, busy, result }) {
             </select>
           </Field>
         </div>
+        <label style={s.liveTransferRow}>
+          <input
+            type="checkbox"
+            checked={form.isLiveTransfer}
+            onChange={(e) => setField('isLiveTransfer', e.target.checked)}
+          />
+          This is a live transfer — the caller is on the line right now
+        </label>
 
         <h4 style={s.formSectionTitle}>CONTACT INFO</h4>
         <div style={s.formGrid}>
@@ -312,6 +321,7 @@ const s = {
   formCard: { padding: 20 },
   form: { display: 'flex', flexDirection: 'column', gap: 10 },
   formSectionTitle: { color: 'var(--text-muted)', fontSize: 11, letterSpacing: 1.5, margin: '10px 0 2px', textTransform: 'uppercase' },
+  liveTransferRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--warning)', background: 'var(--warning-soft)', border: '1px solid rgba(255, 184, 77, 0.4)', borderRadius: 8, padding: '8px 12px', margin: '4px 0 8px' },
   formGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 },
   fieldLabel: { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: 'var(--text-muted)' },
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 13 },

@@ -110,9 +110,12 @@ export default function MoshpitPanel() {
               <div style={s.cardTop}>
                 <div>
                   <div style={s.name}>{c ? `${c.firstName} ${c.lastName}` : 'Lead'}</div>
-                  <div style={s.meta}>{lead.vendor?.name || 'Unknown vendor'} · {new Date(lead.receivedAt).toLocaleString()}</div>
+                  <div style={s.meta}>{lead.isLiveTransfer ? 'Live transfer' : (lead.vendor?.name || 'Unknown vendor')} · {new Date(lead.receivedAt).toLocaleString()}</div>
                 </div>
-                {lead.product && <Badge tone="neutral">{lead.product}</Badge>}
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {lead.isLiveTransfer && <Badge tone="warning">LIVE</Badge>}
+                  {lead.product && <Badge tone="neutral">{lead.product}</Badge>}
+                </div>
               </div>
 
               <div style={s.infoGrid}>

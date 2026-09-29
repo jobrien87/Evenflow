@@ -7,7 +7,7 @@ const { recordAudit } = require('../lib/audit');
 const { scoreLead } = require('../lib/priority');
 const { normalizePhone, normalizeEmail } = require('../lib/normalize');
 const { recordLeadSaleRevenue } = require('../lib/financialEvents');
-const { notifyUser, notifyAgencyOwners } = require('../lib/notifications');
+const { notifyUser, notifyUsers, notifyAgencyOwners } = require('../lib/notifications');
 const { updateCustomerProductsAndDetectCrossSells } = require('../lib/opportunityEvents');
 const { computeProducerScore, computeAgencyScore, computeTelemarketerScore } = require('../lib/flowScore');
 const { computeFunnel } = require('../lib/funnelMetrics');
@@ -116,6 +116,9 @@ const createLeadSchema = z.object({
   yearsWithCarrier: z.string().optional(),
   callbackTime: z.string().optional(),
   tmNotes: z.string().optional(),
+  // Only ever honored when the caller is a real TELEMARKETER (see POST /
+  // below) — never trusted as-is from any other role.
+  isLiveTransfer: z.boolean().optional(),
 });
 
 const INTAKE_FIELD_KEYS = [
@@ -173,6 +176,7 @@ async function createLeadRecord({ agencyId, source, createdById, data }) {
         createdById,
         customFields: data.customFields || {},
         dob: data.dob ? new Date(data.dob) : null,
+        isLiveTransfer: !!data.isLiveTransfer,
         ...intakeFields,
       },
     });
@@ -240,8 +244,11 @@ router.post('/', async (req, res, next) => {
     // Source drives the Yield Transfers filter downstream — authoritative
     // server-side, never client-trusted, for a Telemarketer's submission.
     const source = req.user.role === 'TELEMARKETER' ? 'telemarketer' : parsed.data.source;
+    // Same rule for isLiveTransfer — only a real Telemarketer can flag one,
+    // regardless of what any other caller's request body claims.
+    const isLiveTransfer = req.user.role === 'TELEMARKETER' && !!parsed.data.isLiveTransfer;
 
-    const result = await createLeadRecord({ agencyId, source, createdById: req.user.id, data: parsed.data });
+    const result = await createLeadRecord({ agencyId, source, createdById: req.user.id, data: { ...parsed.data, isLiveTransfer } });
 
     await recordAudit({
       actorId: req.user.id,
@@ -262,6 +269,24 @@ router.post('/', async (req, res, next) => {
         severity: 'INFO',
         title: 'New lead assigned to you',
         body: `${result.customer.firstName} ${result.customer.lastName}${parsed.data.product ? ' — ' + parsed.data.product : ''}`,
+        relatedEntityType: 'Lead',
+        relatedEntityId: result.lead.id,
+      });
+    } else if (source === 'telemarketer' && isLiveTransfer) {
+      // A live transfer needs a producer NOW, not just visibility to the
+      // owner — same real "first to claim it gets it" broadcast a
+      // vendor-sourced Moshpit lead already gets, just triggered by the
+      // TM's flag instead of the vendor's distribution mode.
+      const eligibleProducers = await prisma.user.findMany({
+        where: { agencyId, role: 'PRODUCER', status: 'ACTIVE' },
+        select: { id: true },
+      });
+      await notifyUsers(eligibleProducers.map((u) => u.id), {
+        agencyId,
+        type: 'lead.moshpit_available',
+        severity: 'ACTION',
+        title: 'Live transfer — caller is on the line',
+        body: `${result.customer.firstName} ${result.customer.lastName}${parsed.data.product ? ' — ' + parsed.data.product : ''}. First to claim it gets it.`,
         relatedEntityType: 'Lead',
         relatedEntityId: result.lead.id,
       });
@@ -400,7 +425,7 @@ router.get('/moshpit', async (req, res, next) => {
       where: {
         assignedToId: null,
         archivedAt: null,
-        vendor: { distributionMode: 'MOSHPIT' },
+        OR: [{ vendor: { distributionMode: 'MOSHPIT' } }, { isLiveTransfer: true }],
         ...(agencyId ? { agencyId } : {}),
       },
       include: {
@@ -439,7 +464,7 @@ router.get('/snapshot', async (req, res, next) => {
       prisma.lead.count({ where: { ...baseWhere, firstAttemptAt: null } }),
       prisma.lead.count({ where: { ...baseWhere, status: { in: ['QUOTE_STARTED', 'QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'] } } }),
       prisma.lead.count({ where: { ...baseWhere, status: 'SOLD' } }),
-      prisma.lead.count({ where: { ...baseWhere, assignedToId: null, vendor: { distributionMode: 'MOSHPIT' } } }),
+      prisma.lead.count({ where: { ...baseWhere, assignedToId: null, OR: [{ vendor: { distributionMode: 'MOSHPIT' } }, { isLiveTransfer: true }] } }),
     ]);
 
     return res.json({
@@ -470,7 +495,7 @@ router.post('/:leadId/claim', async (req, res, next) => {
     if (lead.agencyId !== req.user.agencyId) {
       return res.status(403).json({ success: false, error: 'FORBIDDEN' });
     }
-    if (!lead.vendor || lead.vendor.distributionMode !== 'MOSHPIT') {
+    if (!lead.isLiveTransfer && (!lead.vendor || lead.vendor.distributionMode !== 'MOSHPIT')) {
       return res.status(400).json({ success: false, error: 'NOT_CLAIMABLE', message: 'This lead is not in the Moshpit.' });
     }
 

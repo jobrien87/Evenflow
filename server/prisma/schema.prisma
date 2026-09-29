@@ -399,6 +399,13 @@ model Lead {
   // the staleness window has passed again.
   lastReminderSentAt DateTime?
 
+  // A telemarketer flags a lead as a live transfer (the caller is on the
+  // line right now) at submission time — makes it claimable through the
+  // Moshpit pool the same way a vendor-Moshpit lead is, regardless of the
+  // agency's normal distribution mode. Server-set only, never trusted
+  // from a non-Telemarketer caller.
+  isLiveTransfer  Boolean    @default(false)
+
   // Rich intake fields captured at the moment a Telemarketer submits a
   // lead (source: 'telemarketer') — denormalized onto the Lead itself
   // rather than Customer, since this is an intake-time snapshot (the same
