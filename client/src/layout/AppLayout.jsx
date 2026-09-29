@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { useIsMobile } from '../lib/useViewport';
 import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
@@ -22,10 +22,34 @@ export default function AppLayout() {
   const isMobile = useIsMobile();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { user, refreshUser } = useAuth();
+  const location = useLocation();
   const [tourDismissed, setTourDismissed] = useState(false);
   const [manualTourOpen, setManualTourOpen] = useState(false);
+  const [tourStartIndex, setTourStartIndex] = useState(0);
   const roleSteps = user ? stepsForRole(user.role) : null;
   const tourSteps = manualTourOpen ? roleSteps : (user && !user.tourCompletedAt && !tourDismissed ? roleSteps : null);
+
+  // "Start with whatever page they're on" — find the step whose route
+  // matches (or is the closest ancestor of) the current path and jump
+  // straight there instead of always replaying from the top.
+  function startTourHere() {
+    const steps = roleSteps || [];
+    let startIndex = 0;
+    const exact = steps.findIndex((s) => s.route === location.pathname);
+    if (exact !== -1) {
+      startIndex = exact;
+    } else {
+      let bestLength = -1;
+      steps.forEach((s, idx) => {
+        if (s.route && location.pathname.startsWith(s.route) && s.route.length > bestLength) {
+          startIndex = idx;
+          bestLength = s.route.length;
+        }
+      });
+    }
+    setTourStartIndex(startIndex);
+    setManualTourOpen(true);
+  }
 
   // Browsers block AudioContext playback until a real user gesture — warm
   // it up on the first click/keypress anywhere in the app so the new-lead
@@ -58,7 +82,7 @@ export default function AppLayout() {
       <ImpersonationBar />
       <TimeClockWidget />
       <div style={{ display: 'flex' }}>
-        {!isMobile && <Sidebar onTakeTour={() => setManualTourOpen(true)} />}
+        {!isMobile && <Sidebar onTakeTour={startTourHere} />}
         <div style={{ flex: 1, minWidth: 0 }}>
           {isMobile && <MobileTopBar onMenuClick={() => setDrawerOpen(true)} />}
           <main
@@ -74,9 +98,9 @@ export default function AppLayout() {
         </div>
       </div>
       {isMobile && <MobileBottomNav />}
-      {isMobile && <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />}
+      {isMobile && <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} onTakeTour={startTourHere} />}
       <EdWidget />
-      {tourSteps && <TourOverlay steps={tourSteps} onDone={finishTour} />}
+      {tourSteps && <TourOverlay steps={tourSteps} startIndex={manualTourOpen ? tourStartIndex : 0} onDone={finishTour} />}
       <AnnouncementModal />
       {user && LEAD_ALERT_ROLES.has(user.role) && <LeadAlertListener />}
       <ToastHost />

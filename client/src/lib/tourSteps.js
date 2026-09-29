@@ -1,60 +1,116 @@
-// First-login product tour content, one step array per role. Kept as plain
-// data (not JSX) so TourOverlay is the only place that has to render it.
-// Every step names a real, shipped feature — nothing here promises
-// anything that isn't actually in the app today.
+// Product tour content, one step array per role. Kept as plain data (not
+// JSX) so TourOverlay is the only place that has to render it. Every step
+// names a real, shipped feature — nothing here promises anything that
+// isn't actually in the app today.
+//
+// Each step is { icon, title, body, route?, selector? }. `route` is a real
+// path from layout/navConfig.js — TourOverlay navigates there if the user
+// isn't already on it. `selector` is a real data-tour attribute value
+// (rendered on the matching NavLink in Sidebar.jsx/MobileDrawer.jsx, or on
+// a specific element like FlowScoreCard/EdWidget/NotificationBell) that
+// TourOverlay spotlights once the element mounts. A step with neither
+// field renders as a plain centered card (used only for the opening
+// welcome and, for roles with no real "ask for help" nav tab, the closing
+// step).
 
-const CLOSING_CONTACT = {
+const WELCOME = {
+  icon: 'home',
+  title: 'Welcome to EvenFlow',
+  body: "Quick walk through the app — it'll actually take you to each tab as we go. Skip anytime.",
+};
+
+const ED_STEP = {
+  icon: 'sparkle',
+  title: 'ED, your AI sidekick',
+  body: 'The bubble in the corner. Ask ED anything, or glance at the ED SUGGESTS boxes scattered around the app for a proactive nudge.',
+  selector: '[data-tour="ed-widget"]',
+};
+
+const NOTIFICATIONS_STEP = {
+  icon: 'support',
+  title: 'Notifications',
+  body: 'Every real update — a new lead, a chat message, a stale-lead nudge — lands here first.',
+  selector: '[data-tour="notification-bell"]',
+};
+
+const NO_SUPPORT_CLOSING = {
   icon: 'support',
   title: 'Need something turned on?',
-  body: "If a tab looks locked or you want a feature your plan doesn't include, hit Support (or ask your platform contact) — that's the fastest way to get it opened up.",
+  body: "If a tab looks locked or you want a feature your plan doesn't include, ask your agency owner or platform contact — that's the fastest way to get it opened up.",
 };
 
 const STEPS_BY_ROLE = {
   PRODUCER: [
-    { icon: 'home', title: 'Welcome to EvenFlow', body: "Quick lap around the app — under a minute, skip anytime." },
-    { icon: 'trophy', title: 'Your Flow Score', body: 'One score for pace, quality and conversion — right at the top of your Home dashboard.' },
-    { icon: 'target', title: 'Your Funnel', body: 'Real contact, quote and close rates for your own leads, updated live.' },
-    { icon: 'trophy', title: 'Agency Leaderboard', body: 'See exactly where you rank against every producer at your agency, right on your dashboard.' },
-    { icon: 'sparkle', title: 'ED, your AI sidekick', body: "The bubble in the corner. Ask ED anything, or glance at the ED SUGGESTS boxes scattered around the app for a proactive nudge." },
-    { icon: 'chat', title: 'Team Chat', body: 'Talk to your agency and any telemarketer feeding you leads, right from the Team Chat tab.' },
-    { icon: 'flame', title: 'The Moshpit', body: "Some vendor leads go straight to a claim pool instead of one producer — first to hit CLAIM gets it. Check it often." },
-    { icon: 'phone', title: 'Coaching & Training', body: 'Call review scoring and assigned courses live here — ask your agency owner if either looks locked.' },
-    { icon: 'vinyl', title: 'Record Store', body: "Coming soon: buy leads directly via Boberdoo webhooks/API. For now it's a placeholder." },
-    CLOSING_CONTACT,
+    WELCOME,
+    { icon: 'home', title: 'Home', body: 'This is your Home tab — Flow Score, funnel, and what to work next, always one click away.', route: '/producer', selector: '[data-tour="nav-home"]' },
+    { icon: 'trophy', title: 'Your Flow Score', body: 'One score for pace, quality and conversion — right at the top of your Home dashboard.', route: '/producer', selector: '[data-tour="flow-score"]' },
+    { icon: 'sparkle', title: 'Drills', body: 'Practice real sales scenarios with AI roleplay, drill by drill.', route: '/producer/drills', selector: '[data-tour="nav-drills"]' },
+    { icon: 'checklist', title: 'Tasks', body: 'Everything on your plate — follow-ups, callbacks, appointments — lives here.', route: '/producer/tasks', selector: '[data-tour="nav-tasks"]' },
+    { icon: 'leads', title: 'My Leads', body: 'Your real, live queue — click into any lead for full contact info, activity log, and one-click actions.', route: '/producer/my-leads', selector: '[data-tour="nav-my-leads"]' },
+    { icon: 'chat', title: 'Team Chat', body: 'Talk to your agency and any telemarketer feeding you leads, right from this tab.', route: '/producer/team-chat', selector: '[data-tour="nav-team-chat"]' },
+    { icon: 'phone', title: 'Call Coaching', body: 'Real call scoring against the training library, plus your own coaching breakdown.', route: '/producer/coaching', selector: '[data-tour="nav-call-coaching"]' },
+    { icon: 'book', title: 'Training', body: 'Assigned courses and the full 75-drill library live here — browse and practice anytime.', route: '/producer/training', selector: '[data-tour="nav-training"]' },
+    { icon: 'flame', title: 'The Moshpit', body: 'Some vendor leads go straight to a claim pool instead of one producer — first to hit CLAIM gets it. Check it often.', route: '/producer/moshpit', selector: '[data-tour="nav-moshpit"]' },
+    { icon: 'target', title: 'Winbacks & Cross-Sells', body: 'Real, auto-detected opportunities on your own customers — never a fabricated lead.', route: '/producer/opportunities', selector: '[data-tour="nav-opportunities"]' },
+    { icon: 'vinyl', title: 'Record Store', body: "Coming soon: buy leads directly via Boberdoo webhooks/API. For now it's a placeholder.", route: '/producer/record-store', selector: '[data-tour="nav-record-store"]' },
+    ED_STEP,
+    NOTIFICATIONS_STEP,
+    NO_SUPPORT_CLOSING,
   ],
-  AGENCY_OWNER: [
-    { icon: 'home', title: 'Welcome to EvenFlow', body: "Quick lap around the app — under a minute, skip anytime." },
-    { icon: 'home', title: 'Main Stage', body: 'Your home base — full roster, live leads, and your Agency Flow Score.' },
-    { icon: 'trophy', title: 'Leaderboards', body: 'Vendor and producer rankings, right on your dashboard — see who is actually earning their keep.' },
-    { icon: 'transfer', title: 'Yield Transfers', body: 'Every telemarketer-submitted lead lands here instantly, with a live team chat right alongside it.' },
-    { icon: 'trophy', title: 'Call Scoring', body: 'Upload a producer\'s call to get a real Drill Score based on the training library, then use the Coaching Box to see any producer\'s weak spots over a date range.' },
-    { icon: 'dollar', title: 'Financials', body: 'Revenue, cost, margin, and vendor cost-efficiency — real numbers, not vibes.' },
-    { icon: 'flag', title: 'Goals', body: 'Describe a goal in plain English and ED parses it for you, then watch live pace against it.' },
-    { icon: 'vendor', title: 'Vendors', body: 'Connect lead vendors, track cost-per-lead, and pick exactly how each vendor\'s leads get distributed — Round Robin, hand-picked agents, or the Moshpit claim pool.' },
-    { icon: 'sparkle', title: 'ED, your AI sidekick', body: 'Ask ED anything from the bubble in the corner, or check the ED SUGGESTS boxes for a proactive read on your numbers.' },
-    { icon: 'card', title: 'Billing', body: 'Manage your plan and payment method here.' },
-    { icon: 'vinyl', title: 'Record Store', body: 'Coming soon: a marketplace to sell leads directly via webhooks/API.' },
-    CLOSING_CONTACT,
-  ],
-  AGENCY_MANAGER: null, // filled in below — identical to AGENCY_OWNER
-  PLATFORM_OWNER: [
-    { icon: 'home', title: 'Welcome to EvenFlow', body: "Quick lap around the app — under a minute, skip anytime." },
-    { icon: 'agencies', title: 'Agencies', body: 'Every agency, its MRR, roster counts, and entitlements — click into any one for the full detail page.' },
-    { icon: 'megaphone', title: 'Telemarketers', body: 'Invite telemarketers, assign them to agencies, and watch assignment status roll in.' },
-    { icon: 'dollar', title: 'Financials', body: 'Platform-wide revenue and cost, scoped per agency to keep every number real.' },
-    { icon: 'support', title: 'Support', body: 'Every support ticket across every agency lands here.' },
-    { icon: 'card', title: 'Billing', body: 'Create plans, assign subscriptions to agencies, and watch MRR roll up.' },
-    { icon: 'book', title: 'Training', body: 'Manage the courses assigned platform-wide.' },
-    { icon: 'vinyl', title: 'Record Store', body: 'Coming soon: a marketplace to sell leads directly via webhooks/API.' },
-    { icon: 'sparkle', title: "That's the whole platform", body: 'You run it from here. If an agency needs something, Support is where it surfaces.' },
-  ],
+
   TELEMARKETER: [
-    { icon: 'home', title: 'Welcome to EvenFlow', body: "Quick lap around the app — under a minute, skip anytime." },
-    { icon: 'home', title: 'Your split-screen Home', body: 'Submit a rich lead on the left, chat live with your agency team on the right — at the same time.' },
-    { icon: 'trophy', title: 'Your Flow Score', body: 'Lead quality and close rate, tracked automatically from what you submit.' },
-    { icon: 'leads', title: 'My Recent Submissions', body: 'Every lead you have sent, with live status — watch them turn SOLD.' },
-    { icon: 'vinyl', title: 'Record Store', body: 'Coming soon.' },
-    { icon: 'support', title: 'Questions?', body: 'Ask the agency you are assigned to, right in that same chat panel.' },
+    WELCOME,
+    { icon: 'home', title: 'Your split-screen Home', body: 'Submit a rich lead on the left, chat live with your agency team on the right — at the same time.', route: '/telemarketer', selector: '[data-tour="nav-home"]' },
+    { icon: 'trophy', title: 'Your Flow Score', body: 'Lead quality and close rate, tracked automatically from what you submit.', route: '/telemarketer', selector: '[data-tour="flow-score"]' },
+    { icon: 'sparkle', title: 'Drills', body: 'Practice real sales scenarios with AI roleplay, drill by drill.', route: '/telemarketer/drills', selector: '[data-tour="nav-drills"]' },
+    { icon: 'checklist', title: 'Tasks', body: 'Follow-ups and callbacks assigned to you live here.', route: '/telemarketer/tasks', selector: '[data-tour="nav-tasks"]' },
+    { icon: 'vinyl', title: 'Record Store', body: 'Coming soon.', route: '/telemarketer/record-store', selector: '[data-tour="nav-record-store"]' },
+    ED_STEP,
+    NOTIFICATIONS_STEP,
+    { icon: 'support', title: 'Questions?', body: 'Ask the agency you are assigned to, right in that same chat panel on your Home tab.' },
+  ],
+
+  AGENCY_OWNER: [
+    WELCOME,
+    { icon: 'home', title: 'Main Stage', body: 'Your home base — full roster, live leads, and your Agency Flow Score.', route: '/agency', selector: '[data-tour="nav-home"]' },
+    { icon: 'trophy', title: 'Your Agency Flow Score', body: 'One score for pace, quality and conversion across your whole team — plus vendor and producer leaderboards further down this page.', route: '/agency', selector: '[data-tour="flow-score"]' },
+    { icon: 'sparkle', title: 'Drills', body: 'The full 75-drill training library, browsable and practiceable by anyone on your team.', route: '/agency/drills', selector: '[data-tour="nav-drills"]' },
+    { icon: 'checklist', title: 'Tasks', body: 'Every open follow-up across your agency, in one place.', route: '/agency/tasks', selector: '[data-tour="nav-tasks"]' },
+    { icon: 'transfer', title: 'Transfers', body: 'Every telemarketer-submitted lead lands here instantly, with a live team chat right alongside it.', route: '/agency/transfers', selector: '[data-tour="nav-transfers"]' },
+    { icon: 'chat', title: 'Team Chat', body: 'The agency-wide room — you, your producers, and any assigned telemarketers, all in one thread.', route: '/agency/team-chat', selector: '[data-tour="nav-team-chat"]' },
+    { icon: 'trophy', title: 'Call Scoring', body: "Upload a producer's call to get a real Drill Score based on the training library, then use the Coaching Box to see any producer's weak spots over a date range.", route: '/agency/call-scoring', selector: '[data-tour="nav-call-scoring"]' },
+    { icon: 'flame', title: 'The Moshpit', body: 'A live pool of claimable leads — first producer to hit CLAIM gets it.', route: '/agency/moshpit', selector: '[data-tour="nav-moshpit"]' },
+    { icon: 'target', title: 'Winbacks & Cross-Sells', body: 'Real, auto-detected opportunities across your whole customer base.', route: '/agency/opportunities', selector: '[data-tour="nav-opportunities"]' },
+    { icon: 'dollar', title: 'Financials', body: 'Revenue, cost, margin, and vendor cost-efficiency — real numbers, not vibes.', route: '/agency/financials', selector: '[data-tour="nav-financials"]' },
+    { icon: 'flag', title: 'Goals', body: 'Describe a goal in plain English and ED parses it for you, then watch live pace against it.', route: '/agency/goals', selector: '[data-tour="nav-goals"]' },
+    { icon: 'vendor', title: 'Vendors', body: "Connect lead vendors, track cost-per-lead, and pick exactly how each vendor's leads get distributed — Round Robin, hand-picked agents, or the Moshpit claim pool.", route: '/agency/vendors', selector: '[data-tour="nav-vendors"]' },
+    { icon: 'book', title: 'Training', body: 'Assign courses, track completion, and manage the drill library for your whole team.', route: '/agency/training', selector: '[data-tour="nav-training"]' },
+    { icon: 'clock', title: 'Hours Report', body: 'Real clock-in/out hours for your whole team, exportable for payroll.', route: '/agency/hours-report', selector: '[data-tour="nav-hours-report"]' },
+    { icon: 'card', title: 'Billing', body: 'Manage your plan and payment method here.', route: '/agency/billing', selector: '[data-tour="nav-billing"]' },
+    { icon: 'vinyl', title: 'Record Store', body: 'Coming soon: a marketplace to sell leads directly via webhooks/API.', route: '/agency/record-store', selector: '[data-tour="nav-record-store"]' },
+    { icon: 'phone', title: 'Coaching', body: "A focused view into any one producer's call breakdown — the same real scoring data as Call Scoring, framed for a 1:1 conversation.", route: '/agency/coaching', selector: '[data-tour="nav-coaching"]' },
+    { icon: 'support', title: 'Support', body: 'Open a ticket here any time something looks locked or broken — it reaches your platform contact directly.', route: '/agency/support', selector: '[data-tour="nav-support"]' },
+    ED_STEP,
+    NOTIFICATIONS_STEP,
+    { icon: 'sparkle', title: "You're all set", body: 'That\'s the full agency toolkit. Re-open this tour from the Tour button any time you need a refresher — it\'ll pick up right where you are.' },
+  ],
+
+  AGENCY_MANAGER: null, // filled in below — identical to AGENCY_OWNER
+
+  PLATFORM_OWNER: [
+    WELCOME,
+    { icon: 'agencies', title: 'Agencies', body: 'Every agency, its MRR, roster counts, and entitlements — click into any one for the full detail page.', route: '/platform', selector: '[data-tour="nav-home"]' },
+    { icon: 'sparkle', title: 'Drills', body: 'The full 75-drill training library, managed platform-wide.', route: '/platform/drills', selector: '[data-tour="nav-drills"]' },
+    { icon: 'checklist', title: 'Tasks', body: 'Open tasks across the platform.', route: '/platform/tasks', selector: '[data-tour="nav-tasks"]' },
+    { icon: 'megaphone', title: 'Telemarketers', body: 'Invite telemarketers, assign them to agencies, and watch assignment status roll in.', route: '/platform/telemarketers', selector: '[data-tour="nav-telemarketers"]' },
+    { icon: 'dollar', title: 'Financials', body: 'Platform-wide revenue and cost, scoped per agency to keep every number real.', route: '/platform/financials', selector: '[data-tour="nav-financials"]' },
+    { icon: 'support', title: 'Support', body: 'Every support ticket across every agency lands here.', route: '/platform/support', selector: '[data-tour="nav-support"]' },
+    { icon: 'card', title: 'Billing', body: 'Create plans, assign subscriptions to agencies, and watch MRR roll up.', route: '/platform/billing', selector: '[data-tour="nav-billing"]' },
+    { icon: 'book', title: 'Training', body: 'Manage the courses assigned platform-wide.', route: '/platform/training', selector: '[data-tour="nav-training"]' },
+    { icon: 'vinyl', title: 'Record Store', body: 'Coming soon: a marketplace to sell leads directly via webhooks/API.', route: '/platform/record-store', selector: '[data-tour="nav-record-store"]' },
+    ED_STEP,
+    NOTIFICATIONS_STEP,
+    { icon: 'sparkle', title: "That's the whole platform", body: 'You run it from here. If an agency needs something, Support is where it surfaces.' },
   ],
 };
 

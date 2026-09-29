@@ -4,7 +4,7 @@ import { useAuth } from '../lib/AuthContext';
 import { mainNavForRole, secondaryNavForRole } from './navConfig';
 import { Icon, Button, ComingSoonModal } from '../ui';
 
-export default function MobileDrawer({ open, onClose }) {
+export default function MobileDrawer({ open, onClose, onTakeTour }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const mainItems = mainNavForRole(user?.role);
@@ -19,6 +19,7 @@ export default function MobileDrawer({ open, onClose }) {
         end={item.to.split('/').length === 2}
         className={({ isActive }) => `ui-nav-link${isActive ? ' active' : ''}`}
         onClick={item.stub ? (e) => { e.preventDefault(); setStubOpen(true); onClose(); } : onClose}
+        data-tour={item.dataTour}
       >
         <Icon name={item.icon} size={17} />
         {item.label}
@@ -64,6 +65,12 @@ export default function MobileDrawer({ open, onClose }) {
             <Icon name="logout" size={14} style={{ marginRight: 6 }} />
             Log out
           </Button>
+          {onTakeTour && (
+            <button style={s.tourButton} onClick={() => { onClose(); onTakeTour(); }}>
+              <Icon name="sparkle" size={14} style={{ marginRight: 6 }} />
+              Tour
+            </button>
+          )}
         </div>
       </div>
 
@@ -100,4 +107,10 @@ const s = {
   secondaryNav: { padding: '0 var(--space-3) var(--space-2)', borderTop: '1px solid var(--border-hairline)', paddingTop: 'var(--space-2)', display: 'flex', flexDirection: 'column', gap: 2 },
   bottom: { padding: 'var(--space-4)', borderTop: '1px solid var(--border-hairline)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' },
   userLabel: { color: 'var(--text-muted)', fontSize: 11 },
+  tourButton: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%',
+    background: 'var(--accent-gradient-soft)', border: '1px solid var(--border-hairline)',
+    borderRadius: 'var(--radius-sm)', color: 'var(--accent)', fontSize: 12, fontWeight: 700,
+    cursor: 'pointer', padding: '8px 10px', letterSpacing: 0.3,
+  },
 };

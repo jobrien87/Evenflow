@@ -27,7 +27,7 @@ export default function FlowScoreCard({ scope = 'me', agencyId, title = 'FLOW SC
 
   if (!data.snapshot) {
     return (
-      <Card>
+      <Card data-tour="flow-score">
         <SectionHeader>{title}</SectionHeader>
         <div style={s.scoreRow}>
           <ProgressRing value={null} size={88} strokeWidth={7} />
@@ -56,7 +56,7 @@ export default function FlowScoreCard({ scope = 'me', agencyId, title = 'FLOW SC
   const { snapshot, explanation } = data;
 
   return (
-    <Card>
+    <Card data-tour="flow-score">
       <SectionHeader right={<span style={s.updated}>Updated {new Date(snapshot.computedAt).toLocaleString()}</span>}>
         {title}
       </SectionHeader>

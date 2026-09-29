@@ -117,7 +117,7 @@ export default function EdWidget() {
 
   return (
     <>
-      <button style={s.fab} onClick={() => setOpen(!open)}>
+      <button style={s.fab} onClick={() => setOpen(!open)} data-tour="ed-widget">
         {open ? '✕' : '⚡'}
       </button>
 

@@ -23,6 +23,7 @@ export default function Sidebar({ onTakeTour }) {
         end={item.to.split('/').length === 2}
         className={({ isActive }) => `ui-nav-link${isActive ? ' active' : ''}`}
         onClick={item.stub ? (e) => { e.preventDefault(); setStubOpen(true); } : undefined}
+        data-tour={item.dataTour}
       >
         <Icon name={item.icon} size={17} />
         {item.label}
@@ -48,7 +49,7 @@ export default function Sidebar({ onTakeTour }) {
       )}
 
       <div style={s.bottom}>
-        <div style={s.bellRow}>
+        <div style={s.bellRow} data-tour="notification-bell">
           <NotificationBell openUpward />
           <span style={s.userLabel}>
             {user?.firstName} · {user?.role.replace('_', ' ')}
@@ -67,7 +68,10 @@ export default function Sidebar({ onTakeTour }) {
           Log out
         </Button>
         {onTakeTour && (
-          <button style={s.tourLink} onClick={onTakeTour}>Take the tour again</button>
+          <button style={s.tourButton} onClick={onTakeTour}>
+            <Icon name="sparkle" size={14} style={{ marginRight: 6 }} />
+            Tour
+          </button>
         )}
       </div>
 
@@ -116,5 +120,10 @@ const s = {
   bottom: { padding: 'var(--space-4)', borderTop: '1px solid var(--border-hairline)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' },
   bellRow: { display: 'flex', alignItems: 'center', gap: 10 },
   userLabel: { color: 'var(--text-muted)', fontSize: 11 },
-  tourLink: { background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 11, textAlign: 'center', cursor: 'pointer', textDecoration: 'underline', padding: 2 },
+  tourButton: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%',
+    background: 'var(--accent-gradient-soft)', border: '1px solid var(--border-hairline)',
+    borderRadius: 'var(--radius-sm)', color: 'var(--accent)', fontSize: 12, fontWeight: 700,
+    cursor: 'pointer', padding: '8px 10px', letterSpacing: 0.3,
+  },
 };

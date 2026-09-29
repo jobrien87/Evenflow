@@ -8,7 +8,9 @@ export default function MobileTopBar({ onMenuClick }) {
         <Icon name="menu" size={22} />
       </button>
       <span style={s.logo}>EVENFLOW</span>
-      <NotificationBell />
+      <span data-tour="notification-bell">
+        <NotificationBell />
+      </span>
     </header>
   );
 }
