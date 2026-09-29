@@ -77,7 +77,7 @@ export default function MobileDrawer({ open, onClose, onTakeTour }) {
       {stubOpen && (
         <ComingSoonModal
           label="Record Store"
-          description="A marketplace to sell your leads directly to buyers via Boberdoo webhooks & APIs. We're building it — stay tuned."
+          description="A marketplace to purchase Real Time Internet leads at wholesale prices. We're building it — stay tuned."
           onClose={() => setStubOpen(false)}
         />
       )}
