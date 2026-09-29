@@ -7,11 +7,29 @@ import FunnelMetricsCard from './FunnelMetricsCard';
 import PerformanceLeaderboards from './PerformanceLeaderboards';
 import RunningReportPage from './RunningReportPage';
 
+const STARTED_DAY_KEY = 'evenflow.startedDay';
+
+function todayISODate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// A route change (or a refresh) remounts this component, which would
+// otherwise reset the plain useState(false) below and re-prompt "Start My
+// Day" every single time. Persisting today's date in localStorage survives
+// both, so the prompt only shows once per real calendar day.
+function hasStartedToday() {
+  try {
+    return localStorage.getItem(STARTED_DAY_KEY) === todayISODate();
+  } catch {
+    return false;
+  }
+}
+
 export default function ProducerDashboard() {
   const { user } = useAuth();
   const [recap, setRecap] = useState(null);
   const [queue, setQueue] = useState(null);
-  const [started, setStarted] = useState(false);
+  const [started, setStarted] = useState(hasStartedToday);
   const [busyId, setBusyId] = useState(null);
   const [showReport, setShowReport] = useState(false);
   const [loadError, setLoadError] = useState('');
@@ -47,11 +65,21 @@ export default function ProducerDashboard() {
     }
   }
 
+  function startDay() {
+    try {
+      localStorage.setItem(STARTED_DAY_KEY, todayISODate());
+    } catch {
+      // Private-browsing/blocked storage — the prompt just re-shows next
+      // time, which is a harmless degradation, not a broken feature.
+    }
+    setStarted(true);
+  }
+
   if (!started) {
     return (
       <div style={s.center}>
         <h2 style={s.h2}>Ready when you are.</h2>
-        <button style={s.bigButton} onClick={() => setStarted(true)}>
+        <button style={s.bigButton} onClick={startDay}>
           START MY DAY ⚡
         </button>
       </div>
