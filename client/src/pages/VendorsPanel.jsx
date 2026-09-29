@@ -3,6 +3,14 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { StatTile, BarRow, SectionHeader, Badge } from '../ui';
 
+const VENDOR_CATEGORIES = [
+  { value: 'PAID_AD', label: 'Paid Ad' },
+  { value: 'DIRECT_MAIL', label: 'Direct Mail' },
+  { value: 'META_AD', label: 'Meta Ad' },
+  { value: 'OTHER', label: 'Other' },
+];
+const categoryLabel = (category) => VENDOR_CATEGORIES.find((c) => c.value === category)?.label || 'Other';
+
 const DISTRIBUTION_MODES = [
   { value: 'ROUND_ROBIN', label: 'Round Robin', hint: 'Cycles evenly through every active producer.' },
   { value: 'SELECTED_AGENTS', label: 'Select Agents', hint: 'Cycles only through the agents you pick below.' },
@@ -41,7 +49,7 @@ export default function VendorsPanel() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', email: '', product: 'Auto', costPerLeadCents: '', distributionMode: 'ROUND_ROBIN', selectedAgentIds: [] });
+  const [form, setForm] = useState({ name: '', email: '', product: 'Auto', costPerLeadCents: '', distributionMode: 'ROUND_ROBIN', selectedAgentIds: [], category: 'OTHER' });
   const [formError, setFormError] = useState('');
   const [newKeyResult, setNewKeyResult] = useState(null);
   const [selectedVendor, setSelectedVendor] = useState(null);
@@ -90,7 +98,7 @@ export default function VendorsPanel() {
         selectedAgentIds: form.distributionMode === 'SELECTED_AGENTS' ? form.selectedAgentIds : undefined,
       });
       setNewKeyResult(res);
-      setForm({ name: '', email: '', product: 'Auto', costPerLeadCents: '', distributionMode: 'ROUND_ROBIN', selectedAgentIds: [] });
+      setForm({ name: '', email: '', product: 'Auto', costPerLeadCents: '', distributionMode: 'ROUND_ROBIN', selectedAgentIds: [], category: 'OTHER' });
       setShowForm(false);
       await load();
     } catch (err) {
@@ -135,6 +143,7 @@ export default function VendorsPanel() {
       costPerLeadCents: v.costPerLeadCents ? (v.costPerLeadCents / 100).toFixed(2) : '',
       distributionMode: v.distributionMode || 'ROUND_ROBIN',
       selectedAgentIds: v.selectedAgentIds || [],
+      category: v.category || 'OTHER',
     });
   }
 
@@ -148,6 +157,7 @@ export default function VendorsPanel() {
         costPerLeadCents: editForm.costPerLeadCents ? Math.round(parseFloat(editForm.costPerLeadCents) * 100) : null,
         distributionMode: editForm.distributionMode,
         selectedAgentIds: editForm.distributionMode === 'SELECTED_AGENTS' ? editForm.selectedAgentIds : [],
+        category: editForm.category,
       });
       setEditingId(null);
       await load();
@@ -229,6 +239,9 @@ export default function VendorsPanel() {
           <select style={s.input} value={form.product} onChange={(e) => setForm({ ...form, product: e.target.value })}>
             <option>Auto</option><option>Home</option><option>Life</option><option>Health</option>
           </select>
+          <select style={s.input} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+            {VENDOR_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </select>
           <input
             style={s.input}
             type="number"
@@ -276,11 +289,12 @@ export default function VendorsPanel() {
               <div style={s.rowSub}>
                 {v.email} · {v.costPerLeadCents ? `$${(v.costPerLeadCents / 100).toFixed(2)}/lead` : 'cost not set'}
               </div>
-              <div style={{ marginTop: 6 }}>
+              <div style={{ marginTop: 6, display: 'flex', gap: 6 }}>
                 <Badge tone={distributionTone(v.distributionMode)}>
                   {distributionLabel(v.distributionMode)}
                   {v.distributionMode === 'SELECTED_AGENTS' ? ` (${(v.selectedAgentIds || []).length})` : ''}
                 </Badge>
+                <Badge tone="neutral">{categoryLabel(v.category)}</Badge>
               </div>
             </div>
             <select style={s.miniInput} value={v.status} onChange={(e) => setStatus(v.id, e.target.value)}>
@@ -306,6 +320,9 @@ export default function VendorsPanel() {
               <input style={s.input} type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} placeholder="Email" />
               <select style={s.input} value={editForm.product} onChange={(e) => setEditForm({ ...editForm, product: e.target.value })}>
                 <option>Auto</option><option>Home</option><option>Life</option><option>Health</option>
+              </select>
+              <select style={s.input} value={editForm.category} onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}>
+                {VENDOR_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
               </select>
               <input style={s.input} type="number" step="0.01" min="0" value={editForm.costPerLeadCents} onChange={(e) => setEditForm({ ...editForm, costPerLeadCents: e.target.value })} placeholder="Cost per lead ($)" />
 

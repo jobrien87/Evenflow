@@ -56,6 +56,8 @@ router.get('/', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'),
   }
 });
 
+const VENDOR_CATEGORIES = ['PAID_AD', 'DIRECT_MAIL', 'META_AD', 'OTHER'];
+
 const createVendorSchema = z.object({
   agencyId: z.string().uuid().optional(),
   name: z.string().min(1),
@@ -64,6 +66,10 @@ const createVendorSchema = z.object({
   costPerLeadCents: z.number().int().positive().nullable().optional(),
   distributionMode: z.enum(['ROUND_ROBIN', 'SELECTED_AGENTS', 'MOSHPIT']).optional(),
   selectedAgentIds: z.array(z.string().uuid()).optional(),
+  // What kind of leads this vendor supplies — every lead sourced from it
+  // inherits this as its Lead.leadType (see lib/leadType.js), which drives
+  // the configurable priority queue (Agency.priorityRules).
+  category: z.enum(VENDOR_CATEGORIES).optional(),
 });
 
 router.post('/', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res, next) => {
@@ -96,6 +102,7 @@ router.post('/', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res,
           costPerLeadCents: parsed.data.costPerLeadCents ?? null,
           distributionMode,
           selectedAgentIds,
+          category: parsed.data.category || 'OTHER',
         },
       });
       const credential = await tx.vendorCredential.create({
@@ -202,6 +209,7 @@ const updateVendorSchema = z.object({
   costPerLeadCents: z.number().int().positive().nullable().optional(),
   distributionMode: z.enum(['ROUND_ROBIN', 'SELECTED_AGENTS', 'MOSHPIT']).optional(),
   selectedAgentIds: z.array(z.string().uuid()).optional(),
+  category: z.enum(VENDOR_CATEGORIES).optional(),
 });
 
 // General field edit — separate from /status below, since a status

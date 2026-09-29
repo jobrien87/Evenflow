@@ -5,6 +5,7 @@ const { prisma } = require('../lib/db');
 const { requireAuth, scopeAgencyId } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { scoreLead } = require('../lib/priority');
+const { deriveLeadType } = require('../lib/leadType');
 const { normalizePhone, normalizeEmail } = require('../lib/normalize');
 const { recordLeadSaleRevenue } = require('../lib/financialEvents');
 const { notifyUser, notifyUsers, notifyAgencyOwners } = require('../lib/notifications');
@@ -177,11 +178,13 @@ async function createLeadRecord({ agencyId, source, createdById, data }) {
         customFields: data.customFields || {},
         dob: data.dob ? new Date(data.dob) : null,
         isLiveTransfer: !!data.isLiveTransfer,
+        leadType: deriveLeadType({ isLiveTransfer: !!data.isLiveTransfer }),
         ...intakeFields,
       },
     });
 
-    const { priorityScore, priorityBand, priorityReason } = scoreLead(lead);
+    const agencyRow = await tx.agency.findUnique({ where: { id: agencyId }, select: { priorityRules: true } });
+    const { priorityScore, priorityBand, priorityReason } = scoreLead(lead, agencyRow?.priorityRules);
     const updatedLead = await tx.lead.update({
       where: { id: lead.id },
       data: { priorityScore, priorityReason },
@@ -720,7 +723,8 @@ router.post('/:leadId/disposition', async (req, res, next) => {
         : []),
     ]);
 
-    const { priorityScore, priorityReason } = scoreLead(updated);
+    const agencyRow = await prisma.agency.findUnique({ where: { id: lead.agencyId }, select: { priorityRules: true } });
+    const { priorityScore, priorityReason } = scoreLead(updated, agencyRow?.priorityRules);
     await prisma.lead.update({ where: { id: lead.id }, data: { priorityScore, priorityReason } });
 
     await recordAudit({

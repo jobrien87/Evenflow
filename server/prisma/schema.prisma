@@ -154,6 +154,30 @@ enum LeadDistributionMode {
   MOSHPIT
 }
 
+// Marketing category a vendor's leads come from — drives the default
+// Lead.leadType for anything sourced from that vendor (set once per vendor,
+// not per lead). See Agency.priorityRules for how this feeds the producer
+// queue's ordering.
+enum VendorCategory {
+  PAID_AD
+  DIRECT_MAIL
+  META_AD
+  OTHER
+}
+
+// Coarse lead-source category the configurable priority engine
+// (lib/priority.js) ranks against Agency.priorityRules.typeRank. Derived
+// automatically at creation — never picked by hand.
+enum LeadType {
+  TRANSFER
+  PAID_AD
+  DIRECT_MAIL
+  META_AD
+  MANUAL
+  WINBACK
+  CROSS_SELL
+}
+
 enum RevenueCategory {
   SUBSCRIPTION
   TRANSFER_REVENUE
@@ -313,6 +337,10 @@ model Agency {
   timezone       String       @default("America/New_York")
   officeHours    Json?
   products       String[]     @default([])
+  // Configurable lead-queue ordering: { typeRank: LeadType[], statusRules:
+  // { [LeadStatus]: { afterDays: number, action: 'BUMP_UP' | 'BUMP_DOWN' |
+  // 'DROP_OFF' } } }. Null = lib/priority.js's seeded default applies.
+  priorityRules  Json?
   crmEnabled     Boolean      @default(true)
   transfersEnabled Boolean    @default(false)
   coachingEnabled  Boolean    @default(false)
@@ -401,6 +429,11 @@ model Lead {
   // Real outbound dials logged via POST /:leadId/activities — a count, not
   // a status change, so it stays accurate no matter how status is set.
   attemptCount    Int        @default(0)
+  // Derived automatically at creation (isLiveTransfer -> TRANSFER;
+  // vendor-sourced -> the vendor's category; else MANUAL) — drives the
+  // configurable priority engine's type-rank component. See
+  // Agency.priorityRules and lib/priority.js.
+  leadType        LeadType   @default(MANUAL)
   customFields    Json?
   // Captured when a producer dispositions this lead as SOLD — real, entered
   // data (not a fabricated commission calculation), which is what makes it
@@ -797,6 +830,10 @@ model Vendor {
   distributionMode LeadDistributionMode @default(ROUND_ROBIN)
   selectedAgentIds String[]             @default([])
   roundRobinCursor Int                  @default(0)
+
+  // What kind of leads this vendor supplies — every lead sourced from this
+  // vendor inherits this as its Lead.leadType (see createLeadRecord).
+  category         VendorCategory       @default(OTHER)
 
   credentials     VendorCredential[]
   leads           Lead[]

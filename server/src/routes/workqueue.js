@@ -46,16 +46,18 @@ router.get('/', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER', 'PLATF
       status: { in: ['ASSIGNED', 'ATTEMPTED', 'CONTACTED', 'QUOTED', 'SNOOZED'] },
     };
 
-    const [leads, tasks, opportunities] = await Promise.all([
+    const [leads, tasks, opportunities, agencyRow] = await Promise.all([
       prisma.lead.findMany({ where: leadWhere, include: { customer: true } }),
       prisma.task.findMany({ where: taskWhere, include: { lead: { include: { customer: true } } } }),
       prisma.opportunity.findMany({ where: opportunityWhere, include: { customer: true } }),
+      agencyId ? prisma.agency.findUnique({ where: { id: agencyId }, select: { priorityRules: true } }) : Promise.resolve(null),
     ]);
 
     const now = new Date();
+    const priorityRules = agencyRow?.priorityRules;
 
     const leadItems = leads.map((lead) => {
-      const { priorityScore, priorityBand, priorityReason } = scoreLead(lead, now);
+      const { priorityScore, priorityBand, priorityReason } = scoreLead(lead, priorityRules, now);
       return {
         itemType: 'LEAD',
         id: lead.id,

@@ -10,6 +10,7 @@ const { recordAudit } = require('../lib/audit');
 const { recordVendorLeadCost } = require('../lib/financialEvents');
 const { notifyAgencyOwners, notifyUser, notifyUsers } = require('../lib/notifications');
 const { resolveVendorAssignment } = require('../lib/leadDistribution');
+const { deriveLeadType } = require('../lib/leadType');
 
 const router = express.Router();
 
@@ -137,6 +138,7 @@ router.post('/leads', requireVendorAuth, async (req, res) => {
           status: assignment.assignedToId ? 'ASSIGNED' : 'NEW',
           assignedToId: assignment.assignedToId,
           assignedAt: assignment.assignedToId ? new Date() : null,
+          leadType: deriveLeadType({ vendorCategory: req.vendor.category }),
           customFields: {
             currentCarrier: data.current_carrier,
             subId: data.sub_id,
@@ -145,7 +147,8 @@ router.post('/leads', requireVendorAuth, async (req, res) => {
         },
       });
 
-      const { priorityScore, priorityReason } = scoreLead(lead);
+      const agencyRow = await tx.agency.findUnique({ where: { id: req.vendor.agencyId }, select: { priorityRules: true } });
+      const { priorityScore, priorityReason } = scoreLead(lead, agencyRow?.priorityRules);
       const updatedLead = await tx.lead.update({ where: { id: lead.id }, data: { priorityScore, priorityReason } });
 
       await tx.leadEvent.create({

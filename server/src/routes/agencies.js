@@ -290,11 +290,21 @@ router.get('/:agencyId/activity', async (req, res, next) => {
   }
 });
 
+const LEAD_TYPES = ['TRANSFER', 'PAID_AD', 'DIRECT_MAIL', 'META_AD', 'MANUAL', 'WINBACK', 'CROSS_SELL'];
+const priorityRulesSchema = z.object({
+  typeRank: z.array(z.enum(LEAD_TYPES)).min(1).optional(),
+  statusRules: z.record(z.object({
+    afterDays: z.number().int().min(0),
+    action: z.enum(['BUMP_UP', 'BUMP_DOWN', 'DROP_OFF']),
+  })).optional(),
+}).nullable();
+
 const updateAgencySchema = z.object({
   name: z.string().min(2).optional(),
   timezone: z.string().optional(),
   officeHours: z.record(z.string()).nullable().optional(),
   products: z.array(z.string()).optional(),
+  priorityRules: priorityRulesSchema.optional(),
 });
 
 // Edit an agency's own settings — didn't exist at all before this: an
