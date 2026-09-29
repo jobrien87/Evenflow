@@ -10,6 +10,7 @@ export const NAV_BY_ROLE = {
   PRODUCER: [
     { label: 'Home', to: '/producer', icon: 'home', primary: true },
     { label: 'Drills', to: '/producer/drills', icon: 'sparkle' },
+    { label: 'Tasks', to: '/producer/tasks', icon: 'checklist' },
     { label: 'My Leads', to: '/producer/my-leads', icon: 'leads', primary: true },
     { label: 'Team Chat', to: '/producer/team-chat', icon: 'chat', primary: true },
     { label: 'Call Coaching', to: '/producer/coaching', icon: 'phone', primary: true },
@@ -21,11 +22,13 @@ export const NAV_BY_ROLE = {
   TELEMARKETER: [
     { label: 'Home', to: '/telemarketer', icon: 'home', primary: true },
     { label: 'Drills', to: '/telemarketer/drills', icon: 'sparkle', primary: true },
+    { label: 'Tasks', to: '/telemarketer/tasks', icon: 'checklist' },
     { label: 'Record Store', to: '/telemarketer/record-store', icon: 'vinyl', stub: true },
   ],
   AGENCY_OWNER: [
     { label: 'Main Stage', to: '/agency', icon: 'home', primary: true },
     { label: 'Drills', to: '/agency/drills', icon: 'sparkle' },
+    { label: 'Tasks', to: '/agency/tasks', icon: 'checklist' },
     { label: 'Yield Transfers', to: '/agency/transfers', icon: 'transfer', primary: true },
     { label: 'Call Scoring', to: '/agency/call-scoring', icon: 'trophy', primary: true },
     { label: 'Moshpit', to: '/agency/moshpit', icon: 'flame' },
@@ -42,6 +45,7 @@ export const NAV_BY_ROLE = {
   PLATFORM_OWNER: [
     { label: 'Agencies', to: '/platform', icon: 'agencies', primary: true },
     { label: 'Drills', to: '/platform/drills', icon: 'sparkle' },
+    { label: 'Tasks', to: '/platform/tasks', icon: 'checklist' },
     { label: 'Telemarketers', to: '/platform/telemarketers', icon: 'megaphone', primary: true },
     { label: 'Financials', to: '/platform/financials', icon: 'dollar', primary: true },
     { label: 'Support', to: '/platform/support', icon: 'support', primary: true },

@@ -8,16 +8,17 @@ const { computeProducerScore } = require('../lib/flowScore');
 const router = express.Router();
 router.use(requireAuth);
 
-// Tasks are an agency/producer-side work item — a Telemarketer has no
-// legitimate reason to list them, and scopeAgencyId(req) returns null
-// for a TM (no agencyId of their own), which would otherwise omit the
-// agencyId filter entirely rather than scope it. See opportunities.js
-// for the same fix and reasoning.
-router.get('/', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER', 'PLATFORM_OWNER'), async (req, res, next) => {
+// A Telemarketer has no agencyId of their own (cross-agency via
+// TelemarketerAssignment) — scopeAgencyId(req) returns null for them,
+// which would otherwise omit the agencyId filter entirely rather than
+// scope it (see opportunities.js for the same fix/reasoning). Scope a
+// TM strictly to their own assignedToId instead, same as a Producer.
+router.get('/', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER', 'TELEMARKETER', 'PLATFORM_OWNER'), async (req, res, next) => {
   try {
-    const agencyId = scopeAgencyId(req);
+    const isTelemarketer = req.user.role === 'TELEMARKETER';
+    const agencyId = isTelemarketer ? null : scopeAgencyId(req);
     const where = {
-      ...(agencyId ? { agencyId } : {}),
+      ...(isTelemarketer ? { assignedToId: req.user.id } : agencyId ? { agencyId } : {}),
       ...(req.user.role === 'PRODUCER' ? { assignedToId: req.user.id } : {}),
       ...(req.query.status ? { status: req.query.status } : {}),
     };
@@ -49,7 +50,23 @@ router.post('/', async (req, res, next) => {
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
     }
-    const agencyId = req.user.role === 'PLATFORM_OWNER' ? parsed.data.agencyId : req.user.agencyId;
+    let agencyId;
+    if (req.user.role === 'PLATFORM_OWNER') {
+      agencyId = parsed.data.agencyId;
+    } else if (req.user.role === 'TELEMARKETER') {
+      // Never trust a client-supplied agencyId blindly — require a real
+      // ACTIVE assignment to that exact agency, same pattern leads.js
+      // already uses for a TM's other cross-agency writes.
+      const requested = parsed.data.agencyId;
+      if (!requested) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+      const assignment = await prisma.telemarketerAssignment.findFirst({
+        where: { telemarketerId: req.user.id, agencyId: requested, status: 'ACTIVE' },
+      });
+      if (!assignment) return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'Not assigned to that agency.' });
+      agencyId = requested;
+    } else {
+      agencyId = req.user.agencyId;
+    }
     if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
 
     const task = await prisma.task.create({
@@ -97,7 +114,13 @@ router.post('/:taskId/complete', async (req, res, next) => {
     }
     const task = await prisma.task.findUnique({ where: { id: req.params.taskId } });
     if (!task) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
-    if (req.user.role !== 'PLATFORM_OWNER' && task.agencyId !== req.user.agencyId) {
+    // A Telemarketer's own agencyId is always null (cross-agency), so the
+    // plain agency-match check would always 403 them out of their own
+    // task — allow completing a task that's genuinely assigned to you,
+    // regardless of the agency-membership check, in addition to it.
+    const sameAgency = req.user.role === 'PLATFORM_OWNER' || task.agencyId === req.user.agencyId;
+    const isOwnTask = task.assignedToId === req.user.id;
+    if (!sameAgency && !isOwnTask) {
       return res.status(403).json({ success: false, error: 'FORBIDDEN' });
     }
 

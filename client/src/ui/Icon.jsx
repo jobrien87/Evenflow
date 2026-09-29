@@ -27,6 +27,7 @@ const PATHS = {
   sparkle: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3zM19 15l0.8 2.2L22 18l-2.2 0.8L19 21l-0.8-2.2L16 18l2.2-0.8L19 15z',
   trophy: 'M8 4h8v4a4 4 0 0 1-8 0V4zM5 5H3v2a4 4 0 0 0 4 4M19 5h2v2a4 4 0 0 1-4 4M9 15h6M12 12v5M8 20h8',
   flame: 'M12 2c1 3-3 4-3 8a3 3 0 0 0 6 0c1.5 1 2 3 2 4.5A5.5 5.5 0 0 1 6 14.5C6 9 12 7 12 2z',
+  checklist: 'M4 6h2v2H4V6zM4 11h2v2H4v-2zM4 16h2v2H4v-2zM9 7h11M9 12h11M9 17h11',
 };
 
 export default function Icon({ name, size = 18, style }) {

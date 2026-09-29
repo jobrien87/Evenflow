@@ -42,6 +42,10 @@ export const api = {
   claimLead: (id) => request(`/leads/${id}/claim`, { method: 'POST' }),
   logLeadActivity: (id, payload) => request(`/leads/${id}/activities`, { method: 'POST', body: payload }),
   createLeadNote: (id, content) => request(`/leads/${id}/notes`, { method: 'POST', body: { content } }),
+
+  tasks: (params = '') => request(`/tasks${params}`),
+  createTask: (payload) => request('/tasks', { method: 'POST', body: payload }),
+  completeTask: (id, payload) => request(`/tasks/${id}/complete`, { method: 'POST', body: payload }),
   // Not JSON — a multipart upload, same bypass-request() shape as uploadCall.
   bulkImportLeads: async (file, agencyId) => {
     const formData = new FormData();

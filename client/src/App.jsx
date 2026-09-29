@@ -12,6 +12,7 @@ import CallsPanel from './pages/CallsPanel';
 import TrainingPanel from './pages/TrainingPanel';
 import DrillLibraryPanel from './pages/DrillLibraryPanel';
 import DrillDetailPage from './pages/DrillDetailPage';
+import TasksPanel from './pages/TasksPanel';
 import OpportunitiesPanel from './pages/OpportunitiesPanel';
 import TeamChatPanel from './pages/TeamChatPanel';
 import MoshpitPanel from './pages/MoshpitPanel';
@@ -61,6 +62,7 @@ export default function App() {
           <Route path="producer" element={<ProducerDashboard />} />
           <Route path="producer/drills" element={<DrillLibraryPanel />} />
           <Route path="producer/drills/:courseId/:lessonId" element={<DrillDetailPage />} />
+          <Route path="producer/tasks" element={<TasksPanel />} />
           <Route path="producer/team-chat" element={<TeamChatPanel />} />
           <Route path="producer/coaching" element={<CallsPanel />} />
           <Route path="producer/training" element={<TrainingPanel />} />
@@ -73,6 +75,7 @@ export default function App() {
           <Route path="agency" element={<AgencyOwnerDashboard />} />
           <Route path="agency/drills" element={<DrillLibraryPanel />} />
           <Route path="agency/drills/:courseId/:lessonId" element={<DrillDetailPage />} />
+          <Route path="agency/tasks" element={<TasksPanel />} />
           <Route path="agency/transfers" element={<YieldTransfersPanel />} />
           <Route path="agency/call-scoring" element={<CallScoringPanel />} />
           <Route path="agency/moshpit" element={<MoshpitPanel />} />
@@ -91,6 +94,7 @@ export default function App() {
           <Route path="platform" element={<AgenciesPanel />} />
           <Route path="platform/drills" element={<DrillLibraryPanel />} />
           <Route path="platform/drills/:courseId/:lessonId" element={<DrillDetailPage />} />
+          <Route path="platform/tasks" element={<TasksPanel />} />
           <Route path="platform/agencies/:agencyId" element={<AgencyDetailPage />} />
           <Route path="platform/telemarketers" element={<TelemarketersPanel />} />
           <Route path="platform/financials" element={<FinancialsPanel />} />
@@ -103,6 +107,7 @@ export default function App() {
           <Route path="telemarketer" element={<TelemarketerDashboard />} />
           <Route path="telemarketer/drills" element={<DrillLibraryPanel />} />
           <Route path="telemarketer/drills/:courseId/:lessonId" element={<DrillDetailPage />} />
+          <Route path="telemarketer/tasks" element={<TasksPanel />} />
         </Route>
       </Route>
     </Routes>
