@@ -12,6 +12,7 @@ const { explainScore, componentPlaceholders } = require('../lib/flowScore');
 const { computeFunnel } = require('../lib/funnelMetrics');
 const { computeVendorBreakdown, computeProductBreakdown } = require('../lib/performanceBreakdown');
 const { computeCoachingBreakdown } = require('../lib/callScoring');
+const { findRelevantLessons } = require('../lib/drillRetrieval');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -152,7 +153,14 @@ router.post('/ask', askLimiter, async (req, res, next) => {
       });
     }
 
-    const systemPrompt = buildSystemPrompt({ context, humorLevel: parsed.data.humorLevel || 'NORMAL' });
+    // Ground ED's answer in the real 75-drill training library whenever the
+    // question overlaps one — a plain keyword search (lib/drillRetrieval.js),
+    // never a second AI call. Only added to the CONTEXT block when something
+    // real actually matched, so the deterministic fallback above is untouched.
+    const relevantDrills = await findRelevantLessons(parsed.data.message, { limit: 3 });
+    const promptContext = relevantDrills.length > 0 ? { ...context, relevantDrills } : context;
+
+    const systemPrompt = buildSystemPrompt({ context: promptContext, humorLevel: parsed.data.humorLevel || 'NORMAL' });
 
     let result;
     try {

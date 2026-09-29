@@ -15,6 +15,7 @@ const { requireAuth } = require('../middleware/auth');
 const { requireModuleEnabled } = require('../lib/entitlements');
 const { callMultiTurn, isConfigured } = require('../lib/aiProvider');
 const { estimateCostMicros } = require('../lib/aiCost');
+const { findRelevantLessons } = require('../lib/drillRetrieval');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -30,7 +31,11 @@ const roleplayLimiter = rateLimit({
   message: { success: false, error: 'RATE_LIMITED', message: "You've hit today's roleplay limit. It resets tomorrow." },
 });
 
-function buildRoleplaySystemPrompt(course, lesson) {
+function buildRoleplaySystemPrompt(course, lesson, relatedLessons = []) {
+  const relatedSection = relatedLessons.length > 0
+    ? `\n\nOTHER RELEVANT DRILLS IN THE LIBRARY (real, from the same training library — when you give feedback, you may recommend one of these BY NAME as a next drill to practice if it genuinely fits what came up in the conversation; never invent a drill that isn't listed here, and never use its content as your own in-character script):\n${relatedLessons.map((l) => `- "${l.title}" (${l.courseTitle}): ${l.content.slice(0, 150).trim()}...`).join('\n')}`
+    : '';
+
   return `You are running a live phone-call roleplay to help an insurance salesperson practice one specific drill from their training library.
 
 DRILL: ${lesson.title}
@@ -38,6 +43,7 @@ CATEGORY: ${course.title}
 
 WHAT THIS DRILL TEACHES (its real training content, follow it faithfully):
 ${lesson.content}
+${relatedSection}
 
 Figure out from the conversation which role the human is playing, and always play the OTHER one:
 - If they're writing as the insurance agent (pitching, asking discovery questions, handling objections, guiding the call), you play a realistic PROSPECT/CUSTOMER with realistic objections relevant to this exact drill.
@@ -73,13 +79,20 @@ router.post('/:lessonId/message', roleplayLimiter, async (req, res, next) => {
       });
     }
 
-    const systemPrompt = buildRoleplaySystemPrompt(lesson.course, lesson);
     // First turn: no messages yet, so send a placeholder user turn asking
     // the model to open the scene (never an empty messages array to the
     // Anthropic API).
     const messages = parsed.data.messages.length > 0
       ? parsed.data.messages
       : [{ role: 'user', content: '[Begin the roleplay.]' }];
+
+    // Search the rest of the 75-drill library (excluding the drill already
+    // being practiced) against the running transcript so far, so feedback
+    // can point to a genuinely relevant next drill by name — same plain
+    // keyword search ED's /ask uses, never a second AI call.
+    const transcriptText = messages.map((m) => m.content).join(' ');
+    const relatedLessons = await findRelevantLessons(transcriptText, { limit: 2, excludeIds: [lesson.id] });
+    const systemPrompt = buildRoleplaySystemPrompt(lesson.course, lesson, relatedLessons);
 
     let result;
     try {
