@@ -394,6 +394,11 @@ model Lead {
   updatedAt       DateTime   @updatedAt
   archivedAt      DateTime?
 
+  // Set the moment a stale-lead reminder notification is sent (Part 4);
+  // read back on the next check so the same lead isn't re-notified until
+  // the staleness window has passed again.
+  lastReminderSentAt DateTime?
+
   // Rich intake fields captured at the moment a Telemarketer submits a
   // lead (source: 'telemarketer') — denormalized onto the Lead itself
   // rather than Customer, since this is an intake-time snapshot (the same

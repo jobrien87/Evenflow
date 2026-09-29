@@ -132,7 +132,49 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
       <Section title={`NOTES (${lead.notes?.length || 0})`}>
         <NotesBlock lead={lead} onDone={refresh} />
       </Section>
+
+      <Section title={`HISTORY (${lead.events?.length || 0})`}>
+        <HistoryBlock lead={lead} />
+      </Section>
     </Modal>
+  );
+}
+
+// Every claim/assign/disposition already writes a real LeadEvent — this
+// just surfaces that existing audit trail, so anyone opening the lead can
+// see everything that's happened without having to ask around.
+function describeEvent(e) {
+  const note = e.metadata?.note;
+  switch (e.type) {
+    case 'lead.created':
+      return 'Lead created';
+    case 'lead.created.possible_duplicate':
+      return 'Lead created (flagged as a possible duplicate)';
+    case 'lead.assigned':
+      return 'Assigned to a producer';
+    case 'lead.new':
+      return 'New lead received';
+    case 'lead.claimed':
+      return 'Claimed from the Moshpit';
+    case 'lead.disposition':
+      return `Disposition: ${e.fromStatus?.replace(/_/g, ' ') || '—'} → ${e.toStatus?.replace(/_/g, ' ') || '—'}${note ? ` — "${note}"` : ''}`;
+    default:
+      return e.type.replace(/_/g, ' ');
+  }
+}
+
+function HistoryBlock({ lead }) {
+  const events = lead.events || [];
+  if (events.length === 0) return <div style={s.empty}>No history yet.</div>;
+  return (
+    <div style={s.list}>
+      {events.map((e) => (
+        <div key={e.id} style={s.listRow}>
+          <span style={s.listMain}>{describeEvent(e)}</span>
+          <span style={s.listMeta}>{fmt(e.createdAt)}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 
