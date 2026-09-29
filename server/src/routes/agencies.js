@@ -317,7 +317,7 @@ router.patch('/:agencyId', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFO
     }
     const parsed = updateAgencySchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Please check the form and try again.', fieldErrors: parsed.error.flatten() });
     }
     const before = await prisma.agency.findUnique({ where: { id: req.params.agencyId } });
     if (!before) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
@@ -351,7 +351,7 @@ router.patch('/:agencyId/entitlements', requireRole('PLATFORM_OWNER'), async (re
   try {
     const parsed = entitlementsSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Please check the form and try again.', fieldErrors: parsed.error.flatten() });
     }
     const before = await prisma.agency.findUnique({ where: { id: req.params.agencyId } });
     if (!before) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
@@ -386,14 +386,16 @@ router.post('/:agencyId/invite-owner', requireRole('PLATFORM_OWNER'), async (req
   try {
     const parsed = inviteOwnerSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Please check the form and try again.', fieldErrors: parsed.error.flatten() });
     }
     const agency = await prisma.agency.findUnique({ where: { id: req.params.agencyId } });
     if (!agency) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
 
     const email = parsed.data.email.trim().toLowerCase();
     const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) return res.status(409).json({ success: false, error: 'EMAIL_IN_USE' });
+    if (existing) {
+      return res.status(409).json({ success: false, error: 'EMAIL_IN_USE', message: 'A user with that email already exists.' });
+    }
 
     const { user, rawToken } = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({

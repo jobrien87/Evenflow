@@ -71,6 +71,20 @@ export default function TelemarketersPanel() {
     }
   }
 
+  async function sendReset(tmId) {
+    setStatus('Sending password reset…');
+    setInviteLink('');
+    try {
+      const res = await api.sendPasswordReset(tmId);
+      setStatus(`Password reset sent. Email status: ${res.emailStatus}`);
+      if (res.emailStatus !== 'SENT' && res.resetUrl) {
+        setInviteLink(res.resetUrl);
+      }
+    } catch (err) {
+      setStatus(err.data?.message || 'Failed to send password reset.');
+    }
+  }
+
   async function assign(tmId) {
     const agencyId = assignAgency[tmId];
     if (!agencyId) return;
@@ -181,6 +195,9 @@ export default function TelemarketersPanel() {
                 <Badge tone={statusTone(tm.status)}>{tm.status}</Badge>
                 {tm.status === 'INVITED' && (
                   <Button variant="secondary" size="sm" onClick={() => resendTm(tm.id)}>RESEND INVITE</Button>
+                )}
+                {tm.status === 'ACTIVE' && (
+                  <Button variant="secondary" size="sm" onClick={() => sendReset(tm.id)}>RESET PASSWORD</Button>
                 )}
               </div>
             </div>

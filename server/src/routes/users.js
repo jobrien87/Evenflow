@@ -5,6 +5,7 @@ const { prisma } = require('../lib/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { sendInvitationEmail } = require('../lib/email');
+const { issuePasswordResetEmail } = require('../lib/auth');
 const { reissueInvitation } = require('../lib/invitations');
 const { syncSeatCountForAgency } = require('../lib/seatBilling');
 const { explainScore, componentPlaceholders } = require('../lib/flowScore');
@@ -54,20 +55,20 @@ router.post('/invite', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_O
   try {
     const parsed = inviteSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Please check the form and try again.', fieldErrors: parsed.error.flatten() });
     }
     const agencyId = req.user.role === 'PLATFORM_OWNER' ? req.body.agencyId : req.user.agencyId;
     if (!agencyId) {
-      return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+      return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED', message: 'An agency is required to send this invite.' });
     }
     const email = parsed.data.email.trim().toLowerCase();
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {
-      return res.status(409).json({ success: false, error: 'EMAIL_IN_USE' });
+      return res.status(409).json({ success: false, error: 'EMAIL_IN_USE', message: 'A user with that email already exists.' });
     }
 
     const agency = await prisma.agency.findUnique({ where: { id: agencyId } });
-    if (!agency) return res.status(404).json({ success: false, error: 'AGENCY_NOT_FOUND' });
+    if (!agency) return res.status(404).json({ success: false, error: 'AGENCY_NOT_FOUND', message: 'That agency could not be found.' });
 
     const { user, rawToken } = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
@@ -152,6 +153,40 @@ router.post('/:userId/resend-invite', requireRole('AGENCY_OWNER', 'AGENCY_MANAGE
     });
 
     return res.json({ success: true, emailStatus: emailResult.status, acceptUrl: emailResult.acceptUrl });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Admin-triggered password reset — an owner/manager/platform owner sends a
+// real reset link on a user's behalf (e.g. the user is locked out and can't
+// use self-service /auth/forgot-password themselves). Shares the exact same
+// token-issue + email-send path as that self-service route via
+// issuePasswordResetEmail — never a second implementation.
+router.post('/:userId/send-password-reset', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const target = await prisma.user.findUnique({ where: { id: req.params.userId } });
+    if (!target) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (req.user.role !== 'PLATFORM_OWNER' && target.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    if (target.status !== 'ACTIVE') {
+      return res.status(409).json({
+        success: false,
+        error: 'NOT_ACTIVE',
+        message: 'This user has not activated their account yet — resend their invite instead.',
+      });
+    }
+
+    const emailResult = await issuePasswordResetEmail(target);
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: target.agencyId,
+      action: 'user.password_reset_sent', entityType: 'User', entityId: target.id,
+      correlationId: req.correlationId,
+    });
+
+    return res.json({ success: true, emailStatus: emailResult.status, resetUrl: emailResult.resetUrl });
   } catch (err) {
     next(err);
   }

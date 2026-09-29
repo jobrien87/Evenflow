@@ -2,9 +2,8 @@ const express = require('express');
 const { z } = require('zod');
 const rateLimit = require('express-rate-limit');
 const { prisma } = require('../lib/db');
-const { hashPassword, verifyPassword, createSession, revokeSession, revokeAllSessionsForUser, generateRawToken, hashToken, SESSION_COOKIE } = require('../lib/auth');
+const { hashPassword, verifyPassword, createSession, revokeSession, revokeAllSessionsForUser, hashToken, issuePasswordResetEmail, SESSION_COOKIE } = require('../lib/auth');
 const { recordAudit } = require('../lib/audit');
-const { sendPasswordResetEmail } = require('../lib/email');
 const { syncSeatCountForAgency } = require('../lib/seatBilling');
 
 const router = express.Router();
@@ -223,8 +222,6 @@ router.post('/accept-invitation', acceptInvitationLimiter, async (req, res, next
   }
 });
 
-const RESET_TOKEN_HOURS = 1;
-
 const forgotPasswordSchema = z.object({ email: z.string().email() });
 
 router.post('/forgot-password', forgotPasswordLimiter, async (req, res, next) => {
@@ -245,23 +242,7 @@ router.post('/forgot-password', forgotPasswordLimiter, async (req, res, next) =>
       return res.json(genericResponse);
     }
 
-    // A fresh request supersedes any still-outstanding one — only one
-    // reset link should ever be live at a time.
-    await prisma.passwordResetToken.updateMany({
-      where: { userId: user.id, usedAt: null },
-      data: { usedAt: new Date() },
-    });
-
-    const rawToken = generateRawToken();
-    await prisma.passwordResetToken.create({
-      data: {
-        userId: user.id,
-        tokenHash: hashToken(rawToken),
-        expiresAt: new Date(Date.now() + RESET_TOKEN_HOURS * 60 * 60 * 1000),
-      },
-    });
-
-    const emailResult = await sendPasswordResetEmail({ to: user.email, token: rawToken });
+    const emailResult = await issuePasswordResetEmail(user);
     if (emailResult.status !== 'SENT') {
       console.warn(`[auth:forgot-password] email not sent (status=${emailResult.status}) for ${user.email}`);
     }

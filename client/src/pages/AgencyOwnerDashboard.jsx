@@ -156,6 +156,20 @@ export default function AgencyOwnerDashboard() {
     await load();
   }
 
+  async function sendReset(userId) {
+    setStatus('Sending password reset…');
+    setInviteLink('');
+    try {
+      const res = await api.sendPasswordReset(userId);
+      setStatus(`Password reset sent. Email status: ${res.emailStatus}`);
+      if (res.emailStatus !== 'SENT' && res.resetUrl) {
+        setInviteLink(res.resetUrl);
+      }
+    } catch (err) {
+      setStatus(err.data?.message || 'Failed to send password reset.');
+    }
+  }
+
   async function addLead(e) {
     e.preventDefault();
     setLeadStatus('Creating…');
@@ -255,6 +269,9 @@ export default function AgencyOwnerDashboard() {
                 <button style={s.resendButton} onClick={() => startEditUser(u)}>EDIT</button>
                 {u.status === 'INVITED' && (
                   <button style={s.resendButton} onClick={() => resendUser(u.id)}>RESEND INVITE</button>
+                )}
+                {u.status === 'ACTIVE' && (
+                  <button style={s.resendButton} onClick={() => sendReset(u.id)}>RESET PASSWORD</button>
                 )}
                 {u.status !== 'DEACTIVATED' && (
                   <button style={s.deactivateButton} onClick={() => deactivate(u.id)}>DEACTIVATE</button>

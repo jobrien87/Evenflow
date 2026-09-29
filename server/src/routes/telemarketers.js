@@ -100,11 +100,13 @@ router.post('/invite', requireRole('PLATFORM_OWNER'), async (req, res, next) => 
   try {
     const parsed = inviteTMSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Please check the form and try again.', fieldErrors: parsed.error.flatten() });
     }
     const email = parsed.data.email.trim().toLowerCase();
     const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) return res.status(409).json({ success: false, error: 'EMAIL_IN_USE' });
+    if (existing) {
+      return res.status(409).json({ success: false, error: 'EMAIL_IN_USE', message: 'A user with that email already exists.' });
+    }
 
     const { user, rawToken } = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({

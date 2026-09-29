@@ -27,6 +27,8 @@ export default function AgencyDetailPage() {
   const [showEdit, setShowEdit] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [showChangePlan, setShowChangePlan] = useState(false);
+  const [resetStatus, setResetStatus] = useState('');
+  const [resetLink, setResetLink] = useState('');
 
   useEffect(() => {
     load();
@@ -55,6 +57,20 @@ export default function AgencyDetailPage() {
       await load();
     } catch (err) {
       setError(err.data?.message || 'Failed to update entitlement.');
+    }
+  }
+
+  async function sendReset(userId) {
+    setResetStatus('Sending password reset…');
+    setResetLink('');
+    try {
+      const res = await api.sendPasswordReset(userId);
+      setResetStatus(`Password reset sent. Email status: ${res.emailStatus}`);
+      if (res.emailStatus !== 'SENT' && res.resetUrl) {
+        setResetLink(res.resetUrl);
+      }
+    } catch (err) {
+      setResetStatus(err.data?.message || 'Failed to send password reset.');
     }
   }
 
@@ -139,11 +155,19 @@ export default function AgencyDetailPage() {
       >
         ROSTER
       </SectionHeader>
+      {resetStatus && <div style={s.error}>{resetStatus}</div>}
+      {resetLink && (
+        <div style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 12 }}>
+          Email wasn't sent — share this reset link directly:
+          <br />
+          <a style={{ color: 'var(--accent)', wordBreak: 'break-all' }} href={resetLink} target="_blank" rel="noreferrer">{resetLink}</a>
+        </div>
+      )}
       <div style={s.rosterGrid}>
-        <RosterSection title="OWNERS" users={roster.owners} />
-        <RosterSection title="MANAGERS" users={roster.managers} />
-        <RosterSection title="PRODUCERS" users={roster.producers} />
-        <RosterSection title="TELEMARKETERS" users={roster.telemarketers} />
+        <RosterSection title="OWNERS" users={roster.owners} onResetPassword={sendReset} />
+        <RosterSection title="MANAGERS" users={roster.managers} onResetPassword={sendReset} />
+        <RosterSection title="PRODUCERS" users={roster.producers} onResetPassword={sendReset} />
+        <RosterSection title="TELEMARKETERS" users={roster.telemarketers} onResetPassword={sendReset} />
       </div>
 
       <SectionHeader>RECENT ACTIVITY</SectionHeader>
@@ -175,7 +199,7 @@ export default function AgencyDetailPage() {
   );
 }
 
-function RosterSection({ title, users }) {
+function RosterSection({ title, users, onResetPassword }) {
   return (
     <Card style={s.rosterCard}>
       <div style={s.sectionTitle}>{title} ({users.length})</div>
@@ -188,7 +212,12 @@ function RosterSection({ title, users }) {
               <div style={s.rosterName}>{u.firstName} {u.lastName}</div>
               <div style={s.rosterEmail}>{u.email}</div>
             </div>
-            <Badge tone={statusTone(u.status)} style={s.rosterBadge}>{u.status}</Badge>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+              <Badge tone={statusTone(u.status)} style={s.rosterBadge}>{u.status}</Badge>
+              {u.status === 'ACTIVE' && (
+                <Button variant="ghost" size="sm" onClick={() => onResetPassword(u.id)}>RESET PW</Button>
+              )}
+            </div>
           </div>
         ))
       )}

@@ -88,6 +88,7 @@ export const api = {
   updateUser: (userId, payload) => request(`/users/${userId}`, { method: 'PATCH', body: payload }),
   deactivateUser: (userId) => request(`/users/${userId}/deactivate`, { method: 'POST' }),
   resendUserInvite: (userId) => request(`/users/${userId}/resend-invite`, { method: 'POST' }),
+  sendPasswordReset: (userId) => request(`/users/${userId}/send-password-reset`, { method: 'POST' }),
   userPerformance: (userId, params = '') => request(`/users/${userId}/performance${params}`),
   producerNotes: (userId) => request(`/users/${userId}/notes`),
   createProducerNote: (userId, content) => request(`/users/${userId}/notes`, { method: 'POST', body: { content } }),

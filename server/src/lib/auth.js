@@ -1,9 +1,11 @@
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const { prisma } = require('./db');
+const { sendPasswordResetEmail } = require('./email');
 
 const SESSION_COOKIE = 'evenflow_session';
 const SESSION_DAYS = 14;
+const RESET_TOKEN_HOURS = 1;
 
 async function hashPassword(password) {
   return bcrypt.hash(password, 12);
@@ -63,6 +65,30 @@ async function revokeAllSessionsForUser(userId) {
   });
 }
 
+// Shared by the public POST /auth/forgot-password (the user requests their
+// own reset) and the admin-triggered POST /users/:userId/send-password-reset
+// (an owner/manager sends it on a user's behalf) — same real token +
+// email-send path either way, never a second implementation.
+async function issuePasswordResetEmail(user) {
+  // A fresh request supersedes any still-outstanding one — only one reset
+  // link should ever be live at a time.
+  await prisma.passwordResetToken.updateMany({
+    where: { userId: user.id, usedAt: null },
+    data: { usedAt: new Date() },
+  });
+
+  const rawToken = generateRawToken();
+  await prisma.passwordResetToken.create({
+    data: {
+      userId: user.id,
+      tokenHash: hashToken(rawToken),
+      expiresAt: new Date(Date.now() + RESET_TOKEN_HOURS * 60 * 60 * 1000),
+    },
+  });
+
+  return sendPasswordResetEmail({ to: user.email, token: rawToken });
+}
+
 module.exports = {
   SESSION_COOKIE,
   hashPassword,
@@ -73,4 +99,5 @@ module.exports = {
   revokeAllSessionsForUser,
   generateRawToken,
   hashToken,
+  issuePasswordResetEmail,
 };
