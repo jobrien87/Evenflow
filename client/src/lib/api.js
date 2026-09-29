@@ -54,6 +54,10 @@ export const api = {
   lunchEnd: () => request('/timeclock/lunch-end', { method: 'POST' }),
   teamClockStatus: () => request('/timeclock/status'),
   timeClockReport: (params = '') => request(`/timeclock/report${params}`),
+
+  pendingAnnouncement: () => request('/announcements/pending'),
+  ackAnnouncement: (id) => request(`/announcements/${id}/ack`, { method: 'POST' }),
+  createAnnouncement: (payload) => request('/announcements', { method: 'POST', body: payload }),
   // Not JSON — a multipart upload, same bypass-request() shape as uploadCall.
   bulkImportLeads: async (file, agencyId) => {
     const formData = new FormData();

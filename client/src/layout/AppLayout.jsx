@@ -11,6 +11,7 @@ import MobileDrawer from './MobileDrawer';
 import MobileBottomNav from './MobileBottomNav';
 import ImpersonationBar from '../pages/ImpersonationBar';
 import TimeClockWidget from '../pages/TimeClockWidget';
+import AnnouncementModal from '../pages/AnnouncementModal';
 import EdWidget from '../pages/EdWidget';
 
 export default function AppLayout() {
@@ -62,6 +63,7 @@ export default function AppLayout() {
       {isMobile && <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />}
       <EdWidget />
       {tourSteps && <TourOverlay steps={tourSteps} onDone={finishTour} />}
+      <AnnouncementModal />
     </div>
   );
 }

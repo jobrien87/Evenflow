@@ -247,6 +247,9 @@ model User {
   messagesAuthored   Message[]
   passwordResetTokens PasswordResetToken[]
   timeClockEntries   TimeClockEntry[]
+  announcementsCreated  Announcement[]    @relation("AnnouncementCreatedBy")
+  announcementsTargeted Announcement[]    @relation("AnnouncementTargetUser")
+  announcementAcks      AnnouncementAck[]
 
   @@index([agencyId])
   @@index([role])
@@ -336,6 +339,7 @@ model Agency {
   opportunities Opportunity[]
   conversations Conversation[]
   timeClockEntries TimeClockEntry[]
+  announcements Announcement[]
 }
 
 model Customer {
@@ -548,6 +552,44 @@ model TimeClockEntry {
 
   @@index([userId, createdAt])
   @@index([agencyId])
+}
+
+// A blast announcement, forced-acknowledgment before the recipient can use
+// the app further. Targeting is resolved into a real recipient list at
+// creation time (see routes/announcements.js) — this row just records who
+// was targeted, in scope-narrowing order: targetUserId (a single specific
+// person) overrides everything; else agencyId (that whole agency's real
+// team, reusing agencyChat.js's own membership definition); else
+// targetRole with a null agencyId (e.g. every Telemarketer platform-wide).
+model Announcement {
+  id           String   @id @default(uuid())
+  createdById  String
+  createdBy    User     @relation("AnnouncementCreatedBy", fields: [createdById], references: [id])
+  agencyId     String?
+  agency       Agency?  @relation(fields: [agencyId], references: [id])
+  targetRole   String?
+  targetUserId String?
+  targetUser   User?    @relation("AnnouncementTargetUser", fields: [targetUserId], references: [id])
+  title        String
+  body         String
+  createdAt    DateTime @default(now())
+
+  acks AnnouncementAck[]
+
+  @@index([agencyId])
+  @@index([targetUserId])
+}
+
+model AnnouncementAck {
+  id             String       @id @default(uuid())
+  announcementId String
+  announcement   Announcement @relation(fields: [announcementId], references: [id])
+  userId         String
+  user           User         @relation(fields: [userId], references: [id])
+  acknowledgedAt DateTime     @default(now())
+
+  @@unique([announcementId, userId])
+  @@index([userId])
 }
 
 model Goal {

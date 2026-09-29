@@ -13,6 +13,7 @@ import AgencySettingsModal from './AgencySettingsModal';
 import PerformanceLeaderboards from './PerformanceLeaderboards';
 import BulkLeadUploadBox from './BulkLeadUploadBox';
 import TeamClockStatusBox from './TeamClockStatusBox';
+import AnnouncementComposer from './AnnouncementComposer';
 
 export default function AgencyOwnerDashboard() {
   const { user } = useAuth();
@@ -31,6 +32,7 @@ export default function AgencyOwnerDashboard() {
   const [leadStatus, setLeadStatus] = useState('');
   const [showReport, setShowReport] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showAnnounce, setShowAnnounce] = useState(false);
   const [agency, setAgency] = useState(null);
   const [editingUserId, setEditingUserId] = useState(null);
   const [editUserForm, setEditUserForm] = useState({ firstName: '', lastName: '' });
@@ -179,6 +181,7 @@ export default function AgencyOwnerDashboard() {
 
       <section style={s.section}>
         <div style={s.settingsRow}>
+          <Button variant="primary" size="sm" onClick={() => setShowAnnounce(true)}>+ ANNOUNCEMENT</Button>
           <Button variant="secondary" size="sm" onClick={() => setShowSettings(true)}>AGENCY SETTINGS</Button>
         </div>
         <div style={isMobile ? s.topStacked : s.topSplit}>
@@ -331,6 +334,15 @@ export default function AgencyOwnerDashboard() {
         <AgencySettingsModal agency={agency} onClose={() => setShowSettings(false)} onSaved={() => { setShowSettings(false); load(); }} />
       )}
 
+      <AnnouncementComposer
+        open={showAnnounce}
+        onClose={() => setShowAnnounce(false)}
+        targets={[
+          { value: 'team', label: 'Entire team' },
+          { value: 'producer', label: 'Specific producer', picker: { field: 'targetUserId', placeholder: 'Select producer…', options: producers.map((p) => ({ id: p.id, label: `${p.firstName} ${p.lastName}` })) } },
+        ]}
+      />
+
       {scoreUser && (
         <Modal title={`FLOW SCORE — ${scoreUser.firstName} ${scoreUser.lastName}`} onClose={() => { setScoreUser(null); setScoreData(null); }}>
           {!scoreData ? (
@@ -362,7 +374,7 @@ const s = {
   loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 24 },
   editUserError: { color: 'var(--danger)', fontSize: 12, width: '100%', marginTop: 4 },
   section: { marginBottom: 32 },
-  settingsRow: { display: 'flex', justifyContent: 'flex-end', marginBottom: 8 },
+  settingsRow: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 8 },
   topSplit: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'stretch' },
   topStacked: { display: 'flex', flexDirection: 'column', gap: 20 },
   inlineEditForm: { display: 'flex', gap: 8, alignItems: 'center', padding: '8px 14px', background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 8, marginTop: -4, marginBottom: 8 },

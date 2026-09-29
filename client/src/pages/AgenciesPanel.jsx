@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Card, Badge, Button, StatTile, SectionHeader, EmptyState, ExportButton } from '../ui';
 import { downloadCsv } from '../lib/downloadCsv';
+import AnnouncementComposer from './AnnouncementComposer';
 
 function statusTone(status) {
   if (status === 'ACTIVE') return 'accent';
@@ -23,6 +24,7 @@ export default function AgenciesPanel() {
   const [form, setForm] = useState({ name: '', ownerFirstName: '', ownerLastName: '', ownerEmail: '' });
   const [status, setStatus] = useState('');
   const [inviteLink, setInviteLink] = useState('');
+  const [showAnnounce, setShowAnnounce] = useState(false);
 
   useEffect(() => {
     refresh();
@@ -125,12 +127,25 @@ export default function AgenciesPanel() {
                 { key: 'telemarketerCount', label: 'Telemarketers' },
               ])} />
             )}
+            <Button variant="secondary" size="sm" onClick={() => setShowAnnounce(true)}>+ ANNOUNCEMENT</Button>
             <Button variant="primary" size="sm" onClick={() => setShowForm(!showForm)}>+ INVITE AGENCY</Button>
           </div>
         }
       >
         AGENCIES
       </SectionHeader>
+
+      <AnnouncementComposer
+        open={showAnnounce}
+        onClose={() => setShowAnnounce(false)}
+        targets={[
+          { value: 'agency', label: 'Entire agency', picker: { field: 'agencyId', placeholder: 'Select agency…', options: agencies.map((a) => ({ id: a.id, label: a.name })) } },
+          { value: 'agency_owner', label: 'Specific agency owner', picker: { field: 'targetUserId', placeholder: 'Search by name or email…', search: true, roleFilter: ['AGENCY_OWNER', 'AGENCY_MANAGER'] } },
+          { value: 'producer', label: 'Specific producer', picker: { field: 'targetUserId', placeholder: 'Search by name or email…', search: true, roleFilter: ['PRODUCER'] } },
+          { value: 'telemarketer', label: 'Specific telemarketer', picker: { field: 'targetUserId', placeholder: 'Search by name or email…', search: true, roleFilter: ['TELEMARKETER'] } },
+          { value: 'all_telemarketers', label: 'All telemarketers' },
+        ]}
+      />
 
       <div style={s.statsRow}>
         <StatTile label="Agencies" value={total} />
