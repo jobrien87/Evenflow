@@ -45,15 +45,19 @@ enum LeadStatus {
   ASSIGNED
   ATTEMPTED
   CONTACTED
+  LEFT_VM
   APPOINTMENT
   QUOTE_STARTED
   QUOTED
+  QUOTED_HOT
   FOLLOW_UP
   SOLD
   LOST
+  NOT_INTERESTED
   BAD_CONTACT
   DUPLICATE
   DO_NOT_CONTACT
+  INELIGIBLE
   ARCHIVED
 }
 
@@ -394,6 +398,9 @@ model Lead {
   assignedAt      DateTime?
   firstAttemptAt  DateTime?
   firstContactAt  DateTime?
+  // Real outbound dials logged via POST /:leadId/activities — a count, not
+  // a status change, so it stays accurate no matter how status is set.
+  attemptCount    Int        @default(0)
   customFields    Json?
   // Captured when a producer dispositions this lead as SOLD — real, entered
   // data (not a fabricated commission calculation), which is what makes it

@@ -611,6 +611,12 @@ router.post('/:leadId/activities', async (req, res, next) => {
       include: { createdBy: { select: { firstName: true, lastName: true } } },
     });
 
+    // "Attempts" means real outbound dials — a running count, not derived
+    // from status, so it stays accurate regardless of how status is set.
+    if (parsed.data.type === 'CALL' && parsed.data.direction === 'OUTBOUND') {
+      await prisma.lead.update({ where: { id: lead.id }, data: { attemptCount: { increment: 1 } } });
+    }
+
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role, agencyId: lead.agencyId,
       action: 'lead.activity_logged', entityType: 'Lead', entityId: lead.id,
@@ -651,8 +657,9 @@ router.post('/:leadId/notes', async (req, res, next) => {
 
 const dispositionSchema = z.object({
   status: z.enum([
-    'NEW', 'ASSIGNED', 'ATTEMPTED', 'CONTACTED', 'APPOINTMENT', 'QUOTE_STARTED',
-    'QUOTED', 'FOLLOW_UP', 'SOLD', 'LOST', 'BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT', 'ARCHIVED',
+    'NEW', 'ASSIGNED', 'ATTEMPTED', 'CONTACTED', 'LEFT_VM', 'APPOINTMENT', 'QUOTE_STARTED',
+    'QUOTED', 'QUOTED_HOT', 'FOLLOW_UP', 'SOLD', 'LOST', 'NOT_INTERESTED', 'BAD_CONTACT',
+    'DUPLICATE', 'DO_NOT_CONTACT', 'INELIGIBLE', 'ARCHIVED',
   ]),
   note: z.string().optional(),
   saleProduct: z.string().optional(),
@@ -689,6 +696,12 @@ router.post('/:leadId/disposition', async (req, res, next) => {
     if (parsed.data.status === 'SOLD') {
       patch.saleProduct = parsed.data.saleProduct || null;
       patch.salePremiumCents = parsed.data.salePremiumCents || null;
+    }
+    // Duplicate/Archived both mean "hide from active views" — same real
+    // archivedAt field GET /leads and other agency-wide counts already
+    // filter on, never a hard delete.
+    if (['DUPLICATE', 'ARCHIVED'].includes(parsed.data.status) && !lead.archivedAt) {
+      patch.archivedAt = now;
     }
 
     const [updated] = await prisma.$transaction([

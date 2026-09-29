@@ -7,7 +7,7 @@ import { Button, EdSuggestionBox } from '../ui';
 import FlowScoreCard from './FlowScoreCard';
 import LeadsSnapshotBox from './LeadsSnapshotBox';
 import FunnelMetricsCard from './FunnelMetricsCard';
-import Customer360Modal from './Customer360Modal';
+import LeadDetailModal from './LeadDetailModal';
 import RunningReportPage from './RunningReportPage';
 import AgencySettingsModal from './AgencySettingsModal';
 import PerformanceLeaderboards from './PerformanceLeaderboards';
@@ -22,7 +22,7 @@ export default function AgencyOwnerDashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [leads, setLeads] = useState([]);
   const [users, setUsers] = useState([]);
-  const [selectedCustomerId, setSelectedCustomerId] = useState(null);
+  const [openLeadId, setOpenLeadId] = useState(null);
   const [showInvite, setShowInvite] = useState(false);
   const [showAddLead, setShowAddLead] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
@@ -311,10 +311,10 @@ export default function AgencyOwnerDashboard() {
             id={`lead-${l.id}`}
             style={l.id === highlightId ? { ...s.row, ...s.rowHighlighted } : s.row}
             className="ui-row-stack"
-            onClick={() => l.customer && setSelectedCustomerId(l.customerId)}
+            onClick={() => setOpenLeadId(l.id)}
           >
             <div>
-              <div style={{ ...s.rowTitle, cursor: l.customer ? 'pointer' : 'default', textDecoration: l.customer ? 'underline' : 'none' }}>
+              <div style={{ ...s.rowTitle, cursor: 'pointer', textDecoration: 'underline' }}>
                 {l.customer ? `${l.customer.firstName} ${l.customer.lastName}` : 'Lead'}
               </div>
               <div style={s.rowSub}>{l.product || l.source} · {l.assignedTo ? `${l.assignedTo.firstName} ${l.assignedTo.lastName}` : 'Unassigned'}</div>
@@ -325,8 +325,8 @@ export default function AgencyOwnerDashboard() {
         {leads.length === 0 && <div style={s.empty}>No leads yet.</div>}
       </section>
 
-      {selectedCustomerId && (
-        <Customer360Modal customerId={selectedCustomerId} onClose={() => setSelectedCustomerId(null)} />
+      {openLeadId && (
+        <LeadDetailModal leadId={openLeadId} onClose={() => setOpenLeadId(null)} onChanged={load} />
       )}
 
       {showReport && (

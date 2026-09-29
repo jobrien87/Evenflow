@@ -4,16 +4,17 @@ import { useAuth } from '../lib/AuthContext';
 import { Modal, Badge, Button } from '../ui';
 
 const LEAD_STATUSES = [
-  'NEW', 'ASSIGNED', 'ATTEMPTED', 'CONTACTED', 'APPOINTMENT', 'QUOTE_STARTED',
-  'QUOTED', 'FOLLOW_UP', 'SOLD', 'LOST', 'BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT', 'ARCHIVED',
+  'NEW', 'ASSIGNED', 'ATTEMPTED', 'CONTACTED', 'LEFT_VM', 'APPOINTMENT', 'QUOTE_STARTED',
+  'QUOTED', 'QUOTED_HOT', 'FOLLOW_UP', 'SOLD', 'LOST', 'NOT_INTERESTED', 'BAD_CONTACT',
+  'DUPLICATE', 'DO_NOT_CONTACT', 'INELIGIBLE', 'ARCHIVED',
 ];
 
 const TASK_TYPES = ['FOLLOW_UP', 'CALLBACK', 'APPOINTMENT'];
 const ACTIVITY_TYPES = ['CALL', 'EMAIL', 'TEXT'];
 
 function statusTone(status) {
-  if (status === 'SOLD') return 'accent';
-  if (['LOST', 'BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT'].includes(status)) return 'danger';
+  if (['SOLD', 'QUOTED_HOT'].includes(status)) return 'accent';
+  if (['LOST', 'NOT_INTERESTED', 'BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT', 'INELIGIBLE'].includes(status)) return 'danger';
   if (status === 'NEW') return 'warning';
   return 'neutral';
 }
@@ -91,6 +92,7 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
             {lead.vendor?.name ? `${lead.vendor.name} · ` : ''}
             {lead.source} · Received {fmt(lead.receivedAt)}
             {lead.assignedTo && ` · Assigned to ${lead.assignedTo.firstName} ${lead.assignedTo.lastName}`}
+            {` · ${lead.attemptCount || 0} attempt${lead.attemptCount === 1 ? '' : 's'}`}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -115,6 +117,10 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
         {lead.tmNotes && (
           <div style={s.notesBox}><strong>Submission notes:</strong> {lead.tmNotes}</div>
         )}
+      </Section>
+
+      <Section title="QUICK ACTIONS">
+        <QuickActionsBlock lead={lead} user={user} onDone={refresh} />
       </Section>
 
       <Section title="DISPOSITION">
@@ -183,6 +189,94 @@ function Section({ title, children }) {
     <div style={s.section}>
       <div style={s.sectionTitle}>{title}</div>
       {children}
+    </div>
+  );
+}
+
+// One-click versions of the same real actions ActivityBlock/NotesBlock
+// support with a fuller form below — reuses the exact same
+// api.logLeadActivity/api.createLeadNote calls, just a faster entry point
+// for the common case (matches the old system's "Quick Actions" panel).
+function QuickActionsBlock({ lead, user, onDone }) {
+  const [busy, setBusy] = useState(null);
+  const [status, setStatus] = useState('');
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [noteText, setNoteText] = useState('');
+
+  async function quickLog(type, label) {
+    setBusy(type);
+    setStatus('');
+    try {
+      await api.logLeadActivity(lead.id, { type, direction: 'OUTBOUND' });
+      setStatus(`${label} logged.`);
+      await onDone();
+    } catch (e) {
+      setStatus(e.data?.message || `Failed to log ${label.toLowerCase()}.`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function markSent() {
+    setBusy('SENT');
+    setStatus('');
+    try {
+      await api.logLeadActivity(lead.id, { type: 'EMAIL', direction: 'OUTBOUND', outcome: 'Quote sent' });
+      setStatus('Marked as sent.');
+      await onDone();
+    } catch (e) {
+      setStatus(e.data?.message || 'Failed to mark as sent.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function copyIntro() {
+    const c = lead.customer;
+    const firstName = c?.firstName || 'there';
+    const line = `Hi ${firstName}, this is ${user?.firstName || ''} — following up on your${lead.product ? ` ${lead.product}` : ''} quote request. Do you have a couple minutes to go over some options?`;
+    try {
+      await navigator.clipboard.writeText(line);
+      setStatus('Intro text copied to clipboard.');
+    } catch {
+      setStatus('Could not copy — clipboard access is blocked.');
+    }
+  }
+
+  async function addNote() {
+    if (!noteText.trim()) return;
+    setBusy('NOTE');
+    setStatus('');
+    try {
+      await api.createLeadNote(lead.id, noteText.trim());
+      setNoteText('');
+      setNoteOpen(false);
+      setStatus('Note added.');
+      await onDone();
+    } catch (e) {
+      setStatus(e.data?.message || 'Failed to add note.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div>
+      <div style={s.quickActionsRow}>
+        <Button variant="secondary" size="sm" disabled={busy === 'CALL'} onClick={() => quickLog('CALL', 'Call')}>LOG CALL</Button>
+        <Button variant="secondary" size="sm" onClick={copyIntro}>COPY INTRO TEXT</Button>
+        <Button variant="secondary" size="sm" disabled={busy === 'SENT'} onClick={markSent}>MARK AS SENT</Button>
+        <Button variant="secondary" size="sm" disabled={busy === 'TEXT'} onClick={() => quickLog('TEXT', 'Text')}>LOG TEXT</Button>
+        <Button variant="secondary" size="sm" disabled={busy === 'EMAIL'} onClick={() => quickLog('EMAIL', 'Email')}>LOG EMAIL</Button>
+        <Button variant="secondary" size="sm" onClick={() => setNoteOpen((v) => !v)}>ADD NOTE</Button>
+      </div>
+      {noteOpen && (
+        <div style={s.formRow}>
+          <input style={{ ...s.input, flex: 1 }} placeholder="Quick note…" value={noteText} onChange={(e) => setNoteText(e.target.value)} />
+          <Button variant="primary" size="sm" disabled={busy === 'NOTE' || !noteText.trim()} onClick={addNote}>SAVE</Button>
+        </div>
+      )}
+      {status && <div style={s.quickActionsStatus}>{status}</div>}
     </div>
   );
 }
@@ -407,6 +501,8 @@ const s = {
   infoLabel: { color: 'var(--text-muted)', minWidth: 110 },
   infoValue: { color: 'var(--text-primary)' },
   notesBox: { marginTop: 10, padding: 10, background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 6, fontSize: 12, color: 'var(--text-secondary)' },
+  quickActionsRow: { display: 'flex', gap: 8, flexWrap: 'wrap' },
+  quickActionsStatus: { color: 'var(--accent)', fontSize: 11, marginTop: 8 },
   formRow: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 },
   select: { padding: '8px 10px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 },
   input: { padding: '8px 10px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, minWidth: 140 },
