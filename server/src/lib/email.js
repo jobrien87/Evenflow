@@ -16,8 +16,15 @@ function getTransporter() {
   if (!cachedTransporter) {
     cachedTransporter = nodemailer.createTransport({
       host: 'smtp.gmail.com',
-      port: 465,
-      secure: true,
+      // Port 465 (implicit TLS) connects but then times out from Render —
+      // confirmed in production logs (a plain "Connection timeout" after the
+      // IPv4 fix, not ENETUNREACH), the signature of a cloud egress network
+      // silently dropping that specific port rather than a DNS/routing
+      // problem. Port 587 with STARTTLS is Google's primary documented SMTP
+      // port and far more commonly left open by cloud providers.
+      port: 587,
+      secure: false,
+      requireTLS: true,
       auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
       // Gmail's SMTP host resolves to both an IPv4 and an IPv6 address; on
       // hosts without outbound IPv6 routing (confirmed on Render — a real
