@@ -29,6 +29,10 @@ const PATHS = {
   flame: 'M12 2c1 3-3 4-3 8a3 3 0 0 0 6 0c1.5 1 2 3 2 4.5A5.5 5.5 0 0 1 6 14.5C6 9 12 7 12 2z',
   checklist: 'M4 6h2v2H4V6zM4 11h2v2H4v-2zM4 16h2v2H4v-2zM9 7h11M9 12h11M9 17h11',
   clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3.5 2',
+  mail: 'M4 6h16v12H4V6zm0 0l8 7 8-7',
+  pencil: 'M4 20h4l10.5-10.5a2.5 2.5 0 0 0-3.5-3.5L4 16v4zM14 6l4 4',
+  refresh: 'M4 12a8 8 0 0 1 14-5.3M20 3v5h-5M20 12a8 8 0 0 1-14 5.3M4 21v-5h5',
+  tag: 'M12 2h7a1 1 0 0 1 1 1v7a2 2 0 0 1-.6 1.4l-8 8a2 2 0 0 1-2.8 0l-6-6a2 2 0 0 1 0-2.8l8-8A2 2 0 0 1 12 2zM16.5 7.5a1 1 0 1 0 0-2 1 1 0 0 0 0 2z',
 };
 
 export default function Icon({ name, size = 18, style }) {

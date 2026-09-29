@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
-import { Card, Badge, Button, SectionHeader, EmptyState, ExportButton, StatTile, BarRow } from '../ui';
+import { Card, Badge, Button, SectionHeader, EmptyState, ExportButton, StatTile, BarRow, LeadTypeIcon } from '../ui';
 import { downloadCsv, fetchAllPages } from '../lib/downloadCsv';
 import ChatThread from './ChatThread';
 import TransferHistoryPanel from './TransferHistoryPanel';
@@ -365,6 +365,7 @@ function LeadCard({ lead, onDisposition, onDiscuss, selected, onToggleSelected }
           <input type="checkbox" style={s.checkbox} checked={selected} onChange={onToggleSelected} />
           <div>
             <div style={s.name}>
+              <LeadTypeIcon type={lead.leadType} style={{ marginRight: 6 }} />
               {c ? `${c.firstName} ${c.lastName}` : 'Lead'}
               {lead.product && <Badge tone="neutral" style={{ marginLeft: 8 }}>{lead.product}</Badge>}
             </div>

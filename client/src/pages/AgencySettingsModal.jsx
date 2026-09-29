@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../lib/api';
-import { Button, Modal, SectionHeader } from '../ui';
+import { Button, Modal, SectionHeader, LeadTypeIcon } from '../ui';
+import { LEAD_TYPE_LABELS } from '../lib/leadTypeMeta';
 import BulkLeadUploadBox from './BulkLeadUploadBox';
 
 // Mirrors lib/priority.js's DEFAULT_TYPE_RANK/DEFAULT_STATUS_RULES exactly
@@ -10,10 +11,6 @@ const DEFAULT_STATUS_RULES = {
   SOLD: { afterDays: 0, action: 'DROP_OFF' },
   QUOTED: { afterDays: 3, action: 'BUMP_UP' },
   LEFT_VM: { afterDays: 2, action: 'BUMP_UP' },
-};
-const LEAD_TYPE_LABELS = {
-  TRANSFER: 'Transfer', PAID_AD: 'Paid Ad', DIRECT_MAIL: 'Direct Mail', META_AD: 'Meta Ad',
-  MANUAL: 'Manual / Organic', WINBACK: 'Winback', CROSS_SELL: 'Cross-Sell',
 };
 const STATUS_OPTIONS = [
   'NEW', 'ASSIGNED', 'ATTEMPTED', 'CONTACTED', 'LEFT_VM', 'APPOINTMENT', 'QUOTE_STARTED',
@@ -92,6 +89,7 @@ export default function AgencySettingsModal({ agency, onClose, onSaved }) {
           {typeRank.map((type, i) => (
             <div key={type} style={s.typeRow}>
               <span style={s.typeRank}>{i + 1}</span>
+              <LeadTypeIcon type={type} style={{ marginRight: 6 }} />
               <span style={s.typeName}>{LEAD_TYPE_LABELS[type] || type}</span>
               <div style={s.typeArrows}>
                 <button type="button" style={s.arrowButton} disabled={i === 0} onClick={() => moveType(i, -1)}>▲</button>

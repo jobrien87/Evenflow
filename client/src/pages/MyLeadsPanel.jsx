@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
-import { Card, Badge, Button, SectionHeader, StatTile, EmptyState } from '../ui';
+import { Card, Badge, Button, SectionHeader, StatTile, EmptyState, LeadTypeIcon } from '../ui';
 import LeadDetailModal from './LeadDetailModal';
 
 const PERIODS = [
@@ -155,6 +155,7 @@ export default function MyLeadsPanel() {
             {leads.map((lead) => (
               <div key={lead.id} style={s.leadRow} onClick={() => setOpenLeadId(lead.id)}>
                 <span style={s.colLeadName}>
+                  <LeadTypeIcon type={lead.leadType} style={{ marginRight: 6 }} />
                   {lead.customer ? `${lead.customer.firstName} ${lead.customer.lastName}` : 'Lead'}
                   {!lead.firstAttemptAt && <Badge tone="warning" style={{ marginLeft: 8 }}>UNTOUCHED</Badge>}
                 </span>

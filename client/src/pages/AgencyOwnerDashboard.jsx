@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { useIsMobile } from '../lib/useViewport';
-import { Button, EdSuggestionBox } from '../ui';
+import { Button, EdSuggestionBox, LeadTypeIcon } from '../ui';
 import FlowScoreCard from './FlowScoreCard';
 import LeadsSnapshotBox from './LeadsSnapshotBox';
 import FunnelMetricsCard from './FunnelMetricsCard';
@@ -332,6 +332,7 @@ export default function AgencyOwnerDashboard() {
           >
             <div>
               <div style={{ ...s.rowTitle, cursor: 'pointer', textDecoration: 'underline' }}>
+                <LeadTypeIcon type={l.leadType} style={{ marginRight: 6, textDecoration: 'none' }} />
                 {l.customer ? `${l.customer.firstName} ${l.customer.lastName}` : 'Lead'}
               </div>
               <div style={s.rowSub}>{l.product || l.source} · {l.assignedTo ? `${l.assignedTo.firstName} ${l.assignedTo.lastName}` : 'Unassigned'}</div>

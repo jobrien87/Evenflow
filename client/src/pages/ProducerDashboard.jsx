@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { EdSuggestionBox } from '../ui';
+import { EdSuggestionBox, LeadTypeIcon } from '../ui';
 import FlowScoreCard from './FlowScoreCard';
 import FunnelMetricsCard from './FunnelMetricsCard';
 import PerformanceLeaderboards from './PerformanceLeaderboards';
@@ -146,7 +146,10 @@ export default function ProducerDashboard() {
         {next ? (
           <div style={s.nextCard}>
             <div style={s.priorityBadge(next.priorityBand)}>{next.priorityBand} PRIORITY</div>
-            <div style={s.nextTitle}>{next.title}</div>
+            <div style={s.nextTitle}>
+              {next.leadType && <LeadTypeIcon type={next.leadType} size={15} style={{ marginRight: 6 }} />}
+              {next.title}
+            </div>
             <div style={s.nextSubtitle}>{next.subtitle}</div>
             <div style={s.nextReason}>{next.priorityReason}</div>
             {next.itemType === 'OPPORTUNITY' ? (
@@ -182,7 +185,10 @@ export default function ProducerDashboard() {
           <div key={item.id} style={s.queueRow}>
             <span style={s.queueBand(item.priorityBand)}>{item.priorityBand[0]}</span>
             <div style={{ flex: 1 }}>
-              <div style={s.queueTitle}>{item.title}</div>
+              <div style={s.queueTitle}>
+                {item.leadType && <LeadTypeIcon type={item.leadType} size={13} style={{ marginRight: 6 }} />}
+                {item.title}
+              </div>
               <div style={s.queueSubtitle}>{item.subtitle}</div>
             </div>
           </div>

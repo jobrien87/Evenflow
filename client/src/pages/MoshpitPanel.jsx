@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { Card, Badge, Button, SectionHeader, EmptyState } from '../ui';
+import { Card, Badge, Button, SectionHeader, EmptyState, LeadTypeIcon } from '../ui';
 
 // Polls the claimable pool the same way NotificationBell polls unread
 // counts — new Moshpit leads (and other producers claiming them) need to
@@ -109,7 +109,10 @@ export default function MoshpitPanel() {
             <Card key={lead.id} id={`moshpit-lead-${lead.id}`} style={lead.id === highlightId ? { ...s.card, ...s.cardHighlighted } : s.card}>
               <div style={s.cardTop}>
                 <div>
-                  <div style={s.name}>{c ? `${c.firstName} ${c.lastName}` : 'Lead'}</div>
+                  <div style={s.name}>
+                    <LeadTypeIcon type={lead.leadType} style={{ marginRight: 6 }} />
+                    {c ? `${c.firstName} ${c.lastName}` : 'Lead'}
+                  </div>
                   <div style={s.meta}>{lead.isLiveTransfer ? 'Live transfer' : (lead.vendor?.name || 'Unknown vendor')} · {new Date(lead.receivedAt).toLocaleString()}</div>
                 </div>
                 <div style={{ display: 'flex', gap: 6 }}>

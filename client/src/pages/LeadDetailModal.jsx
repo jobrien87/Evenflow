@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { Modal, Badge, Button } from '../ui';
+import { Modal, Badge, Button, LeadTypeIcon } from '../ui';
 
 const LEAD_STATUSES = [
   'NEW', 'ASSIGNED', 'ATTEMPTED', 'CONTACTED', 'LEFT_VM', 'APPOINTMENT', 'QUOTE_STARTED',
@@ -87,7 +87,10 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
     <Modal onClose={onClose} title="LEAD PROFILE" maxWidth={760}>
       <div style={s.header}>
         <div>
-          <div style={s.name}>{c ? `${c.firstName} ${c.lastName}` : 'Lead'}</div>
+          <div style={s.name}>
+            <LeadTypeIcon type={lead.leadType} size={16} style={{ marginRight: 8 }} />
+            {c ? `${c.firstName} ${c.lastName}` : 'Lead'}
+          </div>
           <div style={s.meta}>
             {lead.vendor?.name ? `${lead.vendor.name} · ` : ''}
             {lead.source} · Received {fmt(lead.receivedAt)}
