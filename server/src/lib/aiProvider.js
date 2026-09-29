@@ -9,7 +9,7 @@ function isConfigured() {
   return !!process.env.ANTHROPIC_API_KEY;
 }
 
-async function callEd({ systemPrompt, userMessage, maxTokens = 500 }) {
+async function callMessages({ systemPrompt, messages, maxTokens = 500 }) {
   if (!isConfigured()) {
     return { available: false };
   }
@@ -26,7 +26,7 @@ async function callEd({ systemPrompt, userMessage, maxTokens = 500 }) {
       model: DEFAULT_MODEL,
       max_tokens: maxTokens,
       system: systemPrompt,
-      messages: [{ role: 'user', content: userMessage }],
+      messages,
     }),
   });
 
@@ -52,4 +52,16 @@ async function callEd({ systemPrompt, userMessage, maxTokens = 500 }) {
   };
 }
 
-module.exports = { callEd, isConfigured, DEFAULT_MODEL };
+async function callEd({ systemPrompt, userMessage, maxTokens = 500 }) {
+  return callMessages({ systemPrompt, messages: [{ role: 'user', content: userMessage }], maxTokens });
+}
+
+// Multi-turn variant — same honest isConfigured()/degradation contract as
+// callEd, just accepting a real messages[] array (used by the drill
+// roleplay feature, which needs the model to hold a running
+// conversation rather than one flattened turn).
+async function callMultiTurn({ systemPrompt, messages, maxTokens = 500 }) {
+  return callMessages({ systemPrompt, messages, maxTokens });
+}
+
+module.exports = { callEd, callMultiTurn, isConfigured, DEFAULT_MODEL };

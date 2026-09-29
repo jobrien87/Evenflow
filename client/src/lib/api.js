@@ -163,6 +163,7 @@ export const api = {
   openBillingPortal: () => request('/billing/self-serve/portal', { method: 'POST' }),
 
   trainingCourses: () => request('/training/courses'),
+  trainingCourse: (id) => request(`/training/courses/${id}`),
   createTrainingCourse: (payload) => request('/training/courses', { method: 'POST', body: payload }),
   updateTrainingCourse: (id, payload) => request(`/training/courses/${id}`, { method: 'PATCH', body: payload }),
   addTrainingLesson: (courseId, payload) => request(`/training/courses/${courseId}/lessons`, { method: 'POST', body: payload }),
@@ -171,6 +172,7 @@ export const api = {
   teamTrainingAssignments: () => request('/training/assignments'),
   completeLesson: (lessonId, payload) => request(`/training/lessons/${lessonId}/complete`, { method: 'POST', body: payload }),
   recommendedTraining: () => request('/training/recommended'),
+  roleplayMessage: (lessonId, messages) => request(`/roleplay/${lessonId}/message`, { method: 'POST', body: { messages } }),
 
   notifications: () => request('/notifications'),
   unreadNotificationCount: () => request('/notifications/unread-count'),

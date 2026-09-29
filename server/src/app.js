@@ -33,6 +33,7 @@ const flowScoreRoutes = require('./routes/flowScore');
 const chatRoutes = require('./routes/chat');
 const runningReportRoutes = require('./routes/runningReport');
 const healthRoutes = require('./routes/health');
+const roleplayRoutes = require('./routes/roleplay');
 
 const app = express();
 
@@ -82,6 +83,7 @@ app.use('/api/impersonation', impersonationRoutes);
 app.use('/api/flow-score', flowScoreRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/running-report', runningReportRoutes);
+app.use('/api/roleplay', roleplayRoutes);
 // Public, vendor-authenticated Direct POST API — versioned per spec.
 app.use('/api/v1', vendorApiRoutes);
 
