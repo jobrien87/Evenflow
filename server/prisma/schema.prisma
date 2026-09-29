@@ -246,6 +246,7 @@ model User {
   conversationParticipants ConversationParticipant[]
   messagesAuthored   Message[]
   passwordResetTokens PasswordResetToken[]
+  timeClockEntries   TimeClockEntry[]
 
   @@index([agencyId])
   @@index([role])
@@ -334,6 +335,7 @@ model Agency {
   subscriptions AgencySubscription[]
   opportunities Opportunity[]
   conversations Conversation[]
+  timeClockEntries TimeClockEntry[]
 }
 
 model Customer {
@@ -525,6 +527,27 @@ model Task {
   @@index([assignedToId])
   @@index([status])
   @@index([dueAt])
+}
+
+// A single clock-in-to-clock-out shift, with an optional lunch break inside
+// it. The "one open entry per user at a time" invariant (can't clock in
+// twice, can't start lunch twice, etc.) is enforced in the route layer,
+// not here — mirrors this schema's existing preference for a plain event-
+// log shape over DB-level state-machine constraints (see LeadEvent).
+model TimeClockEntry {
+  id           String    @id @default(uuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id])
+  agencyId     String
+  agency       Agency    @relation(fields: [agencyId], references: [id])
+  clockInAt    DateTime  @default(now())
+  clockOutAt   DateTime?
+  lunchStartAt DateTime?
+  lunchEndAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([agencyId])
 }
 
 model Goal {

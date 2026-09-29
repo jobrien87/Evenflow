@@ -12,6 +12,7 @@ import RunningReportPage from './RunningReportPage';
 import AgencySettingsModal from './AgencySettingsModal';
 import PerformanceLeaderboards from './PerformanceLeaderboards';
 import BulkLeadUploadBox from './BulkLeadUploadBox';
+import TeamClockStatusBox from './TeamClockStatusBox';
 
 export default function AgencyOwnerDashboard() {
   const { user } = useAuth();
@@ -184,6 +185,10 @@ export default function AgencyOwnerDashboard() {
           <FlowScoreCard scope="agency" agencyId={user?.agencyId} title="AGENCY FLOW SCORE" onViewReport={() => setShowReport(true)} />
           <LeadsSnapshotBox agencyId={user?.agencyId} />
         </div>
+      </section>
+
+      <section style={s.section}>
+        <TeamClockStatusBox />
       </section>
 
       <section style={s.section}>

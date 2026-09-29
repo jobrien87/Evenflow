@@ -28,6 +28,7 @@ import SupportPanel from './pages/SupportPanel';
 import AgencyBillingPanel from './pages/AgencyBillingPanel';
 import CoursesAdminPanel from './pages/CoursesAdminPanel';
 import GoalsPanel from './pages/GoalsPanel';
+import TimeClockReportPanel from './pages/TimeClockReportPanel';
 
 import AgenciesPanel from './pages/AgenciesPanel';
 import AgencyDetailPage from './pages/AgencyDetailPage';
@@ -83,6 +84,7 @@ export default function App() {
           <Route path="agency/financials" element={<FinancialsPanel />} />
           <Route path="agency/support" element={<SupportPanel />} />
           <Route path="agency/coaching" element={<CallsPanel />} />
+          <Route path="agency/hours-report" element={<TimeClockReportPanel />} />
           <Route path="agency/billing" element={<AgencyBillingPanel />} />
           <Route path="agency/training" element={<CoursesAdminPanel />} />
           <Route path="agency/opportunities" element={<OpportunitiesPanel />} />

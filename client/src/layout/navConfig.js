@@ -37,6 +37,7 @@ export const NAV_BY_ROLE = {
     { label: 'Goals', to: '/agency/goals', icon: 'flag', primary: true },
     { label: 'Vendors', to: '/agency/vendors', icon: 'vendor' },
     { label: 'Training', to: '/agency/training', icon: 'book' },
+    { label: 'Hours Report', to: '/agency/hours-report', icon: 'clock', secondary: true },
     { label: 'Billing', to: '/agency/billing', icon: 'card', secondary: true },
     { label: 'Record Store', to: '/agency/record-store', icon: 'vinyl', stub: true, secondary: true },
     { label: 'Coaching', to: '/agency/coaching', icon: 'phone', secondary: true },

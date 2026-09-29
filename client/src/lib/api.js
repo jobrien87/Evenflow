@@ -46,6 +46,14 @@ export const api = {
   tasks: (params = '') => request(`/tasks${params}`),
   createTask: (payload) => request('/tasks', { method: 'POST', body: payload }),
   completeTask: (id, payload) => request(`/tasks/${id}/complete`, { method: 'POST', body: payload }),
+
+  myClockStatus: () => request('/timeclock/me'),
+  clockIn: (agencyId) => request('/timeclock/clock-in', { method: 'POST', body: agencyId ? { agencyId } : {} }),
+  clockOut: () => request('/timeclock/clock-out', { method: 'POST' }),
+  lunchStart: () => request('/timeclock/lunch-start', { method: 'POST' }),
+  lunchEnd: () => request('/timeclock/lunch-end', { method: 'POST' }),
+  teamClockStatus: () => request('/timeclock/status'),
+  timeClockReport: (params = '') => request(`/timeclock/report${params}`),
   // Not JSON — a multipart upload, same bypass-request() shape as uploadCall.
   bulkImportLeads: async (file, agencyId) => {
     const formData = new FormData();
@@ -61,10 +69,6 @@ export const api = {
     }
     return data;
   },
-
-  tasks: (params = '') => request(`/tasks${params}`),
-  createTask: (payload) => request('/tasks', { method: 'POST', body: payload }),
-  completeTask: (id, payload) => request(`/tasks/${id}/complete`, { method: 'POST', body: payload }),
 
   agencies: (params = '') => request(`/agencies${params}`),
   createAgency: (payload) => request('/agencies', { method: 'POST', body: payload }),

@@ -10,6 +10,7 @@ import MobileTopBar from './MobileTopBar';
 import MobileDrawer from './MobileDrawer';
 import MobileBottomNav from './MobileBottomNav';
 import ImpersonationBar from '../pages/ImpersonationBar';
+import TimeClockWidget from '../pages/TimeClockWidget';
 import EdWidget from '../pages/EdWidget';
 
 export default function AppLayout() {
@@ -40,6 +41,7 @@ export default function AppLayout() {
     <div style={{ minHeight: '100vh' }}>
       <GradientDefs />
       <ImpersonationBar />
+      <TimeClockWidget />
       <div style={{ display: 'flex' }}>
         {!isMobile && <Sidebar onTakeTour={() => setManualTourOpen(true)} />}
         <div style={{ flex: 1, minWidth: 0 }}>
