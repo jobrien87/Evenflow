@@ -19,6 +19,12 @@ function getTransporter() {
       port: 465,
       secure: true,
       auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
+      // Gmail's SMTP host resolves to both an IPv4 and an IPv6 address; on
+      // hosts without outbound IPv6 routing (confirmed on Render — a real
+      // production ENETUNREACH on the IPv6 address, not a credentials
+      // problem), Node can pick the unreachable IPv6 address first. Forcing
+      // IPv4 avoids that entirely.
+      family: 4,
       // Nodemailer's defaults (2min connect / 10min socket) would leave an
       // API request hanging far too long if SMTP egress is ever blocked or
       // Gmail is slow to respond — fail fast into the honest FAILED status
