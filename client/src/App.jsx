@@ -18,6 +18,7 @@ import ProducerDetailPage from './pages/ProducerDetailPage';
 
 import AgencyOwnerDashboard from './pages/AgencyOwnerDashboard';
 import YieldTransfersPanel from './pages/YieldTransfersPanel';
+import CallScoringPanel from './pages/CallScoringPanel';
 import VendorsPanel from './pages/VendorsPanel';
 import FinancialsPanel from './pages/FinancialsPanel';
 import SupportPanel from './pages/SupportPanel';
@@ -67,6 +68,7 @@ export default function App() {
         <Route element={<RoleGate allow={['AGENCY_OWNER', 'AGENCY_MANAGER']} />}>
           <Route path="agency" element={<AgencyOwnerDashboard />} />
           <Route path="agency/transfers" element={<YieldTransfersPanel />} />
+          <Route path="agency/call-scoring" element={<CallScoringPanel />} />
           <Route path="agency/moshpit" element={<MoshpitPanel />} />
           <Route path="agency/vendors" element={<VendorsPanel />} />
           <Route path="agency/financials" element={<FinancialsPanel />} />

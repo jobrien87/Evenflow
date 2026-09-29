@@ -13,6 +13,7 @@ export { default as SectionHeader } from './SectionHeader';
 export { default as Modal } from './Modal';
 export { default as ComingSoonModal } from './ComingSoonModal';
 export { default as ExportButton } from './ExportButton';
+export { default as FileDropzone } from './FileDropzone';
 export { default as EdSuggestionBox } from './EdSuggestionBox';
 export { default as TourOverlay } from './TourOverlay';
 export * from './statusTones';

@@ -27,6 +27,7 @@ const STEPS_BY_ROLE = {
     { icon: 'home', title: 'Main Stage', body: 'Your home base — full roster, live leads, and your Agency Flow Score.' },
     { icon: 'trophy', title: 'Leaderboards', body: 'Vendor and producer rankings, right on your dashboard — see who is actually earning their keep.' },
     { icon: 'transfer', title: 'Yield Transfers', body: 'Every telemarketer-submitted lead lands here instantly, with a live team chat right alongside it.' },
+    { icon: 'trophy', title: 'Call Scoring', body: 'Upload a producer\'s call to get a real Drill Score based on the training library, then use the Coaching Box to see any producer\'s weak spots over a date range.' },
     { icon: 'dollar', title: 'Financials', body: 'Revenue, cost, margin, and vendor cost-efficiency — real numbers, not vibes.' },
     { icon: 'flag', title: 'Goals', body: 'Describe a goal in plain English and ED parses it for you, then watch live pace against it.' },
     { icon: 'vendor', title: 'Vendors', body: 'Connect lead vendors, track cost-per-lead, and pick exactly how each vendor\'s leads get distributed — Round Robin, hand-picked agents, or the Moshpit claim pool.' },

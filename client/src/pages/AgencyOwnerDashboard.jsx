@@ -11,6 +11,7 @@ import Customer360Modal from './Customer360Modal';
 import RunningReportPage from './RunningReportPage';
 import AgencySettingsModal from './AgencySettingsModal';
 import PerformanceLeaderboards from './PerformanceLeaderboards';
+import BulkLeadUploadBox from './BulkLeadUploadBox';
 
 export default function AgencyOwnerDashboard() {
   const { user } = useAuth();
@@ -21,6 +22,7 @@ export default function AgencyOwnerDashboard() {
   const [selectedCustomerId, setSelectedCustomerId] = useState(null);
   const [showInvite, setShowInvite] = useState(false);
   const [showAddLead, setShowAddLead] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
   const [form, setForm] = useState({ email: '', firstName: '', lastName: '', role: 'PRODUCER' });
   const [leadForm, setLeadForm] = useState({ firstName: '', lastName: '', phone: '', email: '', product: 'Auto', assignedToId: '' });
   const [status, setStatus] = useState('');
@@ -264,9 +266,13 @@ export default function AgencyOwnerDashboard() {
             {stageFilter && (
               <button style={s.smallButtonOutline} onClick={clearStageFilter}>CLEAR FILTER</button>
             )}
+            <button style={s.smallButtonOutline} onClick={() => setShowUpload(!showUpload)}>UPLOAD LEADS</button>
             <button style={s.smallButton} onClick={() => setShowAddLead(!showAddLead)}>+ ADD LEAD</button>
           </div>
         </div>
+        {showUpload && (
+          <BulkLeadUploadBox agencyId={user?.agencyId} onImported={load} />
+        )}
         {showAddLead && (
           <form onSubmit={addLead} style={s.form}>
             <input style={s.input} placeholder="First name" value={leadForm.firstName} onChange={(e) => setLeadForm({ ...leadForm, firstName: e.target.value })} required />

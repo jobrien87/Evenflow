@@ -42,6 +42,21 @@ export const api = {
   claimLead: (id) => request(`/leads/${id}/claim`, { method: 'POST' }),
   logLeadActivity: (id, payload) => request(`/leads/${id}/activities`, { method: 'POST', body: payload }),
   createLeadNote: (id, content) => request(`/leads/${id}/notes`, { method: 'POST', body: { content } }),
+  // Not JSON — a multipart upload, same bypass-request() shape as uploadCall.
+  bulkImportLeads: async (file, agencyId) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (agencyId) formData.append('agencyId', agencyId);
+    const res = await fetch(`${BASE}/leads/bulk-import`, { method: 'POST', credentials: 'include', body: formData });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(data.message || data.error || 'Upload failed');
+      err.data = data;
+      err.status = res.status;
+      throw err;
+    }
+    return data;
+  },
 
   tasks: (params = '') => request(`/tasks${params}`),
   createTask: (payload) => request('/tasks', { method: 'POST', body: payload }),
@@ -119,10 +134,12 @@ export const api = {
   // so the session cookie rides along even when client/server are on separate origins.
   callAudioUrl: (id) => `${BASE}/calls/${id}/audio`,
   reviewCall: (id, payload) => request(`/calls/${id}/review`, { method: 'POST', body: payload }),
-  uploadCall: async (file, leadId) => {
+  coachingBreakdown: (params = '') => request(`/calls/coaching${params}`),
+  uploadCall: async (file, leadId, producerId) => {
     const formData = new FormData();
     formData.append('recording', file);
     if (leadId) formData.append('leadId', leadId);
+    if (producerId) formData.append('producerId', producerId);
     const res = await fetch(`${BASE}/calls`, { method: 'POST', credentials: 'include', body: formData });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {

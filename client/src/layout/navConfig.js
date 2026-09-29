@@ -24,6 +24,7 @@ export const NAV_BY_ROLE = {
   AGENCY_OWNER: [
     { label: 'Main Stage', to: '/agency', icon: 'home', primary: true },
     { label: 'Yield Transfers', to: '/agency/transfers', icon: 'transfer', primary: true },
+    { label: 'Call Scoring', to: '/agency/call-scoring', icon: 'trophy', primary: true },
     { label: 'Moshpit', to: '/agency/moshpit', icon: 'flame' },
     { label: 'Winbacks & Cross-Sells', to: '/agency/opportunities', icon: 'target' },
     { label: 'Financials', to: '/agency/financials', icon: 'dollar', primary: true },

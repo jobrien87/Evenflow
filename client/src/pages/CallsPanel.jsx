@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { StatTile, BarRow, SectionHeader } from '../ui';
 
-const STATUS_COLOR = {
+export const STATUS_COLOR = {
   UPLOADED: 'var(--text-secondary)', QUEUED: 'var(--text-secondary)', TRANSCRIBING: 'var(--warning)', TRANSCRIBED: 'var(--warning)',
   ANALYZING: 'var(--warning)', COMPLETE: 'var(--accent)', FAILED: 'var(--danger)',
 };
@@ -252,7 +252,7 @@ export default function CallsPanel() {
   );
 }
 
-function TranscriptEntry({ onSubmit }) {
+export function TranscriptEntry({ onSubmit }) {
   const [transcript, setTranscript] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -294,7 +294,7 @@ function TranscriptEntry({ onSubmit }) {
   );
 }
 
-function Section({ title, content }) {
+export function Section({ title, content }) {
   return (
     <div style={s.analysisSection}>
       <div style={s.analysisSectionTitle}>{title}</div>
@@ -303,7 +303,7 @@ function Section({ title, content }) {
   );
 }
 
-function List({ items }) {
+export function List({ items }) {
   if (!items || items.length === 0) return <div style={s.emptySmall}>None noted.</div>;
   return (
     <ul style={s.list}>
@@ -312,7 +312,7 @@ function List({ items }) {
   );
 }
 
-function ObjectionsList({ items }) {
+export function ObjectionsList({ items }) {
   if (!items || items.length === 0) return <div style={s.emptySmall}>None noted.</div>;
   return (
     <div>
@@ -328,7 +328,7 @@ function ObjectionsList({ items }) {
   );
 }
 
-function ScoreGrid({ scores }) {
+export function ScoreGrid({ scores }) {
   return (
     <div style={s.scoreGrid}>
       {Object.entries(scores || {}).map(([dim, score]) => (
@@ -341,7 +341,7 @@ function ScoreGrid({ scores }) {
   );
 }
 
-function ManagerReviewForm({ analysis, onSubmit }) {
+export function ManagerReviewForm({ analysis, onSubmit }) {
   const [score, setScore] = useState(analysis.managerOverrideScore != null ? String(analysis.managerOverrideScore) : '');
   const [comment, setComment] = useState(analysis.managerComment || '');
   const [busy, setBusy] = useState(false);

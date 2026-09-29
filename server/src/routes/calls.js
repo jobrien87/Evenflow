@@ -9,6 +9,7 @@ const { validateAudioUpload } = require('../lib/fileValidation');
 const { enqueueCallProcessing, enqueueAnalysis } = require('../jobs/callProcessing');
 const { read } = require('../lib/storage');
 const { requireModuleEnabled } = require('../lib/entitlements');
+const { computeDrillScore, computeCoachingBreakdown } = require('../lib/callScoring');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -29,19 +30,78 @@ router.get('/', async (req, res, next) => {
     }
     if (req.user.role === 'PRODUCER') {
       where.uploadedById = req.user.id;
+    } else if (req.query.uploadedById) {
+      // Call Scoring's "sort/filter by producer" — never trust the id
+      // blindly: confirm it's a real user in the caller's own agency
+      // (PLATFORM_OWNER can target any agency), same ownership-check
+      // idiom used elsewhere in this app (e.g. workqueue.js's ?userId=).
+      const target = await prisma.user.findUnique({ where: { id: req.query.uploadedById }, select: { agencyId: true } });
+      if (!target || (req.user.role !== 'PLATFORM_OWNER' && target.agencyId !== req.user.agencyId)) {
+        return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+      }
+      where.uploadedById = req.query.uploadedById;
     }
     if (req.query.status) where.status = req.query.status;
+    if (req.query.from || req.query.to) {
+      where.createdAt = {
+        ...(req.query.from ? { gte: new Date(req.query.from) } : {}),
+        ...(req.query.to ? { lte: new Date(req.query.to) } : {}),
+      };
+    }
 
     const calls = await prisma.call.findMany({
       where,
       include: {
-        uploadedBy: { select: { firstName: true, lastName: true } },
-        analysis: { select: { overallScore: true, reviewRecommended: true } },
+        uploadedBy: { select: { id: true, firstName: true, lastName: true } },
+        analysis: { select: { overallScore: true, reviewRecommended: true, dimensionScores: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
-    return res.json({ success: true, calls });
+
+    // Drill Score — computed from the AI's existing dimensionScores, not
+    // a second analysis pass. See lib/callScoring.js.
+    const callsWithDrillScore = calls.map((call) => ({
+      ...call,
+      drillScore: call.analysis ? computeDrillScore(call.analysis.dimensionScores)?.drillScore ?? null : null,
+    }));
+
+    return res.json({ success: true, calls: callsWithDrillScore });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Registered before /:id — "coaching" would otherwise be swallowed as an
+// id by that param route (same anti-shadowing pattern used throughout
+// this app, e.g. leads.js's /funnel).
+router.get('/coaching', requireRole('PRODUCER', 'AGENCY_MANAGER', 'AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    let targetUserId;
+    let agencyId;
+
+    if (req.user.role === 'PRODUCER') {
+      // Self-service only — a Producer can see their own coaching
+      // breakdown, never another producer's.
+      targetUserId = req.user.id;
+      agencyId = req.user.agencyId;
+    } else {
+      targetUserId = req.query.userId;
+      if (!targetUserId) return res.status(400).json({ success: false, error: 'USER_REQUIRED', message: 'userId is required.' });
+      const target = await prisma.user.findUnique({ where: { id: targetUserId }, select: { agencyId: true, role: true } });
+      if (!target) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+      if (req.user.role !== 'PLATFORM_OWNER' && target.agencyId !== req.user.agencyId) {
+        return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+      }
+      agencyId = target.agencyId;
+    }
+
+    const to = req.query.to ? new Date(req.query.to) : new Date();
+    const from = req.query.from ? new Date(req.query.from) : new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const breakdown = await computeCoachingBreakdown({ prisma, agencyId, userId: targetUserId, from, to });
+
+    return res.json({ success: true, period: { from: from.toISOString(), to: to.toISOString() }, ...breakdown });
   } catch (err) {
     next(err);
   }
@@ -57,7 +117,8 @@ router.get('/:id', async (req, res, next) => {
     if (req.user.role !== 'PLATFORM_OWNER' && call.agencyId !== req.user.agencyId) {
       return res.status(403).json({ success: false, error: 'FORBIDDEN' });
     }
-    return res.json({ success: true, call });
+    const drill = call.analysis ? computeDrillScore(call.analysis.dimensionScores) : null;
+    return res.json({ success: true, call: { ...call, drillScore: drill?.drillScore ?? null, drillCategoryScores: drill?.categoryScores ?? null } });
   } catch (err) {
     next(err);
   }
@@ -145,6 +206,28 @@ router.post('/', requireRole('PRODUCER', 'AGENCY_MANAGER', 'AGENCY_OWNER'), uplo
       }
     }
 
+    // Call Scoring's "upload a recording for a given agent" — a Manager/
+    // Owner uploading a batch of recordings after the fact attributes each
+    // one to the real producer who was on the call, not to themselves.
+    // uploadedById drives Flow Score's callQuality attribution
+    // (computeProducerScore), so this must be validated, never trusted
+    // blindly, same as leadId above.
+    let uploadedById = req.user.id;
+    const producerIdParsed = z.string().uuid().optional().safeParse(req.body.producerId || undefined);
+    if (!producerIdParsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'producerId must be a valid UUID.' });
+    }
+    if (producerIdParsed.data) {
+      if (req.user.role === 'PRODUCER') {
+        return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'Producers can only upload calls as themselves.' });
+      }
+      const producer = await prisma.user.findUnique({ where: { id: producerIdParsed.data }, select: { agencyId: true, role: true } });
+      if (!producer || producer.agencyId !== req.user.agencyId || producer.role !== 'PRODUCER') {
+        return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'producerId must be a Producer in your agency.' });
+      }
+      uploadedById = producerIdParsed.data;
+    }
+
     const validation = validateAudioUpload(req.file.buffer);
     if (!validation.valid) {
       return res.status(400).json({ success: false, error: 'INVALID_FILE', message: validation.reason });
@@ -160,7 +243,7 @@ router.post('/', requireRole('PRODUCER', 'AGENCY_MANAGER', 'AGENCY_OWNER'), uplo
     const call = await prisma.call.create({
       data: {
         agencyId: req.user.agencyId,
-        uploadedById: req.user.id,
+        uploadedById,
         leadId,
         source: 'MANUAL_UPLOAD',
         filename: req.file.originalname,

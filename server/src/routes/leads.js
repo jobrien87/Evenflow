@@ -1,4 +1,5 @@
 const express = require('express');
+const multer = require('multer');
 const { z } = require('zod');
 const { prisma } = require('../lib/db');
 const { requireAuth, scopeAgencyId } = require('../middleware/auth');
@@ -10,9 +11,15 @@ const { notifyUser, notifyAgencyOwners } = require('../lib/notifications');
 const { updateCustomerProductsAndDetectCrossSells } = require('../lib/opportunityEvents');
 const { computeProducerScore, computeAgencyScore, computeTelemarketerScore } = require('../lib/flowScore');
 const { computeFunnel } = require('../lib/funnelMetrics');
+const { parseLeadFile } = require('../lib/leadBulkImport');
 
 const router = express.Router();
 router.use(requireAuth);
+
+// Small cap — a lead-list spreadsheet is text/rows, never a large binary;
+// mirrors calls.js's memoryStorage()-with-no-fileFilter convention (real
+// validation happens after upload, inside parseLeadFile).
+const uploadSpreadsheet = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 // List leads — always server-side scoped to the caller's agency (never trust client agencyId).
 router.get('/', async (req, res, next) => {
@@ -117,6 +124,78 @@ const INTAKE_FIELD_KEYS = [
   'homeClaims', 'currentInsurance', 'currentPremium', 'yearsWithCarrier', 'callbackTime', 'tmNotes',
 ];
 
+// The real per-lead creation transaction — duplicate detection, Customer
+// get-or-create, priority scoring, LeadEvent — shared by the single-lead
+// POST / route below and the bulk-import route, so a spreadsheet-imported
+// lead goes through exactly the same real logic a manually-entered one
+// does, never a second/thinner implementation.
+async function createLeadRecord({ agencyId, source, createdById, data }) {
+  const phoneNormalized = normalizePhone(data.phone);
+  const email = normalizeEmail(data.email);
+
+  let duplicateOf = null;
+  if (phoneNormalized || email) {
+    duplicateOf = await prisma.customer.findFirst({
+      where: {
+        OR: [
+          phoneNormalized ? { phoneNormalized } : undefined,
+          email ? { email } : undefined,
+        ].filter(Boolean),
+      },
+    });
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const customer = duplicateOf
+      ? duplicateOf
+      : await tx.customer.create({
+          data: {
+            firstName: data.firstName,
+            lastName: data.lastName,
+            phoneNormalized,
+            email,
+          },
+        });
+
+    const intakeFields = Object.fromEntries(
+      INTAKE_FIELD_KEYS.filter((key) => data[key]).map((key) => [key, data[key]])
+    );
+
+    const lead = await tx.lead.create({
+      data: {
+        agencyId,
+        customerId: customer.id,
+        source,
+        product: data.product,
+        assignedToId: data.assignedToId,
+        assignedAt: data.assignedToId ? new Date() : null,
+        status: data.assignedToId ? 'ASSIGNED' : 'NEW',
+        createdById,
+        customFields: data.customFields || {},
+        dob: data.dob ? new Date(data.dob) : null,
+        ...intakeFields,
+      },
+    });
+
+    const { priorityScore, priorityBand, priorityReason } = scoreLead(lead);
+    const updatedLead = await tx.lead.update({
+      where: { id: lead.id },
+      data: { priorityScore, priorityReason },
+    });
+
+    await tx.leadEvent.create({
+      data: {
+        leadId: lead.id,
+        type: duplicateOf ? 'lead.created.possible_duplicate' : 'lead.created',
+        toStatus: updatedLead.status,
+        metadata: { source, priorityBand },
+      },
+    });
+
+    return { lead: updatedLead, customer, isDuplicate: !!duplicateOf };
+  });
+}
+
 router.post('/', async (req, res, next) => {
   try {
     const parsed = createLeadSchema.safeParse(req.body);
@@ -162,71 +241,7 @@ router.post('/', async (req, res, next) => {
     // server-side, never client-trusted, for a Telemarketer's submission.
     const source = req.user.role === 'TELEMARKETER' ? 'telemarketer' : parsed.data.source;
 
-    const phoneNormalized = normalizePhone(parsed.data.phone);
-    const email = normalizeEmail(parsed.data.email);
-
-    // Duplicate detection: same normalized phone or email within the same agency, unarchived.
-    let duplicateOf = null;
-    if (phoneNormalized || email) {
-      duplicateOf = await prisma.customer.findFirst({
-        where: {
-          OR: [
-            phoneNormalized ? { phoneNormalized } : undefined,
-            email ? { email } : undefined,
-          ].filter(Boolean),
-        },
-      });
-    }
-
-    const result = await prisma.$transaction(async (tx) => {
-      const customer = duplicateOf
-        ? duplicateOf
-        : await tx.customer.create({
-            data: {
-              firstName: parsed.data.firstName,
-              lastName: parsed.data.lastName,
-              phoneNormalized,
-              email,
-            },
-          });
-
-      const intakeFields = Object.fromEntries(
-        INTAKE_FIELD_KEYS.filter((key) => parsed.data[key]).map((key) => [key, parsed.data[key]])
-      );
-
-      const lead = await tx.lead.create({
-        data: {
-          agencyId,
-          customerId: customer.id,
-          source,
-          product: parsed.data.product,
-          assignedToId: parsed.data.assignedToId,
-          assignedAt: parsed.data.assignedToId ? new Date() : null,
-          status: parsed.data.assignedToId ? 'ASSIGNED' : 'NEW',
-          createdById: req.user.id,
-          customFields: parsed.data.customFields || {},
-          dob: parsed.data.dob ? new Date(parsed.data.dob) : null,
-          ...intakeFields,
-        },
-      });
-
-      const { priorityScore, priorityBand, priorityReason } = scoreLead(lead);
-      const updatedLead = await tx.lead.update({
-        where: { id: lead.id },
-        data: { priorityScore, priorityReason },
-      });
-
-      await tx.leadEvent.create({
-        data: {
-          leadId: lead.id,
-          type: duplicateOf ? 'lead.created.possible_duplicate' : 'lead.created',
-          toStatus: updatedLead.status,
-          metadata: { source, priorityBand },
-        },
-      });
-
-      return { lead: updatedLead, customer, isDuplicate: !!duplicateOf };
-    });
+    const result = await createLeadRecord({ agencyId, source, createdById: req.user.id, data: parsed.data });
 
     await recordAudit({
       actorId: req.user.id,
@@ -265,6 +280,76 @@ router.post('/', async (req, res, next) => {
     }
 
     return res.status(201).json({ success: true, lead: result.lead, possibleDuplicate: result.isDuplicate });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Bulk lead-list upload (CSV/XLS/XLSX) — Agency Owner/Manager for their own
+// agency, or Platform Owner on behalf of a given agency. Each parsed row
+// goes through the exact same createLeadRecord() transaction a manual
+// single-lead submission does — no second/thinner creation path.
+router.post('/bulk-import', uploadSpreadsheet.single('file'), async (req, res, next) => {
+  try {
+    if (!['AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'].includes(req.user.role)) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Expected a multipart field named "file".' });
+    }
+
+    let agencyId;
+    if (req.user.role === 'PLATFORM_OWNER') {
+      agencyId = req.body.agencyId;
+      if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+    } else {
+      agencyId = req.user.agencyId;
+    }
+    if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+
+    const parsedFile = parseLeadFile(req.file.buffer);
+    if (parsedFile.error) {
+      return res.status(400).json({ success: false, error: parsedFile.error, message: parsedFile.message });
+    }
+    if (parsedFile.leads.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'NO_VALID_ROWS',
+        message: 'No rows had a usable name column.',
+        skipped: parsedFile.skipped,
+      });
+    }
+
+    let created = 0;
+    const failures = parsedFile.skipped.map((s) => ({ row: s.row, reason: s.reason }));
+
+    for (const row of parsedFile.leads) {
+      try {
+        const result = await createLeadRecord({ agencyId, source: 'bulk_upload', createdById: req.user.id, data: row });
+        created += 1;
+        await recordAudit({
+          actorId: req.user.id,
+          actorRole: req.user.role,
+          agencyId,
+          action: 'lead.created',
+          entityType: 'Lead',
+          entityId: result.lead.id,
+          after: result.lead,
+          correlationId: req.correlationId,
+        });
+      } catch (err) {
+        failures.push({ row: row._sourceRow, reason: err.message || 'Failed to create this row.' });
+      }
+    }
+
+    return res.json({
+      success: true,
+      totalRows: parsedFile.totalRows,
+      truncated: parsedFile.truncated,
+      created,
+      skipped: failures.length,
+      failures: failures.slice(0, 50),
+    });
   } catch (err) {
     next(err);
   }

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../lib/api';
-import { Button, Modal } from '../ui';
+import { Button, Modal, SectionHeader } from '../ui';
+import BulkLeadUploadBox from './BulkLeadUploadBox';
 
 // Shared by AgencyDetailPage.jsx (Platform Owner editing any agency) and
 // AgencyOwnerDashboard.jsx (an Agency Owner editing their own agency) —
@@ -38,6 +39,10 @@ export default function AgencySettingsModal({ agency, onClose, onSaved }) {
         {err && <div style={s.error}>{err}</div>}
         <Button variant="primary" type="submit" disabled={busy}>{busy ? 'SAVING…' : 'SAVE'}</Button>
       </form>
+
+      <div style={s.divider} />
+      <SectionHeader>Upload Leads</SectionHeader>
+      <BulkLeadUploadBox agencyId={agency.id} />
     </Modal>
   );
 }
@@ -47,4 +52,5 @@ const s = {
   fieldLabel: { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: 'var(--text-muted)' },
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },
   error: { color: 'var(--danger)', fontSize: 13 },
+  divider: { borderTop: '1px solid var(--border-hairline)', margin: '20px 0 16px' },
 };
