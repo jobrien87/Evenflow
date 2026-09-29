@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { useIsMobile } from '../lib/useViewport';
 import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
-import { GradientDefs, TourOverlay } from '../ui';
+import { GradientDefs, TourOverlay, ToastHost } from '../ui';
 import { stepsForRole } from '../lib/tourSteps';
+import { unlockAudio } from '../lib/drumRoll';
+import LeadAlertListener, { LEAD_ALERT_ROLES } from '../lib/useLeadAlerts';
 import Sidebar from './Sidebar';
 import MobileTopBar from './MobileTopBar';
 import MobileDrawer from './MobileDrawer';
@@ -24,6 +26,18 @@ export default function AppLayout() {
   const [manualTourOpen, setManualTourOpen] = useState(false);
   const roleSteps = user ? stepsForRole(user.role) : null;
   const tourSteps = manualTourOpen ? roleSteps : (user && !user.tourCompletedAt && !tourDismissed ? roleSteps : null);
+
+  // Browsers block AudioContext playback until a real user gesture — warm
+  // it up on the first click/keypress anywhere in the app so the new-lead
+  // drum roll (lib/drumRoll.js) is already unlocked by the time it's needed.
+  useEffect(() => {
+    document.addEventListener('pointerdown', unlockAudio, { once: true });
+    document.addEventListener('keydown', unlockAudio, { once: true });
+    return () => {
+      document.removeEventListener('pointerdown', unlockAudio);
+      document.removeEventListener('keydown', unlockAudio);
+    };
+  }, []);
 
   async function finishTour() {
     setTourDismissed(true);
@@ -64,6 +78,8 @@ export default function AppLayout() {
       <EdWidget />
       {tourSteps && <TourOverlay steps={tourSteps} onDone={finishTour} />}
       <AnnouncementModal />
+      {user && LEAD_ALERT_ROLES.has(user.role) && <LeadAlertListener />}
+      <ToastHost />
     </div>
   );
 }
