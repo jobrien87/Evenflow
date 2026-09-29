@@ -2,9 +2,26 @@ import { useState } from 'react';
 import { api } from '../lib/api';
 import { FileDropzone } from '../ui';
 
+// Keep in sync with server/src/lib/leadType.js's BULK_UPLOAD_CATEGORIES —
+// what kind of list this is. Winback/Cross-Sell set the real leadType;
+// the product options set Lead.product for the whole batch (taking
+// precedence over whatever a CSV's own "product" column said, since the
+// person uploading is explicitly declaring what this list is).
+const CATEGORY_OPTIONS = [
+  { value: 'WINBACK', label: 'Winbacks' },
+  { value: 'CROSS_SELL', label: 'Cross-Sell' },
+  { value: 'AUTO', label: 'Auto' },
+  { value: 'HOME', label: 'Home' },
+  { value: 'COMMERCIAL', label: 'Commercial' },
+  { value: 'LIFE', label: 'Life' },
+  { value: 'HEALTH', label: 'Health' },
+  { value: 'UNKNOWN', label: 'Unknown' },
+];
+
 // Reused by AgencyOwnerDashboard's LEADS section and AgencySettingsModal —
 // one real upload flow (parse → createLeadRecord per row), not two.
 export default function BulkLeadUploadBox({ agencyId, onImported }) {
+  const [leadCategory, setLeadCategory] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
@@ -14,7 +31,7 @@ export default function BulkLeadUploadBox({ agencyId, onImported }) {
     setError('');
     setResult(null);
     try {
-      const data = await api.bulkImportLeads(file, agencyId);
+      const data = await api.bulkImportLeads(file, agencyId, leadCategory);
       setResult(data);
       if (onImported) onImported();
     } catch (err) {
@@ -26,10 +43,17 @@ export default function BulkLeadUploadBox({ agencyId, onImported }) {
 
   return (
     <div style={s.wrap}>
+      <label style={s.fieldLabel}>
+        What kind of leads are these?
+        <select style={s.select} value={leadCategory} onChange={(e) => setLeadCategory(e.target.value)}>
+          <option value="">Select lead type…</option>
+          {CATEGORY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      </label>
       <FileDropzone
         onFile={handleFile}
-        disabled={busy}
-        label={busy ? 'Importing…' : 'Click to upload, or drag a lead-list file here'}
+        disabled={busy || !leadCategory}
+        label={busy ? 'Importing…' : !leadCategory ? 'Choose a lead type above first' : 'Click to upload, or drag a lead-list file here'}
         hint="CSV, XLS, or XLSX — any column headers, we'll match them up automatically"
       />
       {error && <div style={s.error}>{error}</div>}
@@ -46,6 +70,8 @@ export default function BulkLeadUploadBox({ agencyId, onImported }) {
 
 const s = {
   wrap: { marginTop: 12, marginBottom: 12 },
+  fieldLabel: { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 },
+  select: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 13 },
   error: { color: 'var(--danger)', fontSize: 12, marginTop: 8 },
   result: { color: 'var(--text-secondary)', fontSize: 12, marginTop: 8 },
 };

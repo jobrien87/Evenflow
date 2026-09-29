@@ -16,4 +16,27 @@ function deriveLeadType({ isLiveTransfer, vendorCategory }) {
   return 'MANUAL';
 }
 
-module.exports = { deriveLeadType };
+// The explicit "what kind of list is this" categorization an Agency
+// Owner/Manager picks at bulk-upload time — a bulk list has no vendor
+// category or live-transfer signal for deriveLeadType to work from, so
+// this is the one place a human tells the system directly. Winback/
+// Cross-Sell set the real leadType (overriding deriveLeadType's default
+// MANUAL); the product categories set Lead.product for the whole batch,
+// taking precedence over whatever a CSV's own "product" column said,
+// since the person uploading is explicitly declaring what this list is.
+const BULK_UPLOAD_CATEGORIES = {
+  WINBACK: { leadTypeOverride: 'WINBACK' },
+  CROSS_SELL: { leadTypeOverride: 'CROSS_SELL' },
+  AUTO: { product: 'Auto' },
+  HOME: { product: 'Home' },
+  COMMERCIAL: { product: 'Commercial' },
+  LIFE: { product: 'Life' },
+  HEALTH: { product: 'Health' },
+  UNKNOWN: {},
+};
+
+function applyBulkUploadCategory(category) {
+  return BULK_UPLOAD_CATEGORIES[category] || {};
+}
+
+module.exports = { deriveLeadType, BULK_UPLOAD_CATEGORIES, applyBulkUploadCategory };

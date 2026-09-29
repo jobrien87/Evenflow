@@ -5,7 +5,7 @@ const { prisma } = require('../lib/db');
 const { requireAuth, scopeAgencyId } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { scoreLead } = require('../lib/priority');
-const { deriveLeadType } = require('../lib/leadType');
+const { deriveLeadType, BULK_UPLOAD_CATEGORIES, applyBulkUploadCategory } = require('../lib/leadType');
 const { normalizePhone, normalizeEmail } = require('../lib/normalize');
 const { recordLeadSaleRevenue } = require('../lib/financialEvents');
 const { notifyUser, notifyUsers, notifyAgencyOwners } = require('../lib/notifications');
@@ -180,7 +180,7 @@ async function createLeadRecord({ agencyId, source, createdById, data }) {
         customFields: data.customFields || {},
         dob: data.dob ? new Date(data.dob) : null,
         isLiveTransfer: !!data.isLiveTransfer,
-        leadType: deriveLeadType({ isLiveTransfer: !!data.isLiveTransfer }),
+        leadType: data.leadTypeOverride || deriveLeadType({ isLiveTransfer: !!data.isLiveTransfer }),
         ...intakeFields,
       },
     });
@@ -327,6 +327,15 @@ router.post('/bulk-import', uploadSpreadsheet.single('file'), async (req, res, n
     if (!req.file) {
       return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Expected a multipart field named "file".' });
     }
+    const leadCategory = req.body.leadCategory;
+    if (!leadCategory || !Object.keys(BULK_UPLOAD_CATEGORIES).includes(leadCategory)) {
+      return res.status(400).json({
+        success: false,
+        error: 'VALIDATION',
+        message: 'Choose what kind of leads this list is before uploading.',
+      });
+    }
+    const categoryFields = applyBulkUploadCategory(leadCategory);
 
     let agencyId;
     if (req.user.role === 'PLATFORM_OWNER') {
@@ -355,7 +364,7 @@ router.post('/bulk-import', uploadSpreadsheet.single('file'), async (req, res, n
 
     for (const row of parsedFile.leads) {
       try {
-        const result = await createLeadRecord({ agencyId, source: 'bulk_upload', createdById: req.user.id, data: row });
+        const result = await createLeadRecord({ agencyId, source: 'bulk_upload', createdById: req.user.id, data: { ...row, ...categoryFields } });
         created += 1;
         await recordAudit({
           actorId: req.user.id,
