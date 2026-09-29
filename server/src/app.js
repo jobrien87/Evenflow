@@ -33,6 +33,7 @@ const flowScoreRoutes = require('./routes/flowScore');
 const chatRoutes = require('./routes/chat');
 const runningReportRoutes = require('./routes/runningReport');
 const healthRoutes = require('./routes/health');
+const adminImportRoutes = require('./routes/adminImport');
 
 const app = express();
 
@@ -84,6 +85,8 @@ app.use('/api/chat', chatRoutes);
 app.use('/api/running-report', runningReportRoutes);
 // Public, vendor-authenticated Direct POST API — versioned per spec.
 app.use('/api/v1', vendorApiRoutes);
+// Temporary one-off data-import trigger — see routes/adminImport.js header.
+app.use('/api/admin', adminImportRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ success: false, error: 'NOT_FOUND', correlationId: req.correlationId });
