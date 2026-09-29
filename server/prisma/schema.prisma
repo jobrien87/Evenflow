@@ -212,6 +212,7 @@ model User {
   passwordHash  String?
   firstName     String
   lastName      String
+  phone         String?
   role          Role
   status        UserStatus   @default(INVITED)
   agencyId      String?
@@ -250,6 +251,8 @@ model User {
   announcementsCreated  Announcement[]    @relation("AnnouncementCreatedBy")
   announcementsTargeted Announcement[]    @relation("AnnouncementTargetUser")
   announcementAcks      AnnouncementAck[]
+  producerNotesReceived ProducerNote[]    @relation("ProducerNoteSubject")
+  producerNotesAuthored ProducerNote[]    @relation("ProducerNoteAuthor")
 
   @@index([agencyId])
   @@index([role])
@@ -340,6 +343,7 @@ model Agency {
   conversations Conversation[]
   timeClockEntries TimeClockEntry[]
   announcements Announcement[]
+  producerNotes ProducerNote[]
 }
 
 model Customer {
@@ -590,6 +594,22 @@ model AnnouncementAck {
 
   @@unique([announcementId, userId])
   @@index([userId])
+}
+
+// Freeform coaching notes an Agency Owner/Manager keeps on one producer —
+// distinct from LeadNote (a note about a Lead, not a person).
+model ProducerNote {
+  id          String   @id @default(uuid())
+  producerId  String
+  producer    User     @relation("ProducerNoteSubject", fields: [producerId], references: [id])
+  agencyId    String
+  agency      Agency   @relation(fields: [agencyId], references: [id])
+  authorId    String
+  author      User     @relation("ProducerNoteAuthor", fields: [authorId], references: [id])
+  content     String
+  createdAt   DateTime @default(now())
+
+  @@index([producerId, createdAt])
 }
 
 model Goal {

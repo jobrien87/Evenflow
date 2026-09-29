@@ -2,12 +2,16 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { z } = require('zod');
 const { prisma } = require('../lib/db');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireRole } = require('../middleware/auth');
 const { buildContextForUser, buildBriefingContext } = require('../lib/edContext');
-const { buildSystemPrompt, buildBriefingPrompt, buildSuggestionPrompt } = require('../lib/edPersonality');
+const { buildSystemPrompt, buildBriefingPrompt, buildSuggestionPrompt, buildCoachingSummaryPrompt } = require('../lib/edPersonality');
 const { callEd, isConfigured } = require('../lib/aiProvider');
 const { estimateCostMicros } = require('../lib/aiCost');
 const { recordAudit } = require('../lib/audit');
+const { explainScore, componentPlaceholders } = require('../lib/flowScore');
+const { computeFunnel } = require('../lib/funnelMetrics');
+const { computeVendorBreakdown, computeProductBreakdown } = require('../lib/performanceBreakdown');
+const { computeCoachingBreakdown } = require('../lib/callScoring');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -40,6 +44,14 @@ const suggestionLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req) => req.user.id,
   message: { success: false, error: 'RATE_LIMITED', message: "You've hit today's ED suggestion limit. It resets tomorrow." },
+});
+const coachingSummaryLimiter = rateLimit({
+  windowMs: 24 * 60 * 60 * 1000,
+  max: 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user.id,
+  message: { success: false, error: 'RATE_LIMITED', message: "You've hit today's coaching summary limit. It resets tomorrow." },
 });
 
 function deterministicSummary(context) {
@@ -327,6 +339,96 @@ router.post('/escalate', async (req, res, next) => {
     });
 
     return res.status(201).json({ success: true, ticket });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const coachingSummarySchema = z.object({
+  userId: z.string().uuid(),
+  humorLevel: z.enum(['LOW', 'NORMAL', 'SPICY']).optional(),
+});
+
+// A coaching summary about ONE producer, for their Owner/Manager to read
+// before a coaching conversation — reuses the exact same real data
+// ProducerDetailPage.jsx already displays (Flow Score, funnel, vendor/
+// product breakdown, coaching/call-scoring breakdown), never a second,
+// divergent computation of any of it.
+router.get('/coaching-summary', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), coachingSummaryLimiter, async (req, res, next) => {
+  try {
+    const parsed = coachingSummarySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+
+    const target = await prisma.user.findUnique({ where: { id: parsed.data.userId } });
+    if (!target) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (req.user.role !== 'PLATFORM_OWNER' && target.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    if (!['PRODUCER', 'TELEMARKETER'].includes(target.role)) {
+      return res.status(400).json({ success: false, error: 'NOT_APPLICABLE' });
+    }
+
+    const to = new Date();
+    const from = new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const snapshot = await prisma.flowScoreSnapshot.findFirst({
+      where: { subjectType: 'USER', subjectId: target.id },
+      orderBy: { computedAt: 'desc' },
+    });
+
+    const agencyId = target.agencyId;
+    const [funnel, vendorBreakdown, productBreakdown, coaching] = agencyId
+      ? await Promise.all([
+          computeFunnel({ agencyId, userId: target.id, from, to }),
+          computeVendorBreakdown({ agencyId, userId: target.id, from, to }),
+          computeProductBreakdown({ agencyId, userId: target.id, from, to }),
+          computeCoachingBreakdown({ prisma, agencyId, userId: target.id, from, to }),
+        ])
+      : [null, [], [], null];
+
+    const context = {
+      producer: { firstName: target.firstName, lastName: target.lastName, role: target.role },
+      period: { from: from.toISOString(), to: to.toISOString() },
+      flowScore: snapshot ? { score: snapshot.score, explanation: explainScore(snapshot) } : null,
+      flowScoreTracks: snapshot ? null : componentPlaceholders(target.role),
+      funnel,
+      vendorBreakdown,
+      productBreakdown,
+      coaching,
+    };
+
+    const fallback = 'Not enough real activity yet to summarize — check back once this producer has more leads, calls, or a computed Flow Score.';
+
+    if (!isConfigured()) {
+      return res.json({ success: true, available: false, message: fallback, context });
+    }
+
+    const systemPrompt = buildCoachingSummaryPrompt({ context, humorLevel: parsed.data.humorLevel || 'NORMAL' });
+
+    let result;
+    try {
+      result = await callEd({ systemPrompt, userMessage: 'Give me the coaching summary.', maxTokens: 350 });
+    } catch (err) {
+      console.error(`[ed] coaching summary provider error correlationId=${req.correlationId}`, err.message);
+      return res.json({ success: true, available: false, message: fallback, context });
+    }
+
+    const estimatedCostMicros = estimateCostMicros(result.model, result.inputTokens, result.outputTokens);
+    await prisma.aiUsageLog.create({
+      data: {
+        feature: 'ed_coaching_summary',
+        agencyId: req.user.agencyId,
+        userId: req.user.id,
+        model: result.model,
+        inputTokens: result.inputTokens,
+        outputTokens: result.outputTokens,
+        estimatedCostMicros,
+      },
+    });
+
+    return res.json({ success: true, available: true, message: result.text, context });
   } catch (err) {
     next(err);
   }

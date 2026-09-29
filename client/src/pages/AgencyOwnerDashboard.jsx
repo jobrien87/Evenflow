@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { useIsMobile } from '../lib/useViewport';
-import { Button, Modal, ProgressRing, EdSuggestionBox } from '../ui';
+import { Button, EdSuggestionBox } from '../ui';
 import FlowScoreCard from './FlowScoreCard';
 import LeadsSnapshotBox from './LeadsSnapshotBox';
 import FunnelMetricsCard from './FunnelMetricsCard';
@@ -18,6 +18,7 @@ import AnnouncementComposer from './AnnouncementComposer';
 export default function AgencyOwnerDashboard() {
   const { user } = useAuth();
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [leads, setLeads] = useState([]);
   const [users, setUsers] = useState([]);
@@ -38,8 +39,7 @@ export default function AgencyOwnerDashboard() {
   const [editUserForm, setEditUserForm] = useState({ firstName: '', lastName: '' });
   const [editUserError, setEditUserError] = useState('');
   const [loadError, setLoadError] = useState('');
-  const [scoreUser, setScoreUser] = useState(null);
-  const [scoreData, setScoreData] = useState(null);
+  const [producerScores, setProducerScores] = useState({});
 
   // The funnel drill-down's filter lives in the URL (not component state)
   // so it's shareable and survives the back button.
@@ -73,9 +73,25 @@ export default function AgencyOwnerDashboard() {
       setLeads(leadData.leads);
       setUsers(userData.users);
       setAgency(agencyData.agency);
+      loadProducerScores(userData.users);
     } catch (err) {
       setLoadError(err.data?.message || 'Could not load your agency dashboard. Try refreshing.');
     }
+  }
+
+  // Inline Flow Score on the roster — an N+1 fan-out is acceptable at this
+  // team-roster scale (a per-page-load call per active producer, not a
+  // hot path); revisit with a real batch endpoint only if a real agency's
+  // roster size ever makes it slow.
+  async function loadProducerScores(allUsers) {
+    const activeProducers = allUsers.filter((u) => u.role === 'PRODUCER' && u.status === 'ACTIVE');
+    if (activeProducers.length === 0) return;
+    const entries = await Promise.all(
+      activeProducers.map((p) =>
+        api.userFlowScore(p.id).then((res) => [p.id, res.snapshot?.score ?? null]).catch(() => [p.id, null])
+      )
+    );
+    setProducerScores(Object.fromEntries(entries));
   }
 
   function startEditUser(u) {
@@ -92,20 +108,6 @@ export default function AgencyOwnerDashboard() {
     } catch (err) {
       setEditUserError(err.data?.message || 'Failed to save.');
     }
-  }
-
-  // Producer Flow Score drill-down — userFlowScore/flowScoreHistory were
-  // fully functional server-side but never called from any page before
-  // this; there was no way to see an individual producer's trend, only
-  // the aggregate agency score.
-  async function viewProducerScore(u) {
-    setScoreUser(u);
-    setScoreData(null);
-    const [scoreRes, historyRes] = await Promise.all([
-      api.userFlowScore(u.id),
-      api.flowScoreHistory('USER', u.id),
-    ]);
-    setScoreData({ snapshot: scoreRes.snapshot, history: historyRes.snapshots });
   }
 
   function selectFunnelStage(stageKey, range) {
@@ -243,7 +245,12 @@ export default function AgencyOwnerDashboard() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <div style={s.badge}>{u.status}</div>
                 {u.role === 'PRODUCER' && (
-                  <button style={s.resendButton} onClick={() => viewProducerScore(u)}>VIEW SCORE</button>
+                  <>
+                    <div style={s.flowScoreBadge(producerScores[u.id])}>
+                      {producerScores[u.id] != null ? `${producerScores[u.id]}` : '—'}
+                    </div>
+                    <button style={s.resendButton} onClick={() => navigate(`/agency/producers/${u.id}`)}>VIEW SCORE</button>
+                  </>
                 )}
                 <button style={s.resendButton} onClick={() => startEditUser(u)}>EDIT</button>
                 {u.status === 'INVITED' && (
@@ -342,29 +349,6 @@ export default function AgencyOwnerDashboard() {
           { value: 'producer', label: 'Specific producer', picker: { field: 'targetUserId', placeholder: 'Select producer…', options: producers.map((p) => ({ id: p.id, label: `${p.firstName} ${p.lastName}` })) } },
         ]}
       />
-
-      {scoreUser && (
-        <Modal title={`FLOW SCORE — ${scoreUser.firstName} ${scoreUser.lastName}`} onClose={() => { setScoreUser(null); setScoreData(null); }}>
-          {!scoreData ? (
-            <div style={{ color: 'var(--text-muted)' }}>Loading…</div>
-          ) : !scoreData.snapshot ? (
-            <div style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Not enough activity yet to compute a Flow Score.</div>
-          ) : (
-            <>
-              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
-                <ProgressRing value={scoreData.snapshot.score} label="/ 100" size={110} />
-              </div>
-              {scoreData.history.length > 1 && (
-                <div style={s.trendRow}>
-                  {scoreData.history.slice().reverse().map((snap) => (
-                    <div key={snap.id} style={s.trendBar(snap.score)} title={`${snap.score} on ${new Date(snap.computedAt).toLocaleDateString()}`} />
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-        </Modal>
-      )}
     </div>
   );
 }
@@ -378,8 +362,13 @@ const s = {
   topSplit: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'stretch' },
   topStacked: { display: 'flex', flexDirection: 'column', gap: 20 },
   inlineEditForm: { display: 'flex', gap: 8, alignItems: 'center', padding: '8px 14px', background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 8, marginTop: -4, marginBottom: 8 },
-  trendRow: { display: 'flex', gap: 4, alignItems: 'flex-end', height: 40, justifyContent: 'center' },
-  trendBar: (score) => ({ width: 10, height: `${Math.max(4, score) / 100 * 40}px`, background: 'var(--border-accent)', borderRadius: 2 }),
+  flowScoreBadge: (score) => ({
+    display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 32, height: 22, padding: '0 6px',
+    borderRadius: 11, fontSize: 11, fontWeight: 700,
+    background: score == null ? 'var(--bg-sunken)' : 'var(--accent-gradient-soft)',
+    color: score == null ? 'var(--text-muted)' : 'var(--accent)',
+    border: '1px solid ' + (score == null ? 'var(--border-hairline)' : 'var(--border-accent)'),
+  }),
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2 },
   rowHighlighted: { outline: '2px solid var(--accent)', boxShadow: 'var(--shadow-glow-accent)', borderRadius: 'var(--radius-md)' },

@@ -32,7 +32,7 @@ router.get('/', async (req, res, next) => {
       where: agencyId ? { agencyId } : {},
       select: {
         id: true, email: true, firstName: true, lastName: true, role: true,
-        status: true, agencyId: true, createdAt: true,
+        status: true, agencyId: true, createdAt: true, phone: true,
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -160,10 +160,12 @@ router.post('/:userId/resend-invite', requireRole('AGENCY_OWNER', 'AGENCY_MANAGE
 const updateUserSchema = z.object({
   firstName: z.string().min(1).optional(),
   lastName: z.string().min(1).optional(),
+  phone: z.string().optional(),
 });
 
-// Fix a typo'd name — no edit of any kind existed on a user record after
-// invite before this (email/role intentionally stay out of scope here).
+// Fix a typo'd name, or keep a producer's real contact number on file — no
+// edit of any kind existed on a user record after invite before this
+// (email/role intentionally stay out of scope here).
 router.patch('/:userId', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
   try {
     const parsed = updateUserSchema.safeParse(req.body);
@@ -179,10 +181,59 @@ router.patch('/:userId', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role, agencyId: target.agencyId,
       action: 'user.updated', entityType: 'User', entityId: target.id,
-      before: { firstName: target.firstName, lastName: target.lastName },
+      before: { firstName: target.firstName, lastName: target.lastName, phone: target.phone },
       after: parsed.data, correlationId: req.correlationId,
     });
-    return res.json({ success: true, user: { id: updated.id, firstName: updated.firstName, lastName: updated.lastName } });
+    return res.json({ success: true, user: { id: updated.id, firstName: updated.firstName, lastName: updated.lastName, phone: updated.phone } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Coaching notes are kept on the producer, not on any one lead — a
+// separate, freeform record an Owner/Manager builds up over time.
+async function assertCanManageProducer(req, userId) {
+  const target = await prisma.user.findUnique({ where: { id: userId } });
+  if (!target) return { error: 'NOT_FOUND' };
+  if (req.user.role !== 'PLATFORM_OWNER' && target.agencyId !== req.user.agencyId) {
+    return { error: 'FORBIDDEN' };
+  }
+  return { target };
+}
+
+router.get('/:userId/notes', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const { target, error } = await assertCanManageProducer(req, req.params.userId);
+    if (error) return res.status(error === 'NOT_FOUND' ? 404 : 403).json({ success: false, error });
+
+    const notes = await prisma.producerNote.findMany({
+      where: { producerId: target.id },
+      include: { author: { select: { firstName: true, lastName: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    return res.json({ success: true, notes });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const createNoteSchema = z.object({ content: z.string().min(1) });
+
+router.post('/:userId/notes', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const parsed = createNoteSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+    const { target, error } = await assertCanManageProducer(req, req.params.userId);
+    if (error) return res.status(error === 'NOT_FOUND' ? 404 : 403).json({ success: false, error });
+    if (!target.agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+
+    const note = await prisma.producerNote.create({
+      data: { producerId: target.id, agencyId: target.agencyId, authorId: req.user.id, content: parsed.data.content },
+      include: { author: { select: { firstName: true, lastName: true } } },
+    });
+    return res.status(201).json({ success: true, note });
   } catch (err) {
     next(err);
   }
@@ -259,7 +310,7 @@ router.get('/:userId/performance', async (req, res, next) => {
 
     return res.json({
       success: true,
-      user: { id: target.id, firstName: target.firstName, lastName: target.lastName, role: target.role },
+      user: { id: target.id, firstName: target.firstName, lastName: target.lastName, role: target.role, email: target.email, phone: target.phone },
       period: { from: from.toISOString(), to: to.toISOString() },
       snapshot,
       explanation: snapshot ? explainScore(snapshot) : null,

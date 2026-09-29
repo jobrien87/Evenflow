@@ -89,6 +89,9 @@ export const api = {
   deactivateUser: (userId) => request(`/users/${userId}/deactivate`, { method: 'POST' }),
   resendUserInvite: (userId) => request(`/users/${userId}/resend-invite`, { method: 'POST' }),
   userPerformance: (userId, params = '') => request(`/users/${userId}/performance${params}`),
+  producerNotes: (userId) => request(`/users/${userId}/notes`),
+  createProducerNote: (userId, content) => request(`/users/${userId}/notes`, { method: 'POST', body: { content } }),
+  coachingSummary: (userId, humorLevel) => request(`/ed/coaching-summary?userId=${userId}${humorLevel ? `&humorLevel=${humorLevel}` : ''}`),
 
   telemarketers: () => request('/telemarketers'),
   telemarketerAgencyRoster: (params = '') => request(`/telemarketers/agency-roster${params}`),
