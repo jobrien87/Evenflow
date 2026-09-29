@@ -29,7 +29,8 @@ export const NAV_BY_ROLE = {
     { label: 'Main Stage', to: '/agency', icon: 'home', primary: true },
     { label: 'Drills', to: '/agency/drills', icon: 'sparkle' },
     { label: 'Tasks', to: '/agency/tasks', icon: 'checklist' },
-    { label: 'Yield Transfers', to: '/agency/transfers', icon: 'transfer', primary: true },
+    { label: 'Transfers', to: '/agency/transfers', icon: 'transfer', primary: true },
+    { label: 'Team Chat', to: '/agency/team-chat', icon: 'chat', primary: true },
     { label: 'Call Scoring', to: '/agency/call-scoring', icon: 'trophy', primary: true },
     { label: 'Moshpit', to: '/agency/moshpit', icon: 'flame' },
     { label: 'Winbacks & Cross-Sells', to: '/agency/opportunities', icon: 'target' },
@@ -81,7 +82,7 @@ export function secondaryNavForRole(role) {
 // to place the unread dot (useTeamChatUnread) on the right tab. null for
 // a role that isn't a chat participant (PLATFORM_OWNER).
 export function teamChatNavPath(role) {
-  if (role === 'AGENCY_OWNER' || role === 'AGENCY_MANAGER') return '/agency/transfers';
+  if (role === 'AGENCY_OWNER' || role === 'AGENCY_MANAGER') return '/agency/team-chat';
   if (role === 'PRODUCER') return '/producer/team-chat';
   if (role === 'TELEMARKETER') return '/telemarketer';
   return null;

@@ -78,6 +78,7 @@ export default function App() {
           <Route path="agency/drills/:courseId/:lessonId" element={<DrillDetailPage />} />
           <Route path="agency/tasks" element={<TasksPanel />} />
           <Route path="agency/transfers" element={<YieldTransfersPanel />} />
+          <Route path="agency/team-chat" element={<TeamChatPanel />} />
           <Route path="agency/call-scoring" element={<CallScoringPanel />} />
           <Route path="agency/moshpit" element={<MoshpitPanel />} />
           <Route path="agency/vendors" element={<VendorsPanel />} />

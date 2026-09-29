@@ -74,7 +74,7 @@ export function notificationTarget(notification, role) {
       // just highlighting something (there's no separate "row" for a
       // room to highlight).
       if (role === 'TELEMARKETER') return { path: '/telemarketer', highlightId: null, openChat: true };
-      return { path: '/agency/transfers', highlightId: null, openChat: true };
+      return { path: '/agency/team-chat', highlightId: null, openChat: true };
 
     default:
       return { path: base, highlightId: null, openChat: false };

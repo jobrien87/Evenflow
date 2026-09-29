@@ -1,8 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
-import { useAuth } from '../lib/AuthContext';
-import { useIsMobile } from '../lib/useViewport';
-import { useTeamChatUnread } from '../lib/useTeamChatUnread';
 import { Card, Badge, Button, SectionHeader, EmptyState, ExportButton, StatTile, BarRow } from '../ui';
 import { downloadCsv, fetchAllPages } from '../lib/downloadCsv';
 import ChatThread from './ChatThread';
@@ -53,12 +50,10 @@ function tmInitials(user) {
 // Yield Transfers rebuild: telemarketer submissions are real Leads
 // (source: 'telemarketer'), instantly visible here the moment they're
 // created — no accept/reject gate, matching the Inferno Connect
-// reference. The team-wide chat lives alongside the leads list; a
-// focused per-lead DISCUSS thread is kept too, opened in its own modal.
+// reference. The team-wide chat now lives on its own "Team Chat" tab
+// (split out per the user's request); a focused per-lead DISCUSS
+// thread is kept here, opened in its own modal.
 export default function YieldTransfersPanel() {
-  const { user } = useAuth();
-  const isMobile = useIsMobile();
-  const chatUnread = useTeamChatUnread();
   const [leads, setLeads] = useState([]);
   const [leadTotal, setLeadTotal] = useState(0);
   const [error, setError] = useState('');
@@ -200,7 +195,7 @@ export default function YieldTransfersPanel() {
 
   return (
     <div style={s.wrap}>
-      <SectionHeader right={view === 'live' && leads.length > 0 && <ExportButton onExport={exportAllLeads} />}>YIELD TRANSFERS</SectionHeader>
+      <SectionHeader right={view === 'live' && leads.length > 0 && <ExportButton onExport={exportAllLeads} />}>TRANSFERS</SectionHeader>
 
       <div style={s.viewTabRow}>
         <button type="button" style={s.viewTab(view === 'live')} onClick={() => setView('live')}>LIVE</button>
@@ -313,35 +308,29 @@ export default function YieldTransfersPanel() {
         </Card>
       )}
 
-      <div style={isMobile ? s.stacked : s.split}>
-        <div style={s.leadsColumn}>
-          {visibleLeads.length === 0 ? (
-            <EmptyState
-              title="No leads yet"
-              description="Telemarketer submissions land here the instant they're sent — nothing to accept or reject, just real leads to work."
-            />
-          ) : (
-            <>
-              <button type="button" style={s.selectAllLink} onClick={toggleSelectAllVisible}>
-                {visibleLeads.every((l) => selectedIds.includes(l.id)) ? 'Deselect all' : 'Select all visible'}
-              </button>
-              {visibleLeads.map((lead) => (
-                <LeadCard
-                  key={lead.id}
-                  lead={lead}
-                  onDisposition={load}
-                  onDiscuss={() => setDiscussLead(lead)}
-                  selected={selectedIds.includes(lead.id)}
-                  onToggleSelected={() => toggleSelected(lead.id)}
-                />
-              ))}
-            </>
-          )}
-        </div>
-
-        <div style={s.chatColumn}>
-          <ChatThread entityType="AGENCY" entityId={user.agencyId} variant="inline" title="TEAM CHAT" unread={chatUnread} />
-        </div>
+      <div style={s.leadsColumn}>
+        {visibleLeads.length === 0 ? (
+          <EmptyState
+            title="No leads yet"
+            description="Telemarketer submissions land here the instant they're sent — nothing to accept or reject, just real leads to work."
+          />
+        ) : (
+          <>
+            <button type="button" style={s.selectAllLink} onClick={toggleSelectAllVisible}>
+              {visibleLeads.every((l) => selectedIds.includes(l.id)) ? 'Deselect all' : 'Select all visible'}
+            </button>
+            {visibleLeads.map((lead) => (
+              <LeadCard
+                key={lead.id}
+                lead={lead}
+                onDisposition={load}
+                onDiscuss={() => setDiscussLead(lead)}
+                selected={selectedIds.includes(lead.id)}
+                onToggleSelected={() => toggleSelected(lead.id)}
+              />
+            ))}
+          </>
+        )}
       </div>
 
       {discussLead && (
@@ -485,10 +474,7 @@ const s = {
   bulkCount: { fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' },
   bulkError: { color: 'var(--danger)', fontSize: 12 },
   selectAllLink: { background: 'none', border: 'none', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', padding: '2px 0', textAlign: 'left', alignSelf: 'flex-start' },
-  split: { display: 'grid', gridTemplateColumns: '1fr 360px', gap: 20, alignItems: 'start' },
-  stacked: { display: 'flex', flexDirection: 'column', gap: 20 },
   leadsColumn: { display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 },
-  chatColumn: { position: 'sticky', top: 0, height: 560 },
   card: {},
   cardSelected: { outline: '2px solid var(--accent)', outlineOffset: -1 },
   cardTop: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, gap: 8 },
