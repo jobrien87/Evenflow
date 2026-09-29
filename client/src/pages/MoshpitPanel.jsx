@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { Card, Badge, Button, SectionHeader, EmptyState, LeadTypeIcon } from '../ui';
+import LeadDetailModal from './LeadDetailModal';
 
 // Polls the claimable pool the same way NotificationBell polls unread
 // counts — new Moshpit leads (and other producers claiming them) need to
@@ -23,6 +24,7 @@ export default function MoshpitPanel() {
   const [error, setError] = useState('');
   const [claimingId, setClaimingId] = useState(null);
   const [conflictMessage, setConflictMessage] = useState('');
+  const [openLeadId, setOpenLeadId] = useState(null);
   const [searchParams] = useSearchParams();
   const highlightId = searchParams.get('highlight');
   const handledHighlightRef = useRef(false);
@@ -62,6 +64,10 @@ export default function MoshpitPanel() {
     try {
       await api.claimLead(leadId);
       await load();
+      // The lead just left the Moshpit into this producer's own queue —
+      // jump straight to its full profile instead of leaving them looking
+      // at a pool the lead is no longer part of.
+      setOpenLeadId(leadId);
     } catch (err) {
       if (err.status === 409) {
         setConflictMessage('Too slow — another producer already claimed that one.');
@@ -141,6 +147,10 @@ export default function MoshpitPanel() {
           );
         })}
       </div>
+
+      {openLeadId && (
+        <LeadDetailModal leadId={openLeadId} onClose={() => setOpenLeadId(null)} onChanged={load} />
+      )}
     </div>
   );
 }
