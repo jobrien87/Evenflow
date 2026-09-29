@@ -19,6 +19,7 @@ export default function TelemarketersPanel() {
   const [showInvite, setShowInvite] = useState(false);
   const [form, setForm] = useState({ email: '', firstName: '', lastName: '' });
   const [assignAgency, setAssignAgency] = useState({});
+  const [assignRowStatus, setAssignRowStatus] = useState({});
   const [status, setStatus] = useState('');
   const [inviteLink, setInviteLink] = useState('');
 
@@ -87,12 +88,17 @@ export default function TelemarketersPanel() {
 
   async function assign(tmId) {
     const agencyId = assignAgency[tmId];
-    if (!agencyId) return;
+    if (!agencyId) {
+      setAssignRowStatus({ ...assignRowStatus, [tmId]: 'Pick an agency first.' });
+      return;
+    }
+    setAssignRowStatus({ ...assignRowStatus, [tmId]: '' });
     try {
       await api.assignTelemarketer({ telemarketerId: tmId, agencyId });
+      setAssignAgency({ ...assignAgency, [tmId]: '' });
       await load();
     } catch (err) {
-      setStatus(err.data?.message || 'Assignment failed.');
+      setAssignRowStatus({ ...assignRowStatus, [tmId]: err.data?.message || 'Assignment failed.' });
     }
   }
 
@@ -217,6 +223,7 @@ export default function TelemarketersPanel() {
               </select>
               <Button variant="primary" size="sm" onClick={() => assign(tm.id)}>ASSIGN OFFICE</Button>
             </div>
+            {assignRowStatus[tm.id] && <div style={s.assignRowStatus}>{assignRowStatus[tm.id]}</div>}
           </Card>
         ))
       )}
@@ -243,6 +250,7 @@ const s = {
   assignedList: { marginBottom: 10 },
   assignedRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', color: 'var(--text-secondary)', fontSize: 13 },
   assignRow: { display: 'flex', gap: 8 },
+  assignRowStatus: { color: 'var(--danger)', fontSize: 12, marginTop: 6 },
   miniInput: { flex: 1, padding: '8px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 },
   empty: { color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 13 },
 };
