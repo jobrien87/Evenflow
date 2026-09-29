@@ -1,40 +1,47 @@
-// Email service adapter — Brevo transactional email API (plain fetch, no
-// SDK, same pattern this codebase already uses for the Anthropic calls).
-// Uses Brevo's HTTPS API rather than its SMTP relay: this dev sandbox's
-// outbound network only proxies HTTPS (see /root/.ccr/README.md), and SMTP
-// ports are commonly throttled/blocked on other hosts too — HTTPS is the
-// reliable path everywhere. If BREVO_API_KEY is not configured, we do NOT
-// pretend the email sent. We record it as NOT_CONFIGURED so the UI can show
-// an honest state instead of a false success.
+// Email service adapter — Gmail SMTP via nodemailer. GMAIL_USER is a real
+// Gmail/Google Workspace address; GMAIL_APP_PASSWORD is a 16-character App
+// Password generated for it (Google requires 2-Step Verification to be on
+// before it will issue one — a normal account password will not
+// authenticate over SMTP). If these are not configured, we do NOT pretend
+// the email sent. We record it as NOT_CONFIGURED so the UI can show an
+// honest state instead of a false success.
+
+const nodemailer = require('nodemailer');
 
 const APP_URL = process.env.APP_URL || 'http://localhost:5173';
-const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
-const EMAIL_FROM = process.env.EMAIL_FROM || 'noreply@yield-marketing.com';
 const EMAIL_FROM_NAME = process.env.EMAIL_FROM_NAME || 'EvenFlow';
 
+let cachedTransporter = null;
+function getTransporter() {
+  if (!cachedTransporter) {
+    cachedTransporter = nodemailer.createTransport({
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true,
+      auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
+      // Nodemailer's defaults (2min connect / 10min socket) would leave an
+      // API request hanging far too long if SMTP egress is ever blocked or
+      // Gmail is slow to respond — fail fast into the honest FAILED status
+      // instead.
+      connectionTimeout: 8000,
+      greetingTimeout: 8000,
+      socketTimeout: 8000,
+    });
+  }
+  return cachedTransporter;
+}
+
 function isConfigured() {
-  return !!process.env.BREVO_API_KEY;
+  return !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD);
 }
 
 async function sendEmail({ to, subject, html }) {
-  const resp = await fetch(BREVO_API_URL, {
-    method: 'POST',
-    headers: {
-      'api-key': process.env.BREVO_API_KEY,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({
-      sender: { email: EMAIL_FROM, name: EMAIL_FROM_NAME },
-      to: [{ email: to }],
-      subject,
-      htmlContent: html,
-    }),
+  await getTransporter().sendMail({
+    from: `"${EMAIL_FROM_NAME}" <${process.env.GMAIL_USER}>`,
+    to,
+    subject,
+    html,
   });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '');
-    throw new Error(`Brevo ${resp.status}: ${text}`);
-  }
 }
 
 async function sendInvitationEmail({ to, role, agencyName, token }) {
@@ -43,7 +50,7 @@ async function sendInvitationEmail({ to, role, agencyName, token }) {
   if (!isConfigured()) {
     console.warn(
       `[email:NOT_CONFIGURED] Would send invitation to ${to} (role=${role}, agency=${agencyName}). ` +
-        `Set BREVO_API_KEY to enable real delivery. Accept URL: ${acceptUrl}`
+        `Set GMAIL_USER/GMAIL_APP_PASSWORD to enable real delivery. Accept URL: ${acceptUrl}`
     );
     return { status: 'NOT_CONFIGURED', acceptUrl };
   }
@@ -67,7 +74,7 @@ async function sendPasswordResetEmail({ to, token }) {
   const resetUrl = `${APP_URL}/reset-password?token=${token}`;
 
   if (!isConfigured()) {
-    console.warn(`[email:NOT_CONFIGURED] Would send password reset to ${to}. Set BREVO_API_KEY to enable real delivery. Reset URL: ${resetUrl}`);
+    console.warn(`[email:NOT_CONFIGURED] Would send password reset to ${to}. Set GMAIL_USER/GMAIL_APP_PASSWORD to enable real delivery. Reset URL: ${resetUrl}`);
     return { status: 'NOT_CONFIGURED', resetUrl };
   }
 
