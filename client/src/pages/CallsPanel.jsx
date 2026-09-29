@@ -2,12 +2,19 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { StatTile, BarRow, SectionHeader } from '../ui';
+import { Card, Button, StatTile, BarRow, SectionHeader } from '../ui';
+import CoachingBreakdownResult from './CoachingBreakdownResult';
 
 export const STATUS_COLOR = {
   UPLOADED: 'var(--text-secondary)', QUEUED: 'var(--text-secondary)', TRANSCRIBING: 'var(--warning)', TRANSCRIBED: 'var(--warning)',
   ANALYZING: 'var(--warning)', COMPLETE: 'var(--accent)', FAILED: 'var(--danger)',
 };
+
+const COACHING_PERIODS = [
+  { key: 'month', label: 'This month', from: () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); } },
+  { key: 'quarter', label: 'This quarter', from: () => { const d = new Date(); return new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3, 1); } },
+  { key: '30d', label: 'Last 30 days', from: () => new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+];
 
 export default function CallsPanel() {
   const { user } = useAuth();
@@ -21,11 +28,39 @@ export default function CallsPanel() {
   const highlightId = searchParams.get('highlight');
   const handledHighlightRef = useRef(false);
 
+  const [coachPeriod, setCoachPeriod] = useState('month');
+  const [coachResult, setCoachResult] = useState(null);
+  const [coachBusy, setCoachBusy] = useState(false);
+  const [coachError, setCoachError] = useState('');
+
+  async function generateMyCoaching() {
+    setCoachBusy(true);
+    setCoachError('');
+    try {
+      const period = COACHING_PERIODS.find((p) => p.key === coachPeriod);
+      const from = period.from().toISOString();
+      const to = new Date().toISOString();
+      const data = await api.coachingBreakdown(`?from=${from}&to=${to}`);
+      setCoachResult(data);
+    } catch (err) {
+      setCoachError(err.data?.message || 'Could not generate your coaching breakdown.');
+    } finally {
+      setCoachBusy(false);
+    }
+  }
+
   useEffect(() => {
     load();
     const interval = setInterval(load, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  // Producers get their own self-service coaching breakdown loaded
+  // automatically (Agency Owner/Manager get the equivalent Coaching Box
+  // on Call Scoring instead, scoped to whichever producer they pick).
+  useEffect(() => {
+    if (user?.role === 'PRODUCER') generateMyCoaching();
+  }, [user?.role, coachPeriod]);
 
   // Destination side of notification deep-linking — a call notification
   // (e.g. analysis complete) opens straight into that call's detail view.
@@ -143,6 +178,24 @@ export default function CallsPanel() {
           </div>
         )}
       </section>
+
+      {user.role === 'PRODUCER' && (
+        <section style={s.section}>
+          <div style={s.headerRow}>
+            <SectionHeader>My Coaching Breakdown</SectionHeader>
+            <select style={s.periodSelect} value={coachPeriod} onChange={(e) => setCoachPeriod(e.target.value)}>
+              {COACHING_PERIODS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+            </select>
+          </div>
+          <Card>
+            {coachError && <div style={s.error}>{coachError}</div>}
+            {coachBusy && !coachResult && <div style={s.thinking}>Loading your breakdown…</div>}
+            {coachResult && (
+              <CoachingBreakdownResult result={coachResult} emptyDescription="You have no analyzed calls in this period yet." />
+            )}
+          </Card>
+        </section>
+      )}
 
       <section style={s.section}>
         <div style={s.headerRow}>
@@ -389,6 +442,8 @@ export function ManagerReviewForm({ analysis, onSubmit }) {
 }
 
 const s = {
+  periodSelect: { padding: '8px 10px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 11 },
+  thinking: { color: 'var(--text-muted)', fontSize: 13, fontStyle: 'italic' },
   notEntitledBox: { background: 'var(--warning-soft)', border: '1px solid rgba(255, 184, 77, 0.4)', color: 'var(--warning)', padding: 20, borderRadius: 8, fontSize: 13, lineHeight: 1.6 },
   rowHighlighted: { outline: '2px solid var(--accent)', boxShadow: 'var(--shadow-glow-accent)', borderRadius: 'var(--radius-md)' },
   reviewForm: { background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 14, marginBottom: 18 },

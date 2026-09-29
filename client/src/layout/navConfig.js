@@ -12,7 +12,7 @@ export const NAV_BY_ROLE = {
     { label: 'Drills', to: '/producer/drills', icon: 'sparkle' },
     { label: 'My Leads', to: '/producer/my-leads', icon: 'leads', primary: true },
     { label: 'Team Chat', to: '/producer/team-chat', icon: 'chat', primary: true },
-    { label: 'Coaching', to: '/producer/coaching', icon: 'phone', primary: true },
+    { label: 'Call Coaching', to: '/producer/coaching', icon: 'phone', primary: true },
     { label: 'Training', to: '/producer/training', icon: 'book', primary: true },
     { label: 'Moshpit', to: '/producer/moshpit', icon: 'flame', primary: true },
     { label: 'Winbacks & Cross-Sells', to: '/producer/opportunities', icon: 'target' },

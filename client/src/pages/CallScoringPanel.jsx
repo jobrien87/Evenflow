@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { Card, Badge, Button, StatTile, SectionHeader, EmptyState, BarRow, FileDropzone } from '../ui';
+import { Card, Badge, Button, SectionHeader, EmptyState, BarRow, FileDropzone } from '../ui';
 import { STATUS_COLOR, Section, List, ObjectionsList, ScoreGrid, ManagerReviewForm, TranscriptEntry } from './CallsPanel';
+import CoachingBreakdownResult from './CoachingBreakdownResult';
 
 const PERIODS = [
   { key: 'month', label: 'This month', from: () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); } },
@@ -250,44 +251,10 @@ export default function CallScoringPanel() {
 
           {coachResult && (
             <div style={s.coachResult}>
-              {coachResult.analyzedCallCount === 0 ? (
-                <EmptyState
-                  title="No scored calls in this period"
-                  description={`${producerName(coachProducerId)} has no analyzed calls in the selected period yet.`}
-                />
-              ) : (
-                <>
-                  <div style={s.statsRow}>
-                    <StatTile label="Calls Analyzed" value={coachResult.analyzedCallCount} sub={`of ${coachResult.callCount} uploaded`} />
-                    <StatTile label="Avg Overall Score" value={coachResult.averageOverallScore} />
-                    <StatTile label="Avg Drill Score" value={coachResult.averageDrillScore} />
-                  </div>
-
-                  <div style={{ marginTop: 20 }}>
-                    <div style={s.subLabel}>DRILL CATEGORY BREAKDOWN</div>
-                    {coachResult.categoryBreakdown.map((c) => (
-                      <BarRow key={c.category} label={c.category} value={c.averageScore} valueLabel={`${c.averageScore} (${c.sampleSize} call${c.sampleSize === 1 ? '' : 's'})`} />
-                    ))}
-                  </div>
-
-                  <div style={{ marginTop: 20 }}>
-                    <div style={s.subLabel}>COACHING OPPORTUNITIES</div>
-                    {coachResult.coachingOpportunities.length === 0 ? (
-                      <div style={s.emptySmall}>No categories below the coaching threshold — solid across the board.</div>
-                    ) : (
-                      coachResult.coachingOpportunities.map((o) => (
-                        <div key={o.category} style={s.opportunityRow}>
-                          <div>
-                            <div style={s.opportunityTitle}>{o.category}</div>
-                            <div style={s.opportunitySub}>Averaging {o.averageScore} across {o.sampleSize} call{o.sampleSize === 1 ? '' : 's'}</div>
-                          </div>
-                          {o.courseTitle && <Badge tone="warning">Practice: {o.courseTitle}</Badge>}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </>
-              )}
+              <CoachingBreakdownResult
+                result={coachResult}
+                emptyDescription={`${producerName(coachProducerId)} has no analyzed calls in the selected period yet.`}
+              />
             </div>
           )}
         </Card>
