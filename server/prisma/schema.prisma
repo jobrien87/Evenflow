@@ -40,6 +40,19 @@ enum UserStatus {
   DEACTIVATED
 }
 
+// A Producer/Telemarketer's live "what are they doing right now" bubble.
+// GRINDING/BREAK/LUNCH/AWAY are auto-set by the time clock actions
+// (clock-in/break/lunch/clock-out); MEETING/COACHING are only ever set by
+// the user themselves, manually, since no clock action implies them.
+enum PresenceStatus {
+  AWAY
+  BREAK
+  LUNCH
+  MEETING
+  GRINDING
+  COACHING
+}
+
 enum LeadStatus {
   NEW
   ASSIGNED
@@ -243,6 +256,8 @@ model User {
   phone         String?
   role          Role
   status        UserStatus   @default(INVITED)
+  // Live status bubble shown next to the time clock — see PresenceStatus.
+  presenceStatus PresenceStatus @default(AWAY)
   agencyId      String?
   agency        Agency?      @relation(fields: [agencyId], references: [id])
   invitedById   String?
@@ -592,6 +607,8 @@ model TimeClockEntry {
   clockOutAt   DateTime?
   lunchStartAt DateTime?
   lunchEndAt   DateTime?
+  breakStartAt DateTime?
+  breakEndAt   DateTime?
   createdAt    DateTime  @default(now())
 
   @@index([userId, createdAt])

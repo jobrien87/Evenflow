@@ -54,6 +54,9 @@ export const api = {
   clockOut: () => request('/timeclock/clock-out', { method: 'POST' }),
   lunchStart: () => request('/timeclock/lunch-start', { method: 'POST' }),
   lunchEnd: () => request('/timeclock/lunch-end', { method: 'POST' }),
+  breakStart: () => request('/timeclock/break-start', { method: 'POST' }),
+  breakEnd: () => request('/timeclock/break-end', { method: 'POST' }),
+  setPresence: (status) => request('/timeclock/presence', { method: 'POST', body: { status } }),
   teamClockStatus: () => request('/timeclock/status'),
   timeClockReport: (params = '') => request(`/timeclock/report${params}`),
 
