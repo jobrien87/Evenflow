@@ -13,6 +13,15 @@ const LEAD_STATUSES = [
 const TASK_TYPES = ['FOLLOW_UP', 'CALLBACK', 'APPOINTMENT'];
 const ACTIVITY_TYPES = ['CALL', 'EMAIL', 'TEXT'];
 
+const PRODUCT_ABBR = { AUTO: 'AUTO', HOME: 'HOME', RENTERS: 'RENT', LIFE: 'LIFE', HEALTH: 'HLTH', COMMERCIAL: 'COMM' };
+const PRODUCT_STATUS_OPTIONS = [
+  { value: null, label: 'Not Quoted' },
+  { value: 'QUOTED', label: 'Quoted' },
+  { value: 'SOLD', label: 'Sold' },
+];
+
+const ACTIVITY_ICON = { CALL: 'phone', EMAIL: 'mail', TEXT: 'chat' };
+
 function statusTone(status) {
   if (['SOLD', 'QUOTED_HOT'].includes(status)) return 'accent';
   if (['LOST', 'NOT_INTERESTED', 'BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT', 'INELIGIBLE'].includes(status)) return 'danger';
@@ -27,6 +36,34 @@ function InfoRow({ icon, label, children }) {
       <span style={s.infoIconWrap}><Icon name={icon} size={13} /></span>
       <span style={s.infoLabel}>{label}</span>
       <span style={s.infoValue}>{children}</span>
+    </div>
+  );
+}
+
+// A labeled control — small uppercase caption above an input/select, so a
+// form bar reads at a glance instead of a row of unlabeled boxes.
+function Field({ label, width, children }) {
+  const grow = width === '1fr';
+  return (
+    <div style={{ ...s.field, ...(grow ? { flex: 1, minWidth: 160 } : { width }) }}>
+      <div style={s.fieldLabel}>{label}</div>
+      {children}
+    </div>
+  );
+}
+
+// A two-line list row — a small tone-colored icon badge, a bold title line,
+// and a muted meta line below — used by Tasks/Activity/History instead of
+// cramming a badge + text + meta + button onto one line.
+function ListRow({ icon, tone = 'neutral', title, meta, action }) {
+  return (
+    <div style={s.listRow2}>
+      <div style={s.listRowIcon(tone)}><Icon name={icon} size={13} /></div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={s.listRowTitle}>{title}</div>
+        <div style={s.listMeta}>{meta}</div>
+      </div>
+      {action}
     </div>
   );
 }
@@ -162,18 +199,11 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
   );
 }
 
-const PRODUCT_STATUS_OPTIONS = [
-  { value: null, label: 'Not Quoted' },
-  { value: 'QUOTED', label: 'Quoted' },
-  { value: 'SOLD', label: 'Sold' },
-];
-
-// One row per product, always editable — no click-to-reveal. Every row
-// shows a 3-way status toggle plus its own premium field, so setting "what
-// was quoted at what premium" or "what sold at what premium" is never
-// hidden behind an extra step. Local pending edits vs. the lead's real
-// saved productQuotes row is what drives the SAVE button's dirty state.
-function ProductRow({ leadId, product, quote, onDone }) {
+// The shared, single expanded editor — whichever product chip is active
+// renders here. Keeping one editor instead of one per product is what keeps
+// the section condensed: the chip strip alone shows everything at a glance,
+// and only the product actually being worked stretches out.
+function ProductEditor({ leadId, product, quote, onDone }) {
   const meta = PRODUCT_META[product];
   const savedStatus = quote?.status || null;
   const savedPremium = quote?.premiumCents != null ? (quote.premiumCents / 100).toFixed(2) : '';
@@ -185,10 +215,10 @@ function ProductRow({ leadId, product, quote, onDone }) {
   useEffect(() => {
     setStatus(savedStatus);
     setPremium(savedPremium);
-  }, [savedStatus, savedPremium]);
+    setErr('');
+  }, [product, savedStatus, savedPremium]);
 
   const dirty = status !== savedStatus || premium !== savedPremium;
-  const tone = status === 'SOLD' ? 'accent' : status === 'QUOTED' ? 'warning' : 'neutral';
 
   async function save() {
     setBusy(true);
@@ -209,9 +239,8 @@ function ProductRow({ leadId, product, quote, onDone }) {
   }
 
   return (
-    <div style={s.productRow(tone)}>
-      <div style={s.productRowIcon(tone)}><Icon name={meta.icon} size={17} /></div>
-      <div style={s.productRowLabel}>{meta.label}</div>
+    <div style={s.productEditor}>
+      <div style={s.productEditorTitle}><Icon name={meta.icon} size={15} style={{ marginRight: 6 }} />{meta.label}</div>
       <div style={s.segmented}>
         {PRODUCT_STATUS_OPTIONS.map((opt) => {
           const active = status === opt.value;
@@ -241,7 +270,7 @@ function ProductRow({ leadId, product, quote, onDone }) {
         />
         <span style={s.premiumSuffix}>/mo</span>
       </div>
-      <Button variant={dirty ? 'primary' : 'secondary'} size="sm" disabled={!dirty || busy} onClick={save} style={s.productSaveButton}>
+      <Button variant={dirty ? 'primary' : 'secondary'} size="sm" disabled={!dirty || busy} onClick={save}>
         {busy ? '…' : 'SAVE'}
       </Button>
       {err && <div style={s.formError}>{err}</div>}
@@ -250,11 +279,14 @@ function ProductRow({ leadId, product, quote, onDone }) {
 }
 
 // Per-product quote/sale tracker — independent of the lead's overall
-// pipeline status. Setting a product's state (Not quoted / Quoted / Sold)
-// and its real premium is what lets the app tell what still needs
-// cross-selling: any product with no row here at all.
+// pipeline status. A compact colored chip per product shows the state
+// (gray = not quoted, amber = quoted, glowing green = sold) at a glance;
+// clicking a chip opens the one shared editor below it to set the status
+// and premium. Any chip still gray is what still needs cross-selling.
 function ProductsBlock({ lead, onDone }) {
   const quotesByProduct = Object.fromEntries((lead.productQuotes || []).map((q) => [q.product, q]));
+  const [expanded, setExpanded] = useState(null);
+
   const soldRows = (lead.productQuotes || []).filter((q) => q.status === 'SOLD');
   const quotedRows = (lead.productQuotes || []).filter((q) => q.status === 'QUOTED');
   const totalSoldCents = soldRows.reduce((sum, q) => sum + (q.premiumCents || 0), 0);
@@ -268,18 +300,31 @@ function ProductsBlock({ lead, onDone }) {
         <StatTile label="OPEN QUOTE POTENTIAL / MO" value={money(totalQuotedCents) || '$0.00'} />
         <StatTile label="PRODUCTS SOLD" value={`${soldRows.length}/${PRODUCTS.length}`} />
       </div>
-      <div style={s.productList}>
-        {PRODUCTS.map((p) => (
-          <ProductRow key={p} leadId={lead.id} product={p} quote={quotesByProduct[p]} onDone={onDone} />
-        ))}
+
+      <div style={s.chipRow}>
+        {PRODUCTS.map((p) => {
+          const q = quotesByProduct[p];
+          const tone = q?.status === 'SOLD' ? 'accent' : q?.status === 'QUOTED' ? 'warning' : 'neutral';
+          const active = expanded === p;
+          return (
+            <button key={p} type="button" style={s.chip(tone, active)} onClick={() => setExpanded(active ? null : p)}>
+              <Icon name={PRODUCT_META[p].icon} size={13} />
+              {PRODUCT_ABBR[p]}
+              {q?.premiumCents != null && <span style={s.chipPremium}>{money(q.premiumCents)}</span>}
+            </button>
+          );
+        })}
       </div>
-      <div style={s.productsSummary}>
-        {untouched.length > 0 ? (
-          <span style={s.crossSellHint}>Needs cross-sell: {untouched.map((p) => PRODUCT_META[p].label).join(', ')}</span>
-        ) : (
-          <span style={s.crossSellHintDone}>Every product has been quoted or sold.</span>
-        )}
-      </div>
+
+      {expanded && (
+        <ProductEditor leadId={lead.id} product={expanded} quote={quotesByProduct[expanded]} onDone={onDone} />
+      )}
+
+      {untouched.length > 0 ? (
+        <div style={s.crossSellHint}>Needs cross-sell: {untouched.map((p) => PRODUCT_ABBR[p]).join(', ')}</div>
+      ) : (
+        <div style={s.crossSellHintDone}>Every product has been quoted or sold.</div>
+      )}
     </div>
   );
 }
@@ -293,23 +338,26 @@ function describeEvent(e) {
   const premium = money(e.metadata?.premiumCents);
   switch (e.type) {
     case 'lead.created':
-      return 'Lead created';
+      return { title: 'Lead created', icon: 'sparkle' };
     case 'lead.created.possible_duplicate':
-      return 'Lead created (flagged as a possible duplicate)';
+      return { title: 'Lead created (flagged as a possible duplicate)', icon: 'sparkle', tone: 'danger' };
     case 'lead.assigned':
-      return 'Assigned to a producer';
+      return { title: 'Assigned to a producer', icon: 'support' };
     case 'lead.new':
-      return 'New lead received';
+      return { title: 'New lead received', icon: 'sparkle' };
     case 'lead.claimed':
-      return 'Claimed from the Moshpit';
+      return { title: 'Claimed from the Moshpit', icon: 'flame' };
     case 'lead.product_quoted':
-      return `${product} marked as quoted${premium ? ` (${premium}/mo)` : ''}`;
+      return { title: `${product} marked as quoted${premium ? ` (${premium}/mo)` : ''}`, icon: 'tag', tone: 'warning' };
     case 'lead.product_sold':
-      return `${product} marked as sold${premium ? ` (${premium}/mo)` : ''}`;
+      return { title: `${product} marked as sold${premium ? ` (${premium}/mo)` : ''}`, icon: 'tag', tone: 'accent' };
     case 'lead.disposition':
-      return `Disposition: ${e.fromStatus?.replace(/_/g, ' ') || '—'} → ${e.toStatus?.replace(/_/g, ' ') || '—'}${note ? ` — "${note}"` : ''}`;
+      return {
+        title: `Disposition: ${e.fromStatus?.replace(/_/g, ' ') || '—'} → ${e.toStatus?.replace(/_/g, ' ') || '—'}${note ? ` — "${note}"` : ''}`,
+        icon: 'flag',
+      };
     default:
-      return e.type.replace(/_/g, ' ');
+      return { title: e.type.replace(/_/g, ' '), icon: 'clock' };
   }
 }
 
@@ -318,12 +366,10 @@ function HistoryBlock({ lead }) {
   if (events.length === 0) return <div style={s.empty}>No history yet.</div>;
   return (
     <div style={s.list}>
-      {events.map((e) => (
-        <div key={e.id} style={s.listRow}>
-          <span style={s.listMain}>{describeEvent(e)}</span>
-          <span style={s.listMeta}>{fmt(e.createdAt)}</span>
-        </div>
-      ))}
+      {events.map((e) => {
+        const d = describeEvent(e);
+        return <ListRow key={e.id} icon={d.icon} tone={d.tone} title={d.title} meta={fmt(e.createdAt)} />;
+      })}
     </div>
   );
 }
@@ -449,12 +495,18 @@ function DispositionBlock({ lead, onDone }) {
   }
 
   return (
-    <div style={s.formRow}>
-      <select style={s.select} value={status} onChange={(e) => setStatus(e.target.value)}>
-        {LEAD_STATUSES.map((st) => <option key={st} value={st}>{st.replace(/_/g, ' ')}</option>)}
-      </select>
-      <input style={{ ...s.input, flex: 1 }} placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
-      <Button variant="primary" size="sm" disabled={busy || (status === lead.status && !note)} onClick={submit}>SAVE</Button>
+    <div>
+      <div style={s.formBar}>
+        <Field label="Status">
+          <select style={s.select} value={status} onChange={(e) => setStatus(e.target.value)}>
+            {LEAD_STATUSES.map((st) => <option key={st} value={st}>{st.replace(/_/g, ' ')}</option>)}
+          </select>
+        </Field>
+        <Field label="Note (optional)" width="1fr">
+          <input style={{ ...s.input, width: '100%' }} placeholder="Add context for this change…" value={note} onChange={(e) => setNote(e.target.value)} />
+        </Field>
+        <Button variant="primary" size="sm" disabled={busy || (status === lead.status && !note)} onClick={submit} style={s.formBarButton}>SAVE</Button>
+      </div>
       {err && <div style={s.formError}>{err}</div>}
     </div>
   );
@@ -496,13 +548,19 @@ function TasksBlock({ lead, user, onDone }) {
 
   return (
     <div>
-      <div style={s.formRow}>
-        <select style={s.select} value={type} onChange={(e) => setType(e.target.value)}>
-          {TASK_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
-        </select>
-        <input style={s.input} placeholder="What needs to happen" value={title} onChange={(e) => setTitle(e.target.value)} />
-        <input style={s.miniInput} type="datetime-local" value={dueAt} onChange={(e) => setDueAt(e.target.value)} />
-        <Button variant="secondary" size="sm" disabled={busy || !title.trim()} onClick={create}>ADD</Button>
+      <div style={s.formBar}>
+        <Field label="Type">
+          <select style={s.select} value={type} onChange={(e) => setType(e.target.value)}>
+            {TASK_TYPES.map((t) => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+          </select>
+        </Field>
+        <Field label="What needs to happen" width="1fr">
+          <input style={{ ...s.input, width: '100%' }} placeholder="e.g. Call back with a home quote" value={title} onChange={(e) => setTitle(e.target.value)} />
+        </Field>
+        <Field label="Due">
+          <input style={s.miniInput} type="datetime-local" value={dueAt} onChange={(e) => setDueAt(e.target.value)} />
+        </Field>
+        <Button variant="secondary" size="sm" disabled={busy || !title.trim()} onClick={create} style={s.formBarButton}>ADD</Button>
       </div>
       {err && <div style={s.formError}>{err}</div>}
 
@@ -511,12 +569,14 @@ function TasksBlock({ lead, user, onDone }) {
       ) : (
         <div style={s.list}>
           {lead.tasks.map((t) => (
-            <div key={t.id} style={s.listRow}>
-              <Badge tone={t.status === 'COMPLETED' ? 'accent' : t.status === 'CANCELLED' ? 'danger' : 'neutral'}>{t.status}</Badge>
-              <span style={s.listMain}>{t.title}</span>
-              <span style={s.listMeta}>{t.type.replace(/_/g, ' ')}{t.dueAt ? ` · due ${fmt(t.dueAt)}` : ''}</span>
-              {t.status === 'OPEN' && <Button variant="ghost" size="sm" onClick={() => complete(t.id)}>MARK DONE</Button>}
-            </div>
+            <ListRow
+              key={t.id}
+              icon="checklist"
+              tone={t.status === 'COMPLETED' ? 'accent' : t.status === 'CANCELLED' ? 'danger' : 'warning'}
+              title={t.title}
+              meta={`${t.type.replace(/_/g, ' ')}${t.dueAt ? ` · due ${fmt(t.dueAt)}` : ''} · ${t.status}`}
+              action={t.status === 'OPEN' && <Button variant="ghost" size="sm" onClick={() => complete(t.id)}>MARK DONE</Button>}
+            />
           ))}
         </div>
       )}
@@ -547,16 +607,22 @@ function ActivityBlock({ lead, onDone }) {
 
   return (
     <div>
-      <div style={s.formRow}>
-        <select style={s.select} value={type} onChange={(e) => setType(e.target.value)}>
-          {ACTIVITY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-        </select>
-        <select style={s.select} value={direction} onChange={(e) => setDirection(e.target.value)}>
-          <option value="OUTBOUND">Outbound</option>
-          <option value="INBOUND">Inbound</option>
-        </select>
-        <input style={s.input} placeholder="Outcome (optional — e.g. 'no answer', 'left voicemail')" value={outcome} onChange={(e) => setOutcome(e.target.value)} />
-        <Button variant="secondary" size="sm" disabled={busy} onClick={log}>LOG</Button>
+      <div style={s.formBar}>
+        <Field label="Type">
+          <select style={s.select} value={type} onChange={(e) => setType(e.target.value)}>
+            {ACTIVITY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </Field>
+        <Field label="Direction">
+          <select style={s.select} value={direction} onChange={(e) => setDirection(e.target.value)}>
+            <option value="OUTBOUND">Outbound</option>
+            <option value="INBOUND">Inbound</option>
+          </select>
+        </Field>
+        <Field label="Outcome (optional)" width="1fr">
+          <input style={{ ...s.input, width: '100%' }} placeholder="e.g. 'no answer', 'left voicemail'" value={outcome} onChange={(e) => setOutcome(e.target.value)} />
+        </Field>
+        <Button variant="secondary" size="sm" disabled={busy} onClick={log} style={s.formBarButton}>LOG</Button>
       </div>
       {err && <div style={s.formError}>{err}</div>}
 
@@ -565,11 +631,12 @@ function ActivityBlock({ lead, onDone }) {
       ) : (
         <div style={s.list}>
           {lead.activities.map((a) => (
-            <div key={a.id} style={s.listRow}>
-              <Badge tone="neutral">{a.type}</Badge>
-              <span style={s.listMain}>{a.outcome || `${a.direction === 'INBOUND' ? 'Inbound' : 'Outbound'} ${a.type.toLowerCase()}`}</span>
-              <span style={s.listMeta}>{a.createdBy?.firstName} {a.createdBy?.lastName} · {fmt(a.occurredAt)}</span>
-            </div>
+            <ListRow
+              key={a.id}
+              icon={ACTIVITY_ICON[a.type] || 'phone'}
+              title={a.outcome || `${a.direction === 'INBOUND' ? 'Inbound' : 'Outbound'} ${a.type.toLowerCase()}`}
+              meta={`${a.createdBy?.firstName || ''} ${a.createdBy?.lastName || ''} · ${fmt(a.occurredAt)}`}
+            />
           ))}
         </div>
       )}
@@ -599,9 +666,11 @@ function NotesBlock({ lead, onDone }) {
 
   return (
     <div>
-      <div style={s.formRow}>
-        <input style={{ ...s.input, flex: 1 }} placeholder="Add a note…" value={content} onChange={(e) => setContent(e.target.value)} />
-        <Button variant="secondary" size="sm" disabled={busy || !content.trim()} onClick={add}>ADD NOTE</Button>
+      <div style={s.formBar}>
+        <Field label="Add a note" width="1fr">
+          <input style={{ ...s.input, width: '100%' }} placeholder="Type a note…" value={content} onChange={(e) => setContent(e.target.value)} />
+        </Field>
+        <Button variant="secondary" size="sm" disabled={busy || !content.trim()} onClick={add} style={s.formBarButton}>ADD NOTE</Button>
       </div>
       {err && <div style={s.formError}>{err}</div>}
 
@@ -610,10 +679,12 @@ function NotesBlock({ lead, onDone }) {
       ) : (
         <div style={s.list}>
           {lead.notes.map((n) => (
-            <div key={n.id} style={s.noteRow}>
-              <div style={s.listMeta}>{n.author?.firstName} {n.author?.lastName} · {fmt(n.createdAt)}</div>
-              <div style={s.noteContent}>{n.content}</div>
-            </div>
+            <ListRow
+              key={n.id}
+              icon="pencil"
+              title={n.content}
+              meta={`${n.author?.firstName || ''} ${n.author?.lastName || ''} · ${fmt(n.createdAt)}`}
+            />
           ))}
         </div>
       )}
@@ -658,37 +729,44 @@ const s = {
   quickActionsRow: { display: 'flex', gap: 8, flexWrap: 'wrap' },
   quickActionsStatus: { color: 'var(--accent)', fontSize: 11, marginTop: 8 },
   formRow: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 },
+  formBar: { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 10 },
+  formBarButton: { flexShrink: 0 },
+  field: { display: 'flex', flexDirection: 'column', gap: 4, flex: 'unset' },
+  fieldLabel: { fontSize: 10, letterSpacing: 0.5, textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 700 },
   select: { padding: '8px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 },
   input: { padding: '8px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, minWidth: 140 },
   miniInput: { padding: '8px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, width: 110 },
   formError: { color: 'var(--danger)', fontSize: 11, width: '100%' },
   empty: { color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 12 },
   list: { display: 'flex', flexDirection: 'column', gap: 6 },
-  listRow: { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 6, fontSize: 12 },
-  listMain: { flex: 1, color: 'var(--text-primary)' },
-  listMeta: { color: 'var(--text-muted)', fontSize: 11 },
-  noteRow: { padding: '8px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 6 },
-  noteContent: { color: 'var(--text-primary)', fontSize: 12, marginTop: 4 },
+  listRow2: { display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 6 },
+  listRowIcon: (tone) => ({
+    width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
+    display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-sunken)',
+    color: tone === 'accent' ? 'var(--accent)' : tone === 'warning' ? 'var(--warning)' : tone === 'danger' ? 'var(--danger)' : 'var(--text-muted)',
+  }),
+  listRowTitle: { fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' },
+  listMeta: { color: 'var(--text-muted)', fontSize: 11, marginTop: 2 },
   statRow: {
     display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 14, paddingBottom: 14,
     borderBottom: '1px solid var(--border-hairline)',
   },
-  productList: { display: 'flex', flexDirection: 'column', gap: 8 },
-  productRow: (tone) => ({
-    display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '10px 12px',
-    borderRadius: 'var(--radius-sm)', position: 'relative',
-    border: `1px solid ${tone === 'accent' ? 'var(--border-accent)' : tone === 'warning' ? 'rgba(255, 184, 77, 0.4)' : 'var(--border-hairline)'}`,
+  chipRow: { display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 },
+  chip: (tone, active) => ({
+    display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 999, cursor: 'pointer',
+    border: `1.5px solid ${active ? 'var(--accent)' : tone === 'accent' ? 'var(--border-accent)' : tone === 'warning' ? 'rgba(255, 184, 77, 0.5)' : 'var(--border-strong)'}`,
     background: tone === 'accent' ? 'var(--accent-gradient-soft)' : tone === 'warning' ? 'var(--warning-soft)' : 'var(--bg-elevated)',
+    color: tone === 'accent' ? 'var(--accent)' : tone === 'warning' ? 'var(--warning)' : 'var(--text-secondary)',
     boxShadow: tone === 'accent' ? 'var(--shadow-glow-accent)' : 'none',
-    transition: `box-shadow var(--dur-base) var(--ease-standard), border-color var(--dur-base) var(--ease-standard)`,
+    fontSize: 12, fontWeight: 700,
+    transition: `all var(--dur-fast) var(--ease-standard)`,
   }),
-  productRowIcon: (tone) => ({
-    width: 30, height: 30, borderRadius: 'var(--radius-sm)', flexShrink: 0,
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    color: tone === 'accent' ? 'var(--accent)' : tone === 'warning' ? 'var(--warning)' : 'var(--text-muted)',
-    background: 'var(--bg-sunken)',
-  }),
-  productRowLabel: { width: 90, flexShrink: 0, fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' },
+  chipPremium: { fontSize: 10, opacity: 0.85, marginLeft: 2 },
+  productEditor: {
+    display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: 12, marginBottom: 10,
+    borderRadius: 'var(--radius-sm)', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)',
+  },
+  productEditorTitle: { display: 'flex', alignItems: 'center', minWidth: 100, fontWeight: 700, fontSize: 13, color: 'var(--text-primary)' },
   segmented: {
     display: 'flex', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', overflow: 'hidden', flexShrink: 0,
   },
@@ -712,8 +790,6 @@ const s = {
     width: 72, padding: '7px 2px', background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: 13, fontWeight: 700,
   },
   premiumSuffix: { color: 'var(--text-muted)', fontSize: 11 },
-  productSaveButton: { flexShrink: 0, marginLeft: 'auto' },
-  productsSummary: { marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 16, fontSize: 12 },
-  crossSellHint: { color: 'var(--warning)' },
-  crossSellHintDone: { color: 'var(--accent)' },
+  crossSellHint: { fontSize: 11, color: 'var(--warning)' },
+  crossSellHintDone: { fontSize: 11, color: 'var(--accent)' },
 };
