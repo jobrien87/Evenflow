@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { Modal, Badge, Button, Icon, LeadTypeIcon } from '../ui';
+import { Modal, Badge, Button, Icon, LeadTypeIcon, StatTile } from '../ui';
 import { PRODUCTS, PRODUCT_META } from '../lib/productMeta';
 
 const LEAD_STATUSES = [
@@ -162,104 +162,118 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
   );
 }
 
-// Per-product quote/sale tracker — independent of the lead's overall
-// pipeline status. Selecting a product's state (Not quoted / Quoted / Sold)
-// and, for Sold, a real entered premium is what lets the app tell what
-// still needs cross-selling: any product with no row here at all.
-function ProductsBlock({ lead, onDone }) {
-  const quotesByProduct = Object.fromEntries((lead.productQuotes || []).map((q) => [q.product, q]));
-  const [editing, setEditing] = useState(null);
-  const [premiumInput, setPremiumInput] = useState('');
+const PRODUCT_STATUS_OPTIONS = [
+  { value: null, label: 'Not Quoted' },
+  { value: 'QUOTED', label: 'Quoted' },
+  { value: 'SOLD', label: 'Sold' },
+];
+
+// One row per product, always editable — no click-to-reveal. Every row
+// shows a 3-way status toggle plus its own premium field, so setting "what
+// was quoted at what premium" or "what sold at what premium" is never
+// hidden behind an extra step. Local pending edits vs. the lead's real
+// saved productQuotes row is what drives the SAVE button's dirty state.
+function ProductRow({ leadId, product, quote, onDone }) {
+  const meta = PRODUCT_META[product];
+  const savedStatus = quote?.status || null;
+  const savedPremium = quote?.premiumCents != null ? (quote.premiumCents / 100).toFixed(2) : '';
+  const [status, setStatus] = useState(savedStatus);
+  const [premium, setPremium] = useState(savedPremium);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
-  function openEditor(product) {
-    const existing = quotesByProduct[product];
-    setEditing(product);
-    setPremiumInput(existing?.premiumCents != null ? (existing.premiumCents / 100).toFixed(2) : '');
-    setErr('');
-  }
+  useEffect(() => {
+    setStatus(savedStatus);
+    setPremium(savedPremium);
+  }, [savedStatus, savedPremium]);
 
-  async function save(product, status) {
+  const dirty = status !== savedStatus || premium !== savedPremium;
+  const tone = status === 'SOLD' ? 'accent' : status === 'QUOTED' ? 'warning' : 'neutral';
+
+  async function save() {
     setBusy(true);
     setErr('');
     try {
-      const premiumCents = premiumInput ? Math.round(parseFloat(premiumInput) * 100) : undefined;
-      await api.logProductQuote(lead.id, { product, status, premiumCents });
-      setEditing(null);
-      setPremiumInput('');
+      if (status === null) {
+        await api.deleteProductQuote(leadId, product);
+      } else {
+        const premiumCents = premium ? Math.round(parseFloat(premium) * 100) : undefined;
+        await api.logProductQuote(leadId, { product, status, premiumCents });
+      }
       await onDone();
     } catch (e) {
-      setErr(e.data?.message || 'Failed to save this product.');
+      setErr(e.data?.message || 'Failed to save.');
     } finally {
       setBusy(false);
     }
   }
 
-  async function clear(product) {
-    setBusy(true);
-    setErr('');
-    try {
-      await api.deleteProductQuote(lead.id, product);
-      setEditing(null);
-      await onDone();
-    } catch (e) {
-      setErr(e.data?.message || 'Failed to clear this product.');
-    } finally {
-      setBusy(false);
-    }
-  }
+  return (
+    <div style={s.productRow(tone)}>
+      <div style={s.productRowIcon(tone)}><Icon name={meta.icon} size={17} /></div>
+      <div style={s.productRowLabel}>{meta.label}</div>
+      <div style={s.segmented}>
+        {PRODUCT_STATUS_OPTIONS.map((opt) => {
+          const active = status === opt.value;
+          const disabled = opt.value === null && savedStatus === 'SOLD';
+          return (
+            <button
+              key={opt.label}
+              type="button"
+              disabled={disabled}
+              style={s.segmentButton(active, opt.value, disabled)}
+              onClick={() => setStatus(opt.value)}
+              title={disabled ? 'A sold product can’t be reverted to Not Quoted here.' : undefined}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+      <div style={s.premiumWrap(status === null)}>
+        <span style={s.premiumDollar}>$</span>
+        <input
+          style={s.premiumInput}
+          placeholder="0.00"
+          disabled={status === null}
+          value={premium}
+          onChange={(e) => setPremium(e.target.value)}
+        />
+        <span style={s.premiumSuffix}>/mo</span>
+      </div>
+      <Button variant={dirty ? 'primary' : 'secondary'} size="sm" disabled={!dirty || busy} onClick={save} style={s.productSaveButton}>
+        {busy ? '…' : 'SAVE'}
+      </Button>
+      {err && <div style={s.formError}>{err}</div>}
+    </div>
+  );
+}
 
+// Per-product quote/sale tracker — independent of the lead's overall
+// pipeline status. Setting a product's state (Not quoted / Quoted / Sold)
+// and its real premium is what lets the app tell what still needs
+// cross-selling: any product with no row here at all.
+function ProductsBlock({ lead, onDone }) {
+  const quotesByProduct = Object.fromEntries((lead.productQuotes || []).map((q) => [q.product, q]));
   const soldRows = (lead.productQuotes || []).filter((q) => q.status === 'SOLD');
+  const quotedRows = (lead.productQuotes || []).filter((q) => q.status === 'QUOTED');
   const totalSoldCents = soldRows.reduce((sum, q) => sum + (q.premiumCents || 0), 0);
+  const totalQuotedCents = quotedRows.reduce((sum, q) => sum + (q.premiumCents || 0), 0);
   const untouched = PRODUCTS.filter((p) => !quotesByProduct[p]);
 
   return (
     <div>
-      <div style={s.productGrid}>
-        {PRODUCTS.map((p) => {
-          const q = quotesByProduct[p];
-          const meta = PRODUCT_META[p];
-          const tone = q?.status === 'SOLD' ? 'accent' : q?.status === 'QUOTED' ? 'warning' : 'neutral';
-          const isEditing = editing === p;
-          return (
-            <div key={p} style={s.productTile(tone)}>
-              <div style={s.productTileHeader} onClick={() => (isEditing ? setEditing(null) : openEditor(p))}>
-                <Icon name={meta.icon} size={15} />
-                <span style={s.productTileLabel}>{meta.label}</span>
-              </div>
-              <Badge tone={tone} style={{ marginTop: 6 }}>
-                {q?.status === 'SOLD' ? 'Sold' : q?.status === 'QUOTED' ? 'Quoted' : 'Not quoted'}
-              </Badge>
-              {q?.premiumCents != null && !isEditing && (
-                <div style={s.productTilePremium}>{money(q.premiumCents)}/mo</div>
-              )}
-              {isEditing && (
-                <div style={s.productTileEditor} onClick={(e) => e.stopPropagation()}>
-                  <input
-                    style={s.miniInput}
-                    placeholder="Premium $"
-                    value={premiumInput}
-                    onChange={(e) => setPremiumInput(e.target.value)}
-                  />
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    <Button variant="secondary" size="sm" disabled={busy} onClick={() => save(p, 'QUOTED')}>QUOTED</Button>
-                    <Button variant="primary" size="sm" disabled={busy} onClick={() => save(p, 'SOLD')}>SOLD</Button>
-                    {q && q.status !== 'SOLD' && (
-                      <Button variant="ghost" size="sm" disabled={busy} onClick={() => clear(p)}>CLEAR</Button>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
+      <div style={s.statRow}>
+        <StatTile label="SOLD PREMIUM / MO" value={money(totalSoldCents) || '$0.00'} />
+        <StatTile label="OPEN QUOTE POTENTIAL / MO" value={money(totalQuotedCents) || '$0.00'} />
+        <StatTile label="PRODUCTS SOLD" value={`${soldRows.length}/${PRODUCTS.length}`} />
       </div>
-      {err && <div style={s.formError}>{err}</div>}
+      <div style={s.productList}>
+        {PRODUCTS.map((p) => (
+          <ProductRow key={p} leadId={lead.id} product={p} quote={quotesByProduct[p]} onDone={onDone} />
+        ))}
+      </div>
       <div style={s.productsSummary}>
-        {totalSoldCents > 0 && (
-          <span style={s.productsSummaryStat}>Total sold premium: <strong>{money(totalSoldCents)}/mo</strong></span>
-        )}
         {untouched.length > 0 ? (
           <span style={s.crossSellHint}>Needs cross-sell: {untouched.map((p) => PRODUCT_META[p].label).join(', ')}</span>
         ) : (
@@ -318,8 +332,8 @@ function Section({ title, icon, children }) {
   return (
     <div style={s.section}>
       <div style={s.sectionTitle}>
-        {icon && <Icon name={icon} size={13} style={{ marginRight: 6 }} />}
-        {title}
+        {icon && <Icon name={icon} size={13} style={{ marginRight: 6, color: 'var(--accent)' }} />}
+        <span style={s.sectionTitleText}>{title}</span>
       </div>
       {children}
     </div>
@@ -615,20 +629,25 @@ const s = {
     paddingBottom: 'var(--space-4)', borderBottom: '1px solid var(--border-hairline)',
   },
   headerAvatar: {
-    width: 40, height: 40, borderRadius: 'var(--radius-md)', flexShrink: 0,
+    width: 44, height: 44, borderRadius: 'var(--radius-md)', flexShrink: 0,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     background: 'var(--accent-gradient-soft)', border: '1px solid var(--border-accent)', color: 'var(--accent)',
+    boxShadow: 'var(--shadow-glow-accent)',
   },
-  name: { fontWeight: 700, fontSize: 18, color: 'var(--text-primary)' },
+  name: { fontWeight: 700, fontSize: 19, color: 'var(--text-primary)' },
   meta: { color: 'var(--text-muted)', fontSize: 12, marginTop: 4 },
   headerBadges: { display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end', flexShrink: 0 },
   section: {
     marginBottom: 'var(--space-4)', background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)',
+    borderLeft: '3px solid rgba(198, 255, 46, 0.35)',
     borderRadius: 'var(--radius-md)', padding: 'var(--space-4)',
   },
   sectionTitle: {
-    display: 'flex', alignItems: 'center', color: 'var(--text-muted)', fontSize: 11,
+    display: 'flex', alignItems: 'center', fontSize: 11,
     letterSpacing: 1.5, fontWeight: 700, marginBottom: 12, textTransform: 'uppercase',
+  },
+  sectionTitleText: {
+    backgroundImage: 'var(--accent-gradient)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',
   },
   infoGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 },
   infoRow: { display: 'flex', alignItems: 'baseline', gap: 6, fontSize: 12, color: 'var(--text-secondary)' },
@@ -650,18 +669,51 @@ const s = {
   listMeta: { color: 'var(--text-muted)', fontSize: 11 },
   noteRow: { padding: '8px 10px', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 6 },
   noteContent: { color: 'var(--text-primary)', fontSize: 12, marginTop: 4 },
-  productGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 },
-  productTile: (tone) => ({
-    padding: 10, borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+  statRow: {
+    display: 'flex', gap: 24, flexWrap: 'wrap', marginBottom: 14, paddingBottom: 14,
+    borderBottom: '1px solid var(--border-hairline)',
+  },
+  productList: { display: 'flex', flexDirection: 'column', gap: 8 },
+  productRow: (tone) => ({
+    display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '10px 12px',
+    borderRadius: 'var(--radius-sm)', position: 'relative',
     border: `1px solid ${tone === 'accent' ? 'var(--border-accent)' : tone === 'warning' ? 'rgba(255, 184, 77, 0.4)' : 'var(--border-hairline)'}`,
     background: tone === 'accent' ? 'var(--accent-gradient-soft)' : tone === 'warning' ? 'var(--warning-soft)' : 'var(--bg-elevated)',
+    boxShadow: tone === 'accent' ? 'var(--shadow-glow-accent)' : 'none',
+    transition: `box-shadow var(--dur-base) var(--ease-standard), border-color var(--dur-base) var(--ease-standard)`,
   }),
-  productTileHeader: { display: 'flex', alignItems: 'center', gap: 6 },
-  productTileLabel: { flex: 1, fontSize: 12, fontWeight: 600, color: 'var(--text-primary)' },
-  productTilePremium: { marginTop: 6, fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' },
-  productTileEditor: { marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 },
+  productRowIcon: (tone) => ({
+    width: 30, height: 30, borderRadius: 'var(--radius-sm)', flexShrink: 0,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    color: tone === 'accent' ? 'var(--accent)' : tone === 'warning' ? 'var(--warning)' : 'var(--text-muted)',
+    background: 'var(--bg-sunken)',
+  }),
+  productRowLabel: { width: 90, flexShrink: 0, fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' },
+  segmented: {
+    display: 'flex', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', overflow: 'hidden', flexShrink: 0,
+  },
+  segmentButton: (active, value, disabled) => {
+    const activeBg = value === 'SOLD' ? 'var(--accent-gradient)' : value === 'QUOTED' ? 'var(--warning)' : 'var(--bg-elevated)';
+    const activeColor = value === 'SOLD' ? 'var(--accent-on)' : value === 'QUOTED' ? '#241a00' : 'var(--text-primary)';
+    return {
+      padding: '6px 10px', fontSize: 11, fontWeight: 700, border: 'none', cursor: disabled ? 'not-allowed' : 'pointer',
+      background: active ? activeBg : 'transparent',
+      color: active ? activeColor : 'var(--text-muted)',
+      opacity: disabled ? 0.4 : 1,
+      borderRight: '1px solid var(--border-strong)',
+    };
+  },
+  premiumWrap: (disabled) => ({
+    display: 'flex', alignItems: 'center', gap: 2, padding: '0 8px', borderRadius: 'var(--radius-sm)',
+    border: '1px solid var(--border-strong)', background: 'var(--bg-sunken)', opacity: disabled ? 0.4 : 1,
+  }),
+  premiumDollar: { color: 'var(--text-muted)', fontSize: 12 },
+  premiumInput: {
+    width: 72, padding: '7px 2px', background: 'transparent', border: 'none', color: 'var(--text-primary)', fontSize: 13, fontWeight: 700,
+  },
+  premiumSuffix: { color: 'var(--text-muted)', fontSize: 11 },
+  productSaveButton: { flexShrink: 0, marginLeft: 'auto' },
   productsSummary: { marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 16, fontSize: 12 },
-  productsSummaryStat: { color: 'var(--text-primary)' },
   crossSellHint: { color: 'var(--warning)' },
   crossSellHintDone: { color: 'var(--accent)' },
 };
