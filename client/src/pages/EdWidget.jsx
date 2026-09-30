@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
+import { Icon } from '../ui';
 
 const HUMOR_LEVELS = ['LOW', 'NORMAL', 'SPICY'];
+const HUMOR_DESCRIPTIONS = {
+  LOW: 'Direct, warm, minimal jokes.',
+  NORMAL: 'A little playful — one light line is plenty.',
+  SPICY: 'Big energy — rapid-fire wisecracks, never at the expense of the point.',
+};
 
 export default function EdWidget() {
   const [open, setOpen] = useState(false);
@@ -11,13 +17,17 @@ export default function EdWidget() {
   const [aiConfigured, setAiConfigured] = useState(true);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [showEscalate, setShowEscalate] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [escalateForm, setEscalateForm] = useState({ subject: '', description: '' });
   const [escalateStatus, setEscalateStatus] = useState('');
+  // SPICY is ED's default personality — a gear-icon settings popup (not a
+  // persistent top row) is where a person can dial it down if they'd
+  // rather.
   const [humorLevel, setHumorLevel] = useState(() => {
     try {
-      return localStorage.getItem('ed_humor_level') || 'NORMAL';
+      return localStorage.getItem('ed_humor_level') || 'SPICY';
     } catch {
-      return 'NORMAL';
+      return 'SPICY';
     }
   });
   const [briefing, setBriefing] = useState(null);
@@ -34,6 +44,7 @@ export default function EdWidget() {
     } catch {
       // per-viewer convenience only — fine if storage is unavailable
     }
+    setShowSettings(false);
   }
 
   // Load real conversation history from the server the first time the
@@ -126,22 +137,32 @@ export default function EdWidget() {
           <div style={s.header}>
             <span style={s.headerTitle}>ED</span>
             {!aiConfigured && <span style={s.degradedBadge}>Language layer not configured</span>}
-            <button style={s.escalateLink} onClick={() => setShowEscalate(!showEscalate)}>
+            {!showEscalate && (
+              <button
+                style={s.gearButton}
+                onClick={() => setShowSettings(!showSettings)}
+                title="ED's settings"
+                aria-label="ED's settings"
+              >
+                <Icon name="gear" size={15} />
+              </button>
+            )}
+            <button style={s.escalateLink} onClick={() => { setShowEscalate(!showEscalate); setShowSettings(false); }}>
               {showEscalate ? 'Back to chat' : 'Can\'t find what you need?'}
             </button>
           </div>
 
-          {!showEscalate && (
-            <div style={s.humorRow}>
-              <span style={s.humorLabel}>TONE</span>
+          {showSettings && !showEscalate && (
+            <div style={s.settingsPopup}>
+              <div style={s.settingsLabel}>ED'S TONE</div>
               {HUMOR_LEVELS.map((level) => (
                 <button
                   key={level}
-                  style={s.humorButton(level === humorLevel)}
+                  style={s.settingsOption(level === humorLevel)}
                   onClick={() => selectHumorLevel(level)}
-                  title={`Set ED's tone to ${level}`}
                 >
-                  {level}
+                  <span style={s.settingsOptionName}>{level}</span>
+                  <span style={s.settingsOptionDesc}>{HUMOR_DESCRIPTIONS[level]}</span>
                 </button>
               ))}
             </div>
@@ -221,15 +242,25 @@ const s = {
   },
   degradedBadge: { fontSize: 10, color: 'var(--warning)', border: '1px solid rgba(255,184,77,0.4)', padding: '2px 6px', borderRadius: 4 },
   escalateLink: { marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer', textDecoration: 'underline' },
-  humorRow: { display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderBottom: '1px solid var(--border-hairline)' },
-  humorLabel: { fontSize: 10, letterSpacing: 1, color: 'var(--text-muted)', marginRight: 2 },
-  humorButton: (active) => ({
-    fontSize: 10, letterSpacing: 0.5, padding: '3px 8px', borderRadius: 20, cursor: 'pointer',
+  gearButton: {
+    background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 4, borderRadius: 6,
+  },
+  settingsPopup: {
+    position: 'absolute', top: 48, right: 16, width: 240, background: 'var(--bg-elevated)',
+    border: '1px solid var(--border-hairline)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-card)',
+    padding: 10, display: 'flex', flexDirection: 'column', gap: 6, zIndex: 1,
+  },
+  settingsLabel: { fontSize: 10, letterSpacing: 1, color: 'var(--text-muted)', padding: '2px 4px 4px' },
+  settingsOption: (active) => ({
+    display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, textAlign: 'left',
+    padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
     border: active ? 'none' : '1px solid var(--border-strong)',
     background: active ? 'var(--accent-gradient)' : 'transparent',
-    color: active ? 'var(--accent-on)' : 'var(--text-secondary)',
-    fontWeight: active ? 700 : 400,
+    color: active ? 'var(--accent-on)' : 'var(--text-primary)',
   }),
+  settingsOptionName: { fontSize: 11, letterSpacing: 0.5, fontWeight: 700 },
+  settingsOptionDesc: { fontSize: 10.5, lineHeight: 1.3, opacity: 0.85 },
   messages: { flex: 1, overflowY: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 },
   emptyState: { color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic', padding: 8 },
   userBubble: { alignSelf: 'flex-end', background: 'var(--accent-gradient)', color: 'var(--accent-on)', padding: '8px 12px', borderRadius: 10, fontSize: 13, maxWidth: '85%' },

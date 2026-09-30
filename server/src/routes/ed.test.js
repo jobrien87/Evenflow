@@ -114,9 +114,9 @@ test('buildSystemPrompt embeds the real per-level humor guidance, one distinct l
   assert.notEqual(low, spicy);
 });
 
-test('buildSystemPrompt falls back to NORMAL guidance for an unrecognized humor level', () => {
+test('buildSystemPrompt falls back to SPICY guidance for an unrecognized humor level', () => {
   const prompt = buildSystemPrompt({ context: { role: 'PRODUCER' }, humorLevel: 'NOT_A_REAL_LEVEL' });
-  assert.ok(prompt.includes(HUMOR_GUIDANCE.NORMAL));
+  assert.ok(prompt.includes(HUMOR_GUIDANCE.SPICY));
 });
 
 test('buildBriefingPrompt embeds the real context data and the matching humor guidance', () => {

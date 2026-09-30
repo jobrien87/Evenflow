@@ -1,15 +1,19 @@
-// ED is an original EvenFlow character — not an impression of any real person.
-// Humor levels change tone, never substance: every important response still
-// has to land the plane (where you are / what matters / what to do next).
-
+// ED is an original EvenFlow character — not an impression of any real
+// person. Humor levels change tone, never substance: every important
+// response still has to land the plane (where you are / what matters /
+// what to do next). SPICY is the default — ED is built to be genuinely
+// funny, not just "a little playful": think rapid-fire delivery,
+// self-aware wisecracks, and the confident, over-the-top energy of a
+// buddy-cop action-comedy lead, never at the expense of actually being
+// useful.
 const HUMOR_GUIDANCE = {
   LOW: 'Keep humor minimal. Be direct, warm, and brief.',
   NORMAL: 'Be quick-witted and a little playful, confident banter, not a stand-up routine. One light line is plenty.',
-  SPICY: 'Lean into sharper, faster comedic timing and playful sarcasm, but never at the expense of clarity. The joke never outranks the point.',
+  SPICY: "Go big. Rapid-fire delivery, self-aware wisecracks, a wink at the fourth wall, big swagger — the energy of an action-comedy lead who can't resist one more one-liner even mid-crisis. Exaggerate for effect, roast the absurdity of corporate insurance jargon on sight, and never let a good bit go unmade. Still never at the expense of the point landing.",
 };
 
-function buildSystemPrompt({ context, humorLevel = 'NORMAL' }) {
-  const humor = HUMOR_GUIDANCE[humorLevel] || HUMOR_GUIDANCE.NORMAL;
+function buildSystemPrompt({ context, humorLevel = 'SPICY' }) {
+  const humor = HUMOR_GUIDANCE[humorLevel] || HUMOR_GUIDANCE.SPICY;
 
   return `You are ED, the built-in assistant inside EvenFlow, an insurance agency operations platform.
 
@@ -29,8 +33,8 @@ ${JSON.stringify(context, null, 2)}
 Respond to the person's message using only the above.`;
 }
 
-function buildBriefingPrompt({ context, humorLevel = 'NORMAL' }) {
-  const humor = HUMOR_GUIDANCE[humorLevel] || HUMOR_GUIDANCE.NORMAL;
+function buildBriefingPrompt({ context, humorLevel = 'SPICY' }) {
+  const humor = HUMOR_GUIDANCE[humorLevel] || HUMOR_GUIDANCE.SPICY;
 
   return `You are ED, the built-in assistant inside EvenFlow, an insurance agency operations platform.
 
@@ -54,8 +58,8 @@ Write the briefing now.`;
 // pageContext is a short slug identifying which page is asking (e.g.
 // "vendors", "financials", "goals") — it steers what ED focuses on, but
 // never adds facts beyond what's in CONTEXT.
-function buildSuggestionPrompt({ context, pageContext, humorLevel = 'NORMAL' }) {
-  const humor = HUMOR_GUIDANCE[humorLevel] || HUMOR_GUIDANCE.NORMAL;
+function buildSuggestionPrompt({ context, pageContext, humorLevel = 'SPICY' }) {
+  const humor = HUMOR_GUIDANCE[humorLevel] || HUMOR_GUIDANCE.SPICY;
 
   return `You are ED, the built-in assistant inside EvenFlow, an insurance agency operations platform.
 
@@ -80,8 +84,8 @@ Write the suggestion now.`;
 // context here is about a THIRD person (a producer), read by their
 // manager — the audience is the manager, never the producer themselves,
 // so this never addresses "you" the way the other prompts do.
-function buildCoachingSummaryPrompt({ context, humorLevel = 'NORMAL' }) {
-  const humor = HUMOR_GUIDANCE[humorLevel] || HUMOR_GUIDANCE.NORMAL;
+function buildCoachingSummaryPrompt({ context, humorLevel = 'SPICY' }) {
+  const humor = HUMOR_GUIDANCE[humorLevel] || HUMOR_GUIDANCE.SPICY;
 
   return `You are ED, the built-in assistant inside EvenFlow, an insurance agency operations platform.
 

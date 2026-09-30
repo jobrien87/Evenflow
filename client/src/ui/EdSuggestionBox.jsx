@@ -16,9 +16,9 @@ export default function EdSuggestionBox({ pageContext, title = 'ED SUGGESTS' }) 
     setState({ loading: true, message: '', available: null, error: '' });
     const humorLevel = (() => {
       try {
-        return localStorage.getItem('ed_humor_level') || 'NORMAL';
+        return localStorage.getItem('ed_humor_level') || 'SPICY';
       } catch {
-        return 'NORMAL';
+        return 'SPICY';
       }
     })();
 

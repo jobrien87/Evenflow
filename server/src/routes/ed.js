@@ -160,7 +160,7 @@ router.post('/ask', askLimiter, async (req, res, next) => {
     const relevantDrills = await findRelevantLessons(parsed.data.message, { limit: 3 });
     const promptContext = relevantDrills.length > 0 ? { ...context, relevantDrills } : context;
 
-    const systemPrompt = buildSystemPrompt({ context: promptContext, humorLevel: parsed.data.humorLevel || 'NORMAL' });
+    const systemPrompt = buildSystemPrompt({ context: promptContext, humorLevel: parsed.data.humorLevel || 'SPICY' });
 
     let result;
     try {
@@ -222,7 +222,7 @@ router.get('/briefing', briefingLimiter, async (req, res, next) => {
       return res.json({ success: true, available: false, message: summary, context });
     }
 
-    const systemPrompt = buildBriefingPrompt({ context, humorLevel: parsed.data.humorLevel || 'NORMAL' });
+    const systemPrompt = buildBriefingPrompt({ context, humorLevel: parsed.data.humorLevel || 'SPICY' });
 
     let result;
     try {
@@ -280,7 +280,7 @@ router.post('/suggest', suggestionLimiter, async (req, res, next) => {
       return res.json({ success: true, available: false, message: fallback, context });
     }
 
-    const systemPrompt = buildSuggestionPrompt({ context, pageContext: parsed.data.pageContext, humorLevel: parsed.data.humorLevel || 'NORMAL' });
+    const systemPrompt = buildSuggestionPrompt({ context, pageContext: parsed.data.pageContext, humorLevel: parsed.data.humorLevel || 'SPICY' });
 
     let result;
     try {
@@ -413,7 +413,7 @@ router.get('/coaching-summary', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'P
       return res.json({ success: true, available: false, message: fallback, context });
     }
 
-    const systemPrompt = buildCoachingSummaryPrompt({ context, humorLevel: parsed.data.humorLevel || 'NORMAL' });
+    const systemPrompt = buildCoachingSummaryPrompt({ context, humorLevel: parsed.data.humorLevel || 'SPICY' });
 
     let result;
     try {
