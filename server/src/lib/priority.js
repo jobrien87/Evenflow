@@ -41,7 +41,7 @@ function scoreLead(lead, priorityRules, now = new Date()) {
 
   const ageMinutes = (now - new Date(lead.receivedAt)) / 60000;
 
-  if (lead.status === 'NEW' || lead.status === 'ASSIGNED') {
+  if (lead.status === 'NEW') {
     if (ageMinutes < 15) {
       score += 50;
       reasons.push('Received in the last 15 minutes');
@@ -53,7 +53,7 @@ function scoreLead(lead, priorityRules, now = new Date()) {
     }
   }
 
-  if (!lead.firstAttemptAt && (lead.status === 'NEW' || lead.status === 'ASSIGNED')) {
+  if (!lead.firstAttemptAt && lead.status === 'NEW') {
     score += 20;
     reasons.push('No contact attempt yet');
   }
@@ -63,7 +63,7 @@ function scoreLead(lead, priorityRules, now = new Date()) {
     reasons.push('Scheduled follow-up');
   }
 
-  if (['QUOTE_STARTED', 'QUOTED', 'QUOTED_HOT'].includes(lead.status)) {
+  if (['QUOTED', 'QUOTED_HOT'].includes(lead.status)) {
     score += 15;
     reasons.push('Active quote in progress');
   }

@@ -38,7 +38,7 @@ async function computeFunnel({ agencyId, userId, vendorId, product, from, to }) 
   const attempted = leads.filter((l) => l.assignedAt && l.firstAttemptAt);
   const contacted = leads.filter((l) => l.firstContactAt);
   const quotedOrBeyond = leads.filter((l) =>
-    ['QUOTE_STARTED', 'QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'].includes(l.status)
+    ['QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'].includes(l.status)
   );
   const sold = leads.filter((l) => l.status === 'SOLD');
 

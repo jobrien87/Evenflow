@@ -94,6 +94,7 @@ export const api = {
 
   users: (params = '') => request(`/users${params}`),
   inviteUser: (payload) => request('/users/invite', { method: 'POST', body: payload }),
+  inviteUsersBulk: (invites) => request('/users/invite-bulk', { method: 'POST', body: { invites } }),
 
   // Personalize page — every user's own account.
   myBackgroundUrl: () => `${BASE}/users/me/background`,

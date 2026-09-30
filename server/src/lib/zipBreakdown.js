@@ -15,7 +15,7 @@
 const { prisma } = require('./db');
 const { pct } = require('./funnelMetrics');
 
-const QUOTED_OR_BEYOND = ['QUOTE_STARTED', 'QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'];
+const QUOTED_OR_BEYOND = ['QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'];
 
 function costPer(costCents, count) {
   return count > 0 ? Math.round(costCents / count) / 100 : null;

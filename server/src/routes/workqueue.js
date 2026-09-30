@@ -32,7 +32,7 @@ router.get('/', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER', 'PLATF
     const leadWhere = {
       ...(agencyId ? { agencyId } : {}),
       assignedToId: targetUserId,
-      status: { in: ['NEW', 'ASSIGNED', 'CONTACTED', 'QUOTE_STARTED', 'QUOTED', 'FOLLOW_UP'] },
+      status: { in: ['NEW', 'CONTACTED', 'QUOTED', 'FOLLOW_UP'] },
       archivedAt: null,
     };
     const taskWhere = {

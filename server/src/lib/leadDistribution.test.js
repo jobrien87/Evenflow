@@ -148,8 +148,8 @@ test('the Moshpit claim is race-safe: only one of two concurrent claims on the s
   });
 
   const [a, b] = await Promise.all([
-    prisma.lead.updateMany({ where: { id: lead.id, assignedToId: null }, data: { assignedToId: producerIds[0], status: 'ASSIGNED' } }),
-    prisma.lead.updateMany({ where: { id: lead.id, assignedToId: null }, data: { assignedToId: producerIds[1], status: 'ASSIGNED' } }),
+    prisma.lead.updateMany({ where: { id: lead.id, assignedToId: null }, data: { assignedToId: producerIds[0], status: 'NEW' } }),
+    prisma.lead.updateMany({ where: { id: lead.id, assignedToId: null }, data: { assignedToId: producerIds[1], status: 'NEW' } }),
   ]);
 
   const totalClaimed = a.count + b.count;

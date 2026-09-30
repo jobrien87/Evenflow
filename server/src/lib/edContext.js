@@ -14,7 +14,7 @@ async function buildProducerContext(user) {
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
   const [openLeads, untouchedLeads, openTasks, monthlySales, goal, vendorBreakdown] = await Promise.all([
-    prisma.lead.count({ where: { assignedToId: user.id, status: { in: ['NEW', 'ASSIGNED', 'CONTACTED', 'FOLLOW_UP'] } } }),
+    prisma.lead.count({ where: { assignedToId: user.id, status: { in: ['NEW', 'CONTACTED', 'FOLLOW_UP'] } } }),
     prisma.lead.count({ where: { assignedToId: user.id, firstAttemptAt: null, archivedAt: null } }),
     prisma.task.count({ where: { assignedToId: user.id, status: { in: ['OPEN', 'IN_PROGRESS'] } } }),
     // Same real "sales this month" count runningReport.js's goal-progress
@@ -58,8 +58,8 @@ async function buildAgencyOwnerContext(agencyId) {
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
   const [openLeads, overdueLeads, untouchedLeads, inMoshpit, offeredTransfers, acceptedTransfers, rejectedTransfers, revenueAgg, costAgg, producerCount, agencyReport, vendorBreakdown, telemarketerPerformance] = await Promise.all([
-    prisma.lead.count({ where: { agencyId, status: { in: ['NEW', 'ASSIGNED', 'CONTACTED', 'FOLLOW_UP'] } } }),
-    prisma.lead.count({ where: { agencyId, status: { in: ['NEW', 'ASSIGNED'] }, receivedAt: { lt: new Date(now.getTime() - 60 * 60 * 1000) } } }),
+    prisma.lead.count({ where: { agencyId, status: { in: ['NEW', 'CONTACTED', 'FOLLOW_UP'] } } }),
+    prisma.lead.count({ where: { agencyId, status: { in: ['NEW'] }, receivedAt: { lt: new Date(now.getTime() - 60 * 60 * 1000) } } }),
     prisma.lead.count({ where: { agencyId, firstAttemptAt: null, archivedAt: null, receivedAt: { gte: monthStart } } }),
     prisma.lead.count({ where: { agencyId, assignedToId: null, archivedAt: null, vendor: { distributionMode: 'MOSHPIT' } } }),
     prisma.transfer.count({ where: { agencyId, createdAt: { gte: monthStart } } }),

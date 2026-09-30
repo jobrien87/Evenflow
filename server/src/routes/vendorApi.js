@@ -135,7 +135,7 @@ router.post('/leads', requireVendorAuth, async (req, res) => {
           rawPayload: req.body,
           source: `vendor:${req.vendor.name}`,
           product: data.product,
-          status: assignment.assignedToId ? 'ASSIGNED' : 'NEW',
+          status: 'NEW',
           assignedToId: assignment.assignedToId,
           assignedAt: assignment.assignedToId ? new Date() : null,
           leadType: deriveLeadType({ vendorCategory: req.vendor.category }),

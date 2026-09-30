@@ -150,6 +150,74 @@ const inviteSchema = z.object({
   role: z.enum(['AGENCY_MANAGER', 'PRODUCER']),
 });
 
+// Shared by the single-invite and bulk-invite routes below — creates the
+// User + Invitation rows in one transaction, sends the real invitation
+// email (or returns the honest raw accept link when email isn't
+// configured), and records the audit event. Never throws on an
+// already-registered email; returns a structured failure instead so a
+// bulk batch can report per-row results without one bad row aborting
+// the rows around it.
+async function inviteOneUser({ actor, agencyId, agency, data, correlationId }) {
+  const email = data.email.trim().toLowerCase();
+  const existing = await prisma.user.findUnique({ where: { email } });
+  if (existing) {
+    return { success: false, email, error: 'EMAIL_IN_USE', message: 'A user with that email already exists.' };
+  }
+
+  const { user, rawToken } = await prisma.$transaction(async (tx) => {
+    const user = await tx.user.create({
+      data: {
+        email,
+        firstName: data.firstName,
+        lastName: data.lastName,
+        role: data.role,
+        status: 'INVITED',
+        agencyId,
+        invitedById: actor.id,
+      },
+    });
+    const rawToken = crypto.randomBytes(24).toString('hex');
+    await tx.invitation.create({
+      data: {
+        email,
+        role: data.role,
+        token: rawToken,
+        agencyId,
+        invitedById: actor.id,
+        userId: user.id,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+    });
+    return { user, rawToken };
+  });
+
+  const emailResult = await sendInvitationEmail({
+    to: email,
+    role: data.role,
+    agencyName: agency.name,
+    token: rawToken,
+  });
+
+  await recordAudit({
+    actorId: actor.id,
+    actorRole: actor.role,
+    agencyId,
+    action: 'user.invited',
+    entityType: 'User',
+    entityId: user.id,
+    after: { email, role: data.role },
+    correlationId,
+  });
+
+  return {
+    success: true,
+    email,
+    user: { id: user.id, email: user.email, role: user.role, status: user.status },
+    emailStatus: emailResult.status,
+    acceptUrl: emailResult.acceptUrl,
+  };
+}
+
 // Agency Owner/Manager invites a Producer or Manager into THEIR OWN agency only.
 router.post('/invite', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
   try {
@@ -161,66 +229,69 @@ router.post('/invite', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_O
     if (!agencyId) {
       return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED', message: 'An agency is required to send this invite.' });
     }
-    const email = parsed.data.email.trim().toLowerCase();
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) {
-      return res.status(409).json({ success: false, error: 'EMAIL_IN_USE', message: 'A user with that email already exists.' });
-    }
-
     const agency = await prisma.agency.findUnique({ where: { id: agencyId } });
     if (!agency) return res.status(404).json({ success: false, error: 'AGENCY_NOT_FOUND', message: 'That agency could not be found.' });
 
-    const { user, rawToken } = await prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          email,
-          firstName: parsed.data.firstName,
-          lastName: parsed.data.lastName,
-          role: parsed.data.role,
-          status: 'INVITED',
-          agencyId,
-          invitedById: req.user.id,
-        },
-      });
-      const rawToken = crypto.randomBytes(24).toString('hex');
-      await tx.invitation.create({
-        data: {
-          email,
-          role: parsed.data.role,
-          token: rawToken,
-          agencyId,
-          invitedById: req.user.id,
-          userId: user.id,
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        },
-      });
-      return { user, rawToken };
-    });
-
-    const emailResult = await sendInvitationEmail({
-      to: email,
-      role: parsed.data.role,
-      agencyName: agency.name,
-      token: rawToken,
-    });
-
-    await recordAudit({
-      actorId: req.user.id,
-      actorRole: req.user.role,
-      agencyId,
-      action: 'user.invited',
-      entityType: 'User',
-      entityId: user.id,
-      after: { email, role: parsed.data.role },
-      correlationId: req.correlationId,
-    });
+    const result = await inviteOneUser({ actor: req.user, agencyId, agency, data: parsed.data, correlationId: req.correlationId });
+    if (!result.success) {
+      return res.status(409).json({ success: false, error: result.error, message: result.message });
+    }
 
     return res.status(201).json({
       success: true,
-      user: { id: user.id, email: user.email, role: user.role, status: user.status },
-      emailStatus: emailResult.status,
-      acceptUrl: emailResult.acceptUrl,
+      user: result.user,
+      emailStatus: result.emailStatus,
+      acceptUrl: result.acceptUrl,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const bulkInviteSchema = z.object({
+  invites: z.array(inviteSchema).min(1, 'At least one invite is required.').max(25, 'You can invite up to 25 people at once.'),
+});
+
+// Same target-agency/target-role rules as POST /invite, just N rows at
+// once. Each row gets its own real transaction + email send via the
+// shared inviteOneUser() above — a bad row (e.g. a duplicate email)
+// never blocks the rows around it; the response reports a per-row
+// result so the client can show exactly which invites went out and
+// which need fixing.
+router.post('/invite-bulk', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const parsed = bulkInviteSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Please check the form and try again.', fieldErrors: parsed.error.flatten() });
+    }
+    const agencyId = req.user.role === 'PLATFORM_OWNER' ? req.body.agencyId : req.user.agencyId;
+    if (!agencyId) {
+      return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED', message: 'An agency is required to send these invites.' });
+    }
+    const agency = await prisma.agency.findUnique({ where: { id: agencyId } });
+    if (!agency) return res.status(404).json({ success: false, error: 'AGENCY_NOT_FOUND', message: 'That agency could not be found.' });
+
+    // Reject duplicate emails within the same batch up front — never trust
+    // the client to have deduped its own rows before writing anything.
+    const seen = new Set();
+    for (const invite of parsed.data.invites) {
+      const email = invite.email.trim().toLowerCase();
+      if (seen.has(email)) {
+        return res.status(400).json({ success: false, error: 'DUPLICATE_EMAIL', message: `"${email}" appears more than once in this batch.` });
+      }
+      seen.add(email);
+    }
+
+    // Sequential, not Promise.all — each row is its own transaction plus a
+    // real outbound email; one at a time keeps audit-log ordering sane and
+    // avoids hammering the email provider with a burst of sends.
+    const results = [];
+    for (const invite of parsed.data.invites) {
+      results.push(await inviteOneUser({ actor: req.user, agencyId, agency, data: invite, correlationId: req.correlationId }));
+    }
+
+    const succeeded = results.filter((r) => r.success).length;
+    return res.status(200).json({ success: true, results, succeeded, failed: results.length - succeeded });
   } catch (err) {
     next(err);
   }

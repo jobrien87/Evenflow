@@ -135,7 +135,7 @@ export default function MyLeadsPanel() {
           <SectionHeader>Your Leads</SectionHeader>
           <select style={s.filterSelect} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
             <option value="">All statuses</option>
-            {['NEW', 'ASSIGNED', 'CONTACTED', 'APPOINTMENT', 'QUOTE_STARTED', 'QUOTED', 'FOLLOW_UP', 'SOLD', 'LOST'].map((st) => (
+            {['NEW', 'CONTACTED', 'APPOINTMENT', 'QUOTED', 'FOLLOW_UP', 'SOLD', 'LOST'].map((st) => (
               <option key={st} value={st}>{st.replace(/_/g, ' ')}</option>
             ))}
           </select>

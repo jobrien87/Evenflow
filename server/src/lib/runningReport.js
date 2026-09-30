@@ -59,7 +59,7 @@ async function computeGoalActual(goal) {
       });
     case 'quotes':
       return prisma.leadEvent.count({
-        where: { type: 'lead.disposition', toStatus: { in: ['QUOTE_STARTED', 'QUOTED'] }, createdAt: { gte: periodStart, lte: periodEnd }, lead: leadScope },
+        where: { type: 'lead.disposition', toStatus: 'QUOTED', createdAt: { gte: periodStart, lte: periodEnd }, lead: leadScope },
       });
     case 'contacts':
       return prisma.leadEvent.count({

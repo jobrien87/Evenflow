@@ -68,11 +68,9 @@ enum FallingEffect {
 
 enum LeadStatus {
   NEW
-  ASSIGNED
   CONTACTED
   LEFT_VM
   APPOINTMENT
-  QUOTE_STARTED
   QUOTED
   QUOTED_HOT
   FOLLOW_UP

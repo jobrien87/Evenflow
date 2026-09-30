@@ -47,7 +47,7 @@ router.get('/', async (req, res, next) => {
     // click from a funnel rate lands on precisely the leads behind that rate.
     const STAGE_FILTERS = {
       contacted: { firstContactAt: { not: null } },
-      quoted: { status: { in: ['QUOTE_STARTED', 'QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'] } },
+      quoted: { status: { in: ['QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'] } },
       sold: { status: 'SOLD' },
     };
 
@@ -177,7 +177,7 @@ async function createLeadRecord({ agencyId, source, createdById, data }) {
         product: data.product,
         assignedToId: data.assignedToId,
         assignedAt: data.assignedToId ? new Date() : null,
-        status: data.assignedToId ? 'ASSIGNED' : 'NEW',
+        status: 'NEW',
         createdById,
         customFields: data.customFields || {},
         dob: data.dob ? new Date(data.dob) : null,
@@ -478,7 +478,7 @@ router.get('/snapshot', async (req, res, next) => {
     const [totalLeads, untouched, quoted, sold, inMoshpit] = await Promise.all([
       prisma.lead.count({ where: baseWhere }),
       prisma.lead.count({ where: { ...baseWhere, firstAttemptAt: null } }),
-      prisma.lead.count({ where: { ...baseWhere, status: { in: ['QUOTE_STARTED', 'QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'] } } }),
+      prisma.lead.count({ where: { ...baseWhere, status: { in: ['QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'] } } }),
       prisma.lead.count({ where: { ...baseWhere, status: 'SOLD' } }),
       prisma.lead.count({ where: { ...baseWhere, assignedToId: null, OR: [{ vendor: { distributionMode: 'MOSHPIT' } }, { isLiveTransfer: true }] } }),
     ]);
@@ -585,7 +585,7 @@ router.post('/:leadId/claim', async (req, res, next) => {
     const now = new Date();
     const claim = await prisma.lead.updateMany({
       where: { id: lead.id, assignedToId: null },
-      data: { assignedToId: req.user.id, assignedAt: now, status: 'ASSIGNED' },
+      data: { assignedToId: req.user.id, assignedAt: now },
     });
 
     if (claim.count === 0) {
@@ -605,7 +605,7 @@ router.post('/:leadId/claim', async (req, res, next) => {
         leadId: lead.id,
         type: 'lead.claimed',
         fromStatus: lead.status,
-        toStatus: 'ASSIGNED',
+        toStatus: lead.status,
         metadata: { claimedById: req.user.id },
       },
     });
@@ -885,7 +885,7 @@ router.delete('/:leadId/products/:product', async (req, res, next) => {
 
 const dispositionSchema = z.object({
   status: z.enum([
-    'NEW', 'ASSIGNED', 'CONTACTED', 'LEFT_VM', 'APPOINTMENT', 'QUOTE_STARTED',
+    'NEW', 'CONTACTED', 'LEFT_VM', 'APPOINTMENT',
     'QUOTED', 'QUOTED_HOT', 'FOLLOW_UP', 'SOLD', 'LOST', 'NOT_INTERESTED', 'BAD_CONTACT',
     'DUPLICATE', 'DO_NOT_CONTACT', 'INELIGIBLE', 'ARCHIVED',
   ]),
@@ -913,7 +913,7 @@ router.post('/:leadId/disposition', async (req, res, next) => {
     const fromStatus = lead.status;
     const now = new Date();
     const patch = { status: parsed.data.status };
-    if (fromStatus === 'NEW' || fromStatus === 'ASSIGNED') {
+    if (fromStatus === 'NEW') {
       if (!lead.firstAttemptAt && parsed.data.status === 'CONTACTED') {
         patch.firstAttemptAt = now;
       }

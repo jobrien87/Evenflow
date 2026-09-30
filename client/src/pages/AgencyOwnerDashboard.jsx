@@ -28,7 +28,9 @@ export default function AgencyOwnerDashboard() {
   const [showInvite, setShowInvite] = useState(false);
   const [showAddLead, setShowAddLead] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
-  const [form, setForm] = useState({ email: '', firstName: '', lastName: '', role: 'PRODUCER' });
+  const [inviteRows, setInviteRows] = useState([{ email: '', firstName: '', lastName: '', role: 'PRODUCER' }]);
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteResults, setInviteResults] = useState(null);
   const [leadForm, setLeadForm] = useState({ firstName: '', lastName: '', phone: '', email: '', product: 'Auto', assignedToId: '' });
   const [status, setStatus] = useState('');
   const [inviteLink, setInviteLink] = useState('');
@@ -164,21 +166,36 @@ export default function AgencyOwnerDashboard() {
     }
   }
 
-  async function invite(e) {
+  function addInviteRow() {
+    setInviteRows((rows) => (rows.length >= 25 ? rows : [...rows, { email: '', firstName: '', lastName: '', role: 'PRODUCER' }]));
+  }
+
+  function removeInviteRow(index) {
+    setInviteRows((rows) => (rows.length <= 1 ? rows : rows.filter((_, i) => i !== index)));
+  }
+
+  function updateInviteRow(index, field, value) {
+    setInviteRows((rows) => rows.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
+  }
+
+  async function submitInvites(e) {
     e.preventDefault();
-    setStatus('Sending invitation…');
-    setInviteLink('');
+    setInviteBusy(true);
+    setInviteResults(null);
+    setStatus('');
     try {
-      const res = await api.inviteUser(form);
-      setStatus(`Invited. Email status: ${res.emailStatus}`);
-      if (res.emailStatus !== 'SENT' && res.acceptUrl) {
-        setInviteLink(res.acceptUrl);
+      const res = await api.inviteUsersBulk(inviteRows);
+      setInviteResults(res.results);
+      setStatus(`${res.succeeded} of ${res.results.length} invitation${res.results.length === 1 ? '' : 's'} sent.`);
+      if (res.failed === 0) {
+        setInviteRows([{ email: '', firstName: '', lastName: '', role: 'PRODUCER' }]);
+        setShowInvite(false);
       }
-      setForm({ email: '', firstName: '', lastName: '', role: 'PRODUCER' });
-      setShowInvite(false);
       await load();
     } catch (err) {
-      setStatus(err.data?.message || 'Failed to invite.');
+      setStatus(err.data?.message || 'Failed to send invitations.');
+    } finally {
+      setInviteBusy(false);
     }
   }
 
@@ -295,22 +312,44 @@ export default function AgencyOwnerDashboard() {
         <div style={s.headerRow}>
           <h3 style={s.h3}>TEAM ({users.length})</h3>
           <button style={s.smallButton} onClick={() => setShowInvite(!showInvite)}>
-            + INVITE PRODUCER
+            + INVITE PEOPLE
           </button>
         </div>
         {showInvite && (
-          <form onSubmit={invite} style={s.form}>
-            <input style={s.input} placeholder="First name" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} required />
-            <input style={s.input} placeholder="Last name" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} required />
-            <input style={s.input} type="email" placeholder="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
-            <select style={s.input} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-              <option value="PRODUCER">Producer</option>
-              <option value="AGENCY_MANAGER">Manager</option>
-            </select>
-            <button style={s.submitButton} type="submit">Send Invitation</button>
+          <form onSubmit={submitInvites} style={s.form}>
+            {inviteRows.map((row, i) => (
+              <div key={i} style={isMobile ? s.inviteRowStacked : s.inviteRow}>
+                <input style={s.input} placeholder="First name" value={row.firstName} onChange={(e) => updateInviteRow(i, 'firstName', e.target.value)} required />
+                <input style={s.input} placeholder="Last name" value={row.lastName} onChange={(e) => updateInviteRow(i, 'lastName', e.target.value)} required />
+                <input style={s.input} type="email" placeholder="Email" value={row.email} onChange={(e) => updateInviteRow(i, 'email', e.target.value)} required />
+                <select style={s.input} value={row.role} onChange={(e) => updateInviteRow(i, 'role', e.target.value)}>
+                  <option value="PRODUCER">Producer</option>
+                  <option value="AGENCY_MANAGER">Manager</option>
+                </select>
+                <button type="button" style={s.removeRowButton} onClick={() => removeInviteRow(i)} disabled={inviteRows.length <= 1} title="Remove this row">×</button>
+              </div>
+            ))}
+            <div style={s.inviteFormActions}>
+              <button type="button" style={s.addRowButton} onClick={addInviteRow} disabled={inviteRows.length >= 25}>+ ADD ANOTHER PERSON</button>
+              <button style={s.submitButton} type="submit" disabled={inviteBusy}>{inviteBusy ? 'Sending…' : `Send ${inviteRows.length > 1 ? `${inviteRows.length} Invitations` : 'Invitation'}`}</button>
+            </div>
           </form>
         )}
         {status && <div style={s.status}>{status}</div>}
+        {inviteResults && (
+          <div style={s.inviteResultsBox}>
+            {inviteResults.map((r, i) => (
+              <div key={i} style={s.inviteResultRow}>
+                <span style={r.success ? s.inviteResultOk : s.inviteResultFail}>{r.success ? '✓' : '✗'}</span>
+                <span>{r.email}</span>
+                {!r.success && <span style={s.inviteResultMessage}>— {r.message}</span>}
+                {r.success && r.emailStatus !== 'SENT' && r.acceptUrl && (
+                  <a style={s.link} href={r.acceptUrl} target="_blank" rel="noreferrer">activation link</a>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
         {inviteLink && (
           <div style={s.linkBox}>
             Email wasn't sent — share this activation link directly:
@@ -478,7 +517,17 @@ const s = {
   smallButtonOutline: { padding: '8px 14px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
   form: { display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg-elevated)', padding: 16, borderRadius: 8, marginBottom: 12, border: '1px solid var(--border-hairline)' },
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },
-  submitButton: { padding: '10px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
+  submitButton: { padding: '10px 16px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
+  inviteRow: { display: 'grid', gridTemplateColumns: '1fr 1fr 1.4fr 130px 28px', gap: 8, alignItems: 'center' },
+  inviteRowStacked: { display: 'flex', flexDirection: 'column', gap: 8, paddingBottom: 10, borderBottom: '1px solid var(--border-hairline)' },
+  removeRowButton: { width: 28, height: 36, background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 16, lineHeight: 1 },
+  inviteFormActions: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, flexWrap: 'wrap', gap: 10 },
+  addRowButton: { padding: '8px 12px', background: 'transparent', border: '1px dashed var(--border-strong)', borderRadius: 6, color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 12, fontWeight: 600 },
+  inviteResultsBox: { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12, background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 12 },
+  inviteResultRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, flexWrap: 'wrap' },
+  inviteResultOk: { color: 'var(--accent)', fontWeight: 700 },
+  inviteResultFail: { color: 'var(--danger)', fontWeight: 700 },
+  inviteResultMessage: { color: 'var(--text-muted)', fontSize: 12 },
   status: { color: 'var(--accent)', marginBottom: 12, fontSize: 13 },
   linkBox: { color: 'var(--text-secondary)', fontSize: 13, marginBottom: 12, background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 12 },
   link: { color: 'var(--accent)', wordBreak: 'break-all' },

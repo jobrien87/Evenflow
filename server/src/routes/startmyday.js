@@ -58,7 +58,7 @@ router.get('/', async (req, res, next) => {
 
     const yesterdaySales = yesterdayDispositions.filter((e) => e.toStatus === 'SOLD').length;
     const yesterdayContacts = yesterdayDispositions.filter((e) => e.toStatus === 'CONTACTED').length;
-    const yesterdayQuotes = yesterdayDispositions.filter((e) => e.toStatus === 'QUOTED' || e.toStatus === 'QUOTE_STARTED').length;
+    const yesterdayQuotes = yesterdayDispositions.filter((e) => e.toStatus === 'QUOTED').length;
 
     let pace = null;
     if (goal) {

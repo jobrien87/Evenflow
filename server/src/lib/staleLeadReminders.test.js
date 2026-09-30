@@ -34,20 +34,20 @@ before(async () => {
 
   // Stale: assigned long ago, no note/activity/disposition since.
   const staleLead = await prisma.lead.create({
-    data: { agencyId, customerId, status: 'ASSIGNED', assignedToId: producerId, assignedAt: past, receivedAt: past },
+    data: { agencyId, customerId, status: 'NEW', assignedToId: producerId, assignedAt: past, receivedAt: past },
   });
   staleLeadId = staleLead.id;
 
   // Also assigned long ago, but has a recent note — must be skipped.
   const notedLead = await prisma.lead.create({
-    data: { agencyId, customerId, status: 'ASSIGNED', assignedToId: producerId, assignedAt: past, receivedAt: past },
+    data: { agencyId, customerId, status: 'NEW', assignedToId: producerId, assignedAt: past, receivedAt: past },
   });
   notedLeadId = notedLead.id;
   await prisma.leadNote.create({ data: { leadId: notedLeadId, authorId: producerId, content: 'Left a voicemail.' } });
 
   // Assigned recently — not old enough to be stale yet.
   const freshLead = await prisma.lead.create({
-    data: { agencyId, customerId, status: 'ASSIGNED', assignedToId: producerId },
+    data: { agencyId, customerId, status: 'NEW', assignedToId: producerId },
   });
   freshLeadId = freshLead.id;
 });

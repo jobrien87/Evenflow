@@ -8,7 +8,7 @@
 const { prisma } = require('./db');
 const { computeFunnel, pct } = require('./funnelMetrics');
 
-const QUOTED_OR_BEYOND = ['QUOTE_STARTED', 'QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'];
+const QUOTED_OR_BEYOND = ['QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'];
 
 // { agencyId, userId?, from, to } -> one row per vendor this scope actually
 // received leads from in the period (vendors with zero leads in-period are

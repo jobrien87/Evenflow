@@ -6,7 +6,7 @@ import { PRODUCTS, PRODUCT_META } from '../lib/productMeta';
 import { fireCelebration } from '../lib/celebrations';
 
 const LEAD_STATUSES = [
-  'NEW', 'ASSIGNED', 'CONTACTED', 'LEFT_VM', 'APPOINTMENT', 'QUOTE_STARTED',
+  'NEW', 'CONTACTED', 'LEFT_VM', 'APPOINTMENT',
   'QUOTED', 'QUOTED_HOT', 'FOLLOW_UP', 'SOLD', 'LOST', 'NOT_INTERESTED', 'BAD_CONTACT',
   'DUPLICATE', 'DO_NOT_CONTACT', 'INELIGIBLE', 'ARCHIVED',
 ];
@@ -29,8 +29,8 @@ const ACTIVITY_ICON = { CALL: 'phone', EMAIL: 'mail', TEXT: 'chat' };
 // never a real chosen outcome), kept in sync manually like this app's other
 // small server/client constant pairs.
 const STATUS_RANK = {
-  NEW: 0, ASSIGNED: 0, LEFT_VM: 1, CONTACTED: 2,
-  APPOINTMENT: 3, QUOTE_STARTED: 3, QUOTED: 4, QUOTED_HOT: 4, FOLLOW_UP: 4, SOLD: 5,
+  NEW: 0, LEFT_VM: 1, CONTACTED: 2,
+  APPOINTMENT: 3, QUOTED: 4, QUOTED_HOT: 4, FOLLOW_UP: 4, SOLD: 5,
   LOST: 99, NOT_INTERESTED: 99, BAD_CONTACT: 99, DUPLICATE: 99, DO_NOT_CONTACT: 99, INELIGIBLE: 99, ARCHIVED: 99,
 };
 

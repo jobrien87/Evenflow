@@ -10,10 +10,10 @@ const { computeProducerScore, computeAgencyScore, computeTelemarketerScore } = r
 // manual disposition flow, never a replacement for it — it can only save
 // an agent a step, never take one away.
 const STATUS_RANK = {
-  NEW: 0, ASSIGNED: 0,
+  NEW: 0,
   LEFT_VM: 1,
   CONTACTED: 2,
-  APPOINTMENT: 3, QUOTE_STARTED: 3,
+  APPOINTMENT: 3,
   QUOTED: 4, QUOTED_HOT: 4, FOLLOW_UP: 4,
   SOLD: 5,
   LOST: 99, NOT_INTERESTED: 99, BAD_CONTACT: 99, DUPLICATE: 99,
@@ -22,8 +22,8 @@ const STATUS_RANK = {
 
 // Called after a real action that implies pipeline progress — an outbound
 // or inbound activity logged, a product marked QUOTED or SOLD — so a lead
-// never sits stuck on NEW/ASSIGNED ("untouched") despite real work already
-// being done on it. Fetches its own fresh copy of the lead rather than
+// never sits stuck on NEW ("untouched") despite real work already being
+// done on it. Fetches its own fresh copy of the lead rather than
 // trusting a caller's possibly-stale copy, since this runs after other
 // writes in the same request. Returns the updated lead, or null if no
 // advance happened (already at or past targetStatus).
@@ -37,7 +37,7 @@ async function autoAdvanceLeadStatus({ leadId, targetStatus, reason }) {
 
   const now = new Date();
   const patch = { status: targetStatus };
-  if ((lead.status === 'NEW' || lead.status === 'ASSIGNED') && !lead.firstAttemptAt && targetStatus === 'CONTACTED') {
+  if (lead.status === 'NEW' && !lead.firstAttemptAt && targetStatus === 'CONTACTED') {
     patch.firstAttemptAt = now;
   }
   if (targetStatus === 'CONTACTED' && !lead.firstContactAt) {
