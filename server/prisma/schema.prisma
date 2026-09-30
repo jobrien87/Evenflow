@@ -56,7 +56,6 @@ enum PresenceStatus {
 enum LeadStatus {
   NEW
   ASSIGNED
-  ATTEMPTED
   CONTACTED
   LEFT_VM
   APPOINTMENT

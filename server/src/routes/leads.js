@@ -707,13 +707,22 @@ router.post('/:leadId/activities', async (req, res, next) => {
       after: { type: activity.type, direction: activity.direction }, correlationId: req.correlationId,
     });
 
-    // A real logged activity is real pipeline progress — a lead a producer
-    // actually called/texted/emailed should never keep reading "untouched"
-    // just because nobody separately picked a disposition. Inbound contact
-    // implies more than an attempt (the customer engaged back), so it
-    // targets CONTACTED instead of ATTEMPTED.
-    const autoTarget = parsed.data.direction === 'INBOUND' ? 'CONTACTED' : 'ATTEMPTED';
-    await autoAdvanceLeadStatus({ leadId: lead.id, targetStatus: autoTarget, reason: `activity_logged:${parsed.data.type}` });
+    // firstAttemptAt marks the moment a producer first actually worked this
+    // lead — set on any logged touch (inbound or outbound), independent of
+    // whether status itself advances, since the real-time speed-to-lead SLA
+    // check (firstAttemptSlaAlerts.js) keys off this timestamp specifically.
+    if (!lead.firstAttemptAt) {
+      await prisma.lead.update({ where: { id: lead.id }, data: { firstAttemptAt: new Date() } });
+    }
+
+    // Inbound contact means the customer actually engaged back — a lead a
+    // producer got a live response from should never keep reading
+    // "untouched." An outbound-only touch (a call/text/email that didn't
+    // reach the customer) no longer auto-advances status on its own; the
+    // producer's own disposition (Left VM, etc.) is what moves it forward.
+    if (parsed.data.direction === 'INBOUND') {
+      await autoAdvanceLeadStatus({ leadId: lead.id, targetStatus: 'CONTACTED', reason: `activity_logged:${parsed.data.type}` });
+    }
 
     return res.status(201).json({ success: true, activity });
   } catch (err) {
@@ -876,7 +885,7 @@ router.delete('/:leadId/products/:product', async (req, res, next) => {
 
 const dispositionSchema = z.object({
   status: z.enum([
-    'NEW', 'ASSIGNED', 'ATTEMPTED', 'CONTACTED', 'LEFT_VM', 'APPOINTMENT', 'QUOTE_STARTED',
+    'NEW', 'ASSIGNED', 'CONTACTED', 'LEFT_VM', 'APPOINTMENT', 'QUOTE_STARTED',
     'QUOTED', 'QUOTED_HOT', 'FOLLOW_UP', 'SOLD', 'LOST', 'NOT_INTERESTED', 'BAD_CONTACT',
     'DUPLICATE', 'DO_NOT_CONTACT', 'INELIGIBLE', 'ARCHIVED',
   ]),
@@ -905,7 +914,7 @@ router.post('/:leadId/disposition', async (req, res, next) => {
     const now = new Date();
     const patch = { status: parsed.data.status };
     if (fromStatus === 'NEW' || fromStatus === 'ASSIGNED') {
-      if (!lead.firstAttemptAt && ['ATTEMPTED', 'CONTACTED'].includes(parsed.data.status)) {
+      if (!lead.firstAttemptAt && parsed.data.status === 'CONTACTED') {
         patch.firstAttemptAt = now;
       }
     }

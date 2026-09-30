@@ -11,7 +11,7 @@ const { computeProducerScore, computeAgencyScore, computeTelemarketerScore } = r
 // an agent a step, never take one away.
 const STATUS_RANK = {
   NEW: 0, ASSIGNED: 0,
-  ATTEMPTED: 1, LEFT_VM: 1,
+  LEFT_VM: 1,
   CONTACTED: 2,
   APPOINTMENT: 3, QUOTE_STARTED: 3,
   QUOTED: 4, QUOTED_HOT: 4, FOLLOW_UP: 4,
@@ -37,7 +37,7 @@ async function autoAdvanceLeadStatus({ leadId, targetStatus, reason }) {
 
   const now = new Date();
   const patch = { status: targetStatus };
-  if ((lead.status === 'NEW' || lead.status === 'ASSIGNED') && !lead.firstAttemptAt && ['ATTEMPTED', 'CONTACTED'].includes(targetStatus)) {
+  if ((lead.status === 'NEW' || lead.status === 'ASSIGNED') && !lead.firstAttemptAt && targetStatus === 'CONTACTED') {
     patch.firstAttemptAt = now;
   }
   if (targetStatus === 'CONTACTED' && !lead.firstContactAt) {

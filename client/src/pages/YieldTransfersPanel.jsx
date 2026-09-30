@@ -6,7 +6,7 @@ import ChatThread from './ChatThread';
 import TransferHistoryPanel from './TransferHistoryPanel';
 
 const LEAD_STATUSES = [
-  'NEW', 'ASSIGNED', 'ATTEMPTED', 'CONTACTED', 'APPOINTMENT', 'QUOTE_STARTED',
+  'NEW', 'ASSIGNED', 'CONTACTED', 'APPOINTMENT', 'QUOTE_STARTED',
   'QUOTED', 'FOLLOW_UP', 'SOLD', 'LOST', 'BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT', 'ARCHIVED',
 ];
 
