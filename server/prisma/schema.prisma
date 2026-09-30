@@ -465,6 +465,12 @@ model Lead {
   // the staleness window has passed again.
   lastReminderSentAt DateTime?
 
+  // Set the moment a "speed to first attempt" SLA-breach alert fires (see
+  // lib/firstAttemptSlaAlerts.js) — a separate, much faster real-time check
+  // than the general staleness reminder above, so it needs its own
+  // re-notify guard rather than sharing lastReminderSentAt.
+  firstAttemptSlaAlertSentAt DateTime?
+
   // A telemarketer flags a lead as a live transfer (the caller is on the
   // line right now) at submission time — makes it claimable through the
   // Moshpit pool the same way a vendor-Moshpit lead is, regardless of the

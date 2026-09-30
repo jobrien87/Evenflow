@@ -8,12 +8,28 @@ const PERIODS = [
   { key: 'today', label: 'Today', from: () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); } },
 ];
 
+// Matches server/src/lib/firstAttemptSlaAlerts.js's FIRST_ATTEMPT_SLA_MINUTES
+// default — the same "speed to lead is blown" line the real-time per-lead
+// alert uses, so this card's own coloring agrees with what actually
+// triggers a producer notification instead of picking an unrelated number.
+const SLA_MINUTES = 30;
+
+function formatHMS(minutes) {
+  if (minutes == null) return null;
+  const totalSeconds = Math.max(0, Math.round(minutes * 60));
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const sec = totalSeconds % 60;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(h)}:${pad(m)}:${pad(sec)}`;
+}
+
 // isDuration: true for the one non-percentage tile (speed to first
-// attempt, in minutes) — a literal "0" there would misleadingly read as
+// attempt, HH:MM:SS) — a literal "0" there would misleadingly read as
 // "instant," so it keeps the neutral dash and just says "No leads yet."
 // Every percentage tile (contact/quote/close rate) shows an honest 0%
 // instead, since "0 out of 0" is a fair, non-misleading starting value.
-function Rate({ label, value, sampleSize, onClick, isDuration }) {
+function Rate({ label, value, sampleSize, onClick, isDuration, tone }) {
   const clickable = onClick && sampleSize > 0;
   const sub = sampleSize === 0 ? 'No leads yet' : sampleSize < 3 ? `Limited data (${sampleSize})` : null;
   const displayValue = value !== null ? (isDuration ? value : `${value}%`) : isDuration ? '—' : '0%';
@@ -22,6 +38,7 @@ function Rate({ label, value, sampleSize, onClick, isDuration }) {
       label={label}
       value={displayValue}
       sub={sub}
+      tone={tone}
       onClick={clickable ? onClick : undefined}
     />
   );
@@ -79,9 +96,10 @@ export default function FunnelMetricsCard({ scope = 'me', title = 'FUNNEL', onSe
       <div style={s.ratesRow}>
         <Rate
           label="Speed to first attempt"
-          value={primary.speedToFirstAttemptMedianMinutes !== null ? Math.round(primary.speedToFirstAttemptMedianMinutes) : null}
+          value={formatHMS(primary.speedToFirstAttemptMedianMinutes)}
           sampleSize={primary.speedToFirstAttemptSampleSize}
           isDuration
+          tone={primary.speedToFirstAttemptMedianMinutes !== null && primary.speedToFirstAttemptMedianMinutes > SLA_MINUTES ? 'danger' : undefined}
         />
         <Rate label="Contact rate" value={primary.contactRate} sampleSize={primary.contactRateSampleSize} onClick={onSelectStage && (() => onSelectStage('contacted', range))} />
         <Rate label="Quote rate" value={primary.quoteRate} sampleSize={primary.quoteRateSampleSize} onClick={onSelectStage && (() => onSelectStage('quoted', range))} />

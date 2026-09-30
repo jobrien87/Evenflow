@@ -6,7 +6,10 @@ import { notificationTarget } from './notificationRouting';
 import { pushToast } from '../ui/Toast';
 import { playDrumRoll } from './drumRoll';
 
-const LEAD_ALERT_TYPES = new Set(['lead.new', 'lead.assigned', 'lead.moshpit_available']);
+// lead.first_attempt_overdue is a speed-to-lead SLA breach — reuses the
+// exact same "make noise + pop a toast right now" mechanism as a brand new
+// lead, since a blown SLA needs the same immediate notice.
+const LEAD_ALERT_TYPES = new Set(['lead.new', 'lead.assigned', 'lead.moshpit_available', 'lead.first_attempt_overdue']);
 const POLL_MS = 15000;
 
 // Polls the same real Notification data NotificationBell.jsx already reads
