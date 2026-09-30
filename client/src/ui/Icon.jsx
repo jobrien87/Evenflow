@@ -46,6 +46,8 @@ const PATHS = {
   building: 'M4 21V6l7-3 7 3v15M4 21h16M9 9h1M9 13h1M14 9h1M14 13h1M9 21v-5h6v5',
   cake: 'M4 21v-8a2 2 0 0 1 2-2h1V9a1 1 0 0 1 2 0v2h1v-2a1 1 0 0 1 2 0v2h1v-2a1 1 0 0 1 2 0v2h1a2 2 0 0 1 2 2v8zM4 17h16M11 3a1 1 0 1 0 2 0c0-1-1-1-1-2',
   alert: 'M12 3l10 18H2L12 3zM12 10v4M12 17h.01',
+  send: 'M21 3L3 10.5l7 3.5m11-11l-6.5 17-4.5-7.5m11-9.5l-11 9.5',
+  help: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9a2.5 2.5 0 0 1 4.9.75c0 1.5-2.4 1.75-2.4 3.25M12 17h.01',
 };
 
 export default function Icon({ name, size = 18, style }) {
