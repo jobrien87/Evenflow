@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { mainNavForRole, secondaryNavForRole } from './navConfig';
-import { Icon, Button, ComingSoonModal } from '../ui';
+import { Icon, Button, ComingSoonModal, Logo } from '../ui';
 
 export default function MobileDrawer({ open, onClose, onTakeTour }) {
   const { user, logout } = useAuth();
@@ -35,7 +35,7 @@ export default function MobileDrawer({ open, onClose, onTakeTour }) {
       />
       <div style={{ ...s.drawer, transform: open ? 'translateX(0)' : 'translateX(-100%)' }}>
         <div style={s.header}>
-          <span style={s.logo}>EVENFLOW</span>
+          <Logo size="sm" />
           <button style={s.closeButton} onClick={onClose} aria-label="Close menu">
             <Icon name="close" size={20} />
           </button>
@@ -98,10 +98,6 @@ const s = {
     transition: `transform var(--dur-base) var(--ease-standard)`,
   },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 'var(--space-4) var(--space-4)' },
-  logo: {
-    fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 15, letterSpacing: 1,
-    backgroundImage: 'var(--accent-gradient)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',
-  },
   closeButton: { background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex' },
   nav: { flex: 1, overflowY: 'auto', padding: '0 var(--space-3)', display: 'flex', flexDirection: 'column', gap: 2 },
   secondaryNav: { padding: '0 var(--space-3) var(--space-2)', borderTop: '1px solid var(--border-hairline)', paddingTop: 'var(--space-2)', display: 'flex', flexDirection: 'column', gap: 2 },

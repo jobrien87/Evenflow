@@ -1,4 +1,4 @@
-import { Icon } from '../ui';
+import { Icon, Logo } from '../ui';
 import NotificationBell from '../pages/NotificationBell';
 
 export default function MobileTopBar({ onMenuClick }) {
@@ -7,7 +7,7 @@ export default function MobileTopBar({ onMenuClick }) {
       <button style={s.iconButton} onClick={onMenuClick} aria-label="Open menu">
         <Icon name="menu" size={22} />
       </button>
-      <span style={s.logo}>EVENFLOW</span>
+      <Logo size="sm" />
       <span data-tour="notification-bell">
         <NotificationBell />
       </span>
@@ -31,14 +31,4 @@ const s = {
     zIndex: 'var(--z-sidebar)',
   },
   iconButton: { background: 'none', border: 'none', color: 'var(--text-primary)', padding: 4, cursor: 'pointer', display: 'flex' },
-  logo: {
-    fontFamily: 'var(--font-display)',
-    fontWeight: 700,
-    fontSize: 14,
-    letterSpacing: 1,
-    backgroundImage: 'var(--accent-gradient)',
-    WebkitBackgroundClip: 'text',
-    backgroundClip: 'text',
-    color: 'transparent',
-  },
 };

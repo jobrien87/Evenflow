@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
-import { Button } from '../ui';
+import { Button, Logo } from '../ui';
 
 export default function Login() {
   const { login } = useAuth();
@@ -46,8 +46,11 @@ export default function Login() {
 
   return (
     <div style={styles.wrap}>
+      <div style={styles.glowBackdrop} />
+      <div style={styles.hero}>
+        <Logo variant="hero" size="lg" tagline="THE AI-POWERED CRM FOR INSURANCE AGENCIES" />
+      </div>
       <div style={styles.card}>
-        <h1 style={styles.logo}>EVENFLOW</h1>
         {mode === 'login' ? (
           <form onSubmit={onSubmit}>
             <label style={styles.label}>Email</label>
@@ -55,7 +58,7 @@ export default function Login() {
             <label style={styles.label}>Password</label>
             <input style={styles.input} type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
             {error && <div style={styles.error}>{error}</div>}
-            <Button style={{ width: '100%', marginTop: 24 }} disabled={busy} type="submit">
+            <Button style={{ width: '100%', marginTop: 24, textTransform: 'uppercase', letterSpacing: 0.5 }} disabled={busy} type="submit">
               {busy ? 'Signing in…' : 'Sign In'}
             </Button>
             <button type="button" style={styles.linkButton} onClick={() => { setMode('forgot'); setForgotMessage(''); }}>
@@ -67,7 +70,7 @@ export default function Login() {
             <label style={styles.label}>Email</label>
             <input style={styles.input} type="email" value={forgotEmail} onChange={(e) => setForgotEmail(e.target.value)} required />
             {forgotMessage && <div style={styles.message}>{forgotMessage}</div>}
-            <Button style={{ width: '100%', marginTop: 24 }} disabled={forgotBusy} type="submit">
+            <Button style={{ width: '100%', marginTop: 24, textTransform: 'uppercase', letterSpacing: 0.5 }} disabled={forgotBusy} type="submit">
               {forgotBusy ? 'Sending…' : 'Send Reset Link'}
             </Button>
             <button type="button" style={styles.linkButton} onClick={() => { setMode('login'); setForgotMessage(''); }}>
@@ -81,16 +84,21 @@ export default function Login() {
 }
 
 const styles = {
-  wrap: { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh' },
+  wrap: {
+    position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+    height: '100vh', gap: 40, overflow: 'hidden', background: 'var(--bg)',
+  },
+  glowBackdrop: {
+    position: 'absolute', top: '18%', left: '50%', transform: 'translateX(-50%)',
+    width: 520, height: 520, borderRadius: '50%', pointerEvents: 'none',
+    background: 'radial-gradient(circle, rgba(198,255,46,0.16) 0%, rgba(22,224,160,0.08) 45%, transparent 70%)',
+  },
+  hero: { position: 'relative' },
   card: {
-    width: 360, padding: 32, background: 'var(--bg-elevated)',
+    position: 'relative', width: 360, padding: 32, background: 'var(--bg-elevated)',
     backdropFilter: 'var(--glass-blur)', WebkitBackdropFilter: 'var(--glass-blur)',
     border: '1px solid var(--border-hairline)', borderTopColor: 'var(--border-glass-highlight)',
     borderRadius: 12, boxShadow: 'var(--shadow-card)',
-  },
-  logo: {
-    fontFamily: 'var(--font-display)', fontWeight: 700, letterSpacing: 3, fontSize: 24, marginBottom: 24, textAlign: 'center',
-    backgroundImage: 'var(--accent-gradient)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',
   },
   label: { color: 'var(--text-secondary)', fontSize: 12, display: 'block', marginBottom: 6, marginTop: 14 },
   input: { width: '100%', padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 14 },

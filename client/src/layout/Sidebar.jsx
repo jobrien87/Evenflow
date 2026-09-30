@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { useTeamChatUnread } from '../lib/useTeamChatUnread';
 import { mainNavForRole, secondaryNavForRole, teamChatNavPath } from './navConfig';
-import { Icon, Button, ComingSoonModal } from '../ui';
+import { Icon, Button, ComingSoonModal, Logo } from '../ui';
 import NotificationBell from '../pages/NotificationBell';
 
 export default function Sidebar({ onTakeTour }) {
@@ -35,7 +35,7 @@ export default function Sidebar({ onTakeTour }) {
   return (
     <aside style={s.wrap}>
       <div style={s.logoRow}>
-        <span style={s.logo}>EVENFLOW</span>
+        <Logo size="md" />
       </div>
 
       <nav style={s.nav}>
@@ -101,16 +101,6 @@ const s = {
     WebkitBackdropFilter: 'var(--glass-blur)',
   },
   logoRow: { padding: 'var(--space-5) var(--space-5) var(--space-4)' },
-  logo: {
-    fontFamily: 'var(--font-display)',
-    fontWeight: 700,
-    fontSize: 18,
-    letterSpacing: 1,
-    backgroundImage: 'var(--accent-gradient)',
-    WebkitBackgroundClip: 'text',
-    backgroundClip: 'text',
-    color: 'transparent',
-  },
   nav: { flex: 1, overflowY: 'auto', padding: '0 var(--space-3)', display: 'flex', flexDirection: 'column', gap: 2 },
   secondaryNav: { padding: '0 var(--space-3) var(--space-2)', borderTop: '1px solid var(--border-hairline)', paddingTop: 'var(--space-2)', display: 'flex', flexDirection: 'column', gap: 2 },
   unreadDot: {
