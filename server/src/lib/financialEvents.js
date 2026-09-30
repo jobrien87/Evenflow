@@ -30,7 +30,24 @@ async function recordLeadSaleRevenue(lead) {
   });
 }
 
+// Called when a single product on a lead (see LeadProductQuote) is marked
+// SOLD with a real entered premium — the per-product analog of
+// recordLeadSaleRevenue, since one lead can now sell several products at
+// different premiums instead of exactly one.
+async function recordLeadProductSaleRevenue({ agencyId, leadId, productLabel, premiumCents }) {
+  if (!agencyId || !premiumCents) return null;
+  return prisma.revenueEvent.create({
+    data: {
+      agencyId,
+      category: 'LEAD_REVENUE',
+      amountCents: premiumCents,
+      notes: `Sale premium recorded for lead ${leadId} (${productLabel})`,
+    },
+  });
+}
+
 module.exports = {
   recordVendorLeadCost,
   recordLeadSaleRevenue,
+  recordLeadProductSaleRevenue,
 };

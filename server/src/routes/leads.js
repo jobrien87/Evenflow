@@ -7,7 +7,8 @@ const { recordAudit } = require('../lib/audit');
 const { scoreLead } = require('../lib/priority');
 const { deriveLeadType, BULK_UPLOAD_CATEGORIES, applyBulkUploadCategory } = require('../lib/leadType');
 const { normalizePhone, normalizeEmail } = require('../lib/normalize');
-const { recordLeadSaleRevenue } = require('../lib/financialEvents');
+const { recordLeadSaleRevenue, recordLeadProductSaleRevenue } = require('../lib/financialEvents');
+const { PRODUCTS, PRODUCT_LABELS } = require('../lib/products');
 const { notifyUser, notifyUsers, notifyAgencyOwners } = require('../lib/notifications');
 const { updateCustomerProductsAndDetectCrossSells } = require('../lib/opportunityEvents');
 const { computeProducerScore, computeAgencyScore, computeTelemarketerScore } = require('../lib/flowScore');
@@ -638,6 +639,7 @@ router.get('/:leadId', async (req, res, next) => {
         notes: { include: { author: { select: { firstName: true, lastName: true } } }, orderBy: { createdAt: 'desc' } },
         activities: { include: { createdBy: { select: { firstName: true, lastName: true } } }, orderBy: { occurredAt: 'desc' } },
         tasks: { include: { assignedTo: { select: { id: true, firstName: true, lastName: true } } }, orderBy: { createdAt: 'desc' } },
+        productQuotes: { orderBy: { product: 'asc' } },
       },
     });
     if (!lead) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
@@ -731,6 +733,129 @@ router.post('/:leadId/notes', async (req, res, next) => {
     });
 
     return res.status(201).json({ success: true, note });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Recomputes Lead.salePremiumCents/saleProduct as a derived sum/join of this
+// lead's SOLD LeadProductQuote rows, so the existing per-vendor/per-zip
+// revenue reports (which read those two fields directly off Lead, not this
+// new table) stay correct without needing their own changes.
+async function syncLeadSaleFieldsFromProductQuotes(leadId) {
+  const soldRows = await prisma.leadProductQuote.findMany({ where: { leadId, status: 'SOLD' } });
+  const totalSoldCents = soldRows.reduce((sum, r) => sum + (r.premiumCents || 0), 0);
+  const soldLabels = soldRows.map((r) => PRODUCT_LABELS[r.product] || r.product).join(', ') || null;
+  await prisma.lead.update({
+    where: { id: leadId },
+    data: { salePremiumCents: totalSoldCents || null, saleProduct: soldLabels },
+  });
+}
+
+const productActionSchema = z.object({
+  product: z.enum(PRODUCTS),
+  status: z.enum(['QUOTED', 'SOLD']),
+  premiumCents: z.number().int().positive().optional(),
+});
+
+// Per-product quote/sale tracking — independent of the lead's overall
+// pipeline `status`. Diffing PRODUCTS against this lead's productQuotes is
+// what tells an agent which products still need cross-selling.
+router.post('/:leadId/products', async (req, res, next) => {
+  try {
+    const parsed = productActionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+    const { lead, forbidden } = await loadLeadWithAccessCheck(req);
+    if (!lead) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (forbidden) return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+
+    const { product, status, premiumCents } = parsed.data;
+    const existing = await prisma.leadProductQuote.findUnique({
+      where: { leadId_product: { leadId: lead.id, product } },
+    });
+    const wasSold = existing?.status === 'SOLD';
+    const now = new Date();
+
+    await prisma.leadProductQuote.upsert({
+      where: { leadId_product: { leadId: lead.id, product } },
+      create: {
+        leadId: lead.id,
+        product,
+        status,
+        premiumCents: premiumCents ?? null,
+        soldAt: status === 'SOLD' ? now : null,
+        createdById: req.user.id,
+      },
+      update: {
+        status,
+        premiumCents: premiumCents ?? existing?.premiumCents ?? null,
+        soldAt: status === 'SOLD' && !wasSold ? now : existing?.soldAt,
+      },
+    });
+
+    await prisma.leadEvent.create({
+      data: {
+        leadId: lead.id,
+        type: status === 'SOLD' ? 'lead.product_sold' : 'lead.product_quoted',
+        metadata: { product, premiumCents: premiumCents ?? null },
+      },
+    });
+
+    // Real, entered sale premium feeds the Financial Ledger — only on the
+    // first time this product is marked SOLD, so re-saving/correcting an
+    // already-sold product's premium never double-books revenue.
+    if (status === 'SOLD' && !wasSold && premiumCents) {
+      await recordLeadProductSaleRevenue({
+        agencyId: lead.agencyId, leadId: lead.id, productLabel: PRODUCT_LABELS[product], premiumCents,
+      });
+      if (lead.customerId) {
+        await updateCustomerProductsAndDetectCrossSells({
+          customerId: lead.customerId, agencyId: lead.agencyId, soldProduct: PRODUCT_LABELS[product],
+        });
+      }
+    }
+
+    await syncLeadSaleFieldsFromProductQuotes(lead.id);
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: lead.agencyId,
+      action: 'lead.product_quote_saved', entityType: 'Lead', entityId: lead.id,
+      after: { product, status, premiumCents: premiumCents ?? null }, correlationId: req.correlationId,
+    });
+
+    const productQuotes = await prisma.leadProductQuote.findMany({ where: { leadId: lead.id }, orderBy: { product: 'asc' } });
+    return res.json({ success: true, productQuotes });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Un-mark a product (back to "not quoted") — blocked once SOLD, since that
+// would silently remove a row a RevenueEvent already references (by lead id
+// + product, in its notes — there's no hard FK to clean up automatically).
+router.delete('/:leadId/products/:product', async (req, res, next) => {
+  try {
+    if (!PRODUCTS.includes(req.params.product)) {
+      return res.status(400).json({ success: false, error: 'INVALID_PRODUCT' });
+    }
+    const { lead, forbidden } = await loadLeadWithAccessCheck(req);
+    if (!lead) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (forbidden) return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+
+    const existing = await prisma.leadProductQuote.findUnique({
+      where: { leadId_product: { leadId: lead.id, product: req.params.product } },
+    });
+    if (existing) {
+      if (existing.status === 'SOLD') {
+        return res.status(409).json({ success: false, error: 'ALREADY_SOLD', message: 'A sold product cannot be un-marked here.' });
+      }
+      await prisma.leadProductQuote.delete({ where: { id: existing.id } });
+    }
+
+    const productQuotes = await prisma.leadProductQuote.findMany({ where: { leadId: lead.id }, orderBy: { product: 'asc' } });
+    return res.json({ success: true, productQuotes });
   } catch (err) {
     next(err);
   }

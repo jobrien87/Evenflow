@@ -44,6 +44,8 @@ export const api = {
   claimLead: (id) => request(`/leads/${id}/claim`, { method: 'POST' }),
   logLeadActivity: (id, payload) => request(`/leads/${id}/activities`, { method: 'POST', body: payload }),
   createLeadNote: (id, content) => request(`/leads/${id}/notes`, { method: 'POST', body: { content } }),
+  logProductQuote: (id, payload) => request(`/leads/${id}/products`, { method: 'POST', body: payload }),
+  deleteProductQuote: (id, product) => request(`/leads/${id}/products/${product}`, { method: 'DELETE' }),
 
   tasks: (params = '') => request(`/tasks${params}`),
   createTask: (payload) => request('/tasks', { method: 'POST', body: payload }),

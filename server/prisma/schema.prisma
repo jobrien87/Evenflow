@@ -280,6 +280,7 @@ model User {
   tasksCreated      Task[]           @relation("TaskCreatedBy")
   leadNotes         LeadNote[]
   leadActivities    LeadActivity[]
+  leadProductQuotes LeadProductQuote[]
   auditEvents       AuditEvent[]
   sessions          Session[]
   telemarketerAssignments TelemarketerAssignment[] @relation("TMAssignments")
@@ -497,17 +498,49 @@ model Lead {
   callbackTime      String?
   tmNotes           String?
 
-  events     LeadEvent[]
-  notes      LeadNote[]
-  tasks      Task[]
-  calls      Call[]
-  activities LeadActivity[]
+  events        LeadEvent[]
+  notes         LeadNote[]
+  tasks         Task[]
+  calls         Call[]
+  activities    LeadActivity[]
+  productQuotes LeadProductQuote[]
 
   @@index([agencyId])
   @@index([assignedToId])
   @@index([status])
   @@index([receivedAt])
   @@unique([vendorId, externalLeadId])
+}
+
+enum LeadProductStatus {
+  QUOTED
+  SOLD
+}
+
+// Per-product quote/sale tracking on a Lead — independent of the lead's
+// overall pipeline `status`. One row per (lead, product): created when a
+// product is marked QUOTED, transitions to SOLD with its own premium.
+// Diffing this table's products against the canonical product list (see
+// lib/products.js) is what tells an agent "what still needs to be
+// cross-sold" on this lead. Lead.salePremiumCents/saleProduct stay in sync
+// as a derived sum/join of this table's SOLD rows, so existing per-vendor/
+// per-zip revenue reports (which read those two fields directly) keep
+// working unchanged.
+model LeadProductQuote {
+  id           String            @id @default(uuid())
+  leadId       String
+  lead         Lead              @relation(fields: [leadId], references: [id])
+  product      String
+  status       LeadProductStatus @default(QUOTED)
+  premiumCents Int?
+  quotedAt     DateTime          @default(now())
+  soldAt       DateTime?
+  createdById  String?
+  createdBy    User?             @relation(fields: [createdById], references: [id])
+  updatedAt    DateTime          @updatedAt
+
+  @@unique([leadId, product])
+  @@index([leadId])
 }
 
 model LeadEvent {
