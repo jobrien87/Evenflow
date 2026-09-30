@@ -96,6 +96,11 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
   // and cleared the moment a real disposition is saved — drives the
   // close-time reminder below.
   const [touchedSinceDisposition, setTouchedSinceDisposition] = useState(false);
+  // A CALL logged with no outcome/note text this session — the one case
+  // that always demands a reminder regardless of anything else, since a
+  // content-free "logged a call" tells the team nothing about what
+  // actually happened.
+  const [bareCallLogged, setBareCallLogged] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
 
   useEffect(() => {
@@ -119,7 +124,11 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
     onChanged?.();
   }
 
-  async function refreshTouched() {
+  // Called by activity/note/product actions. `meta` (when the caller has
+  // it) is `{ type, outcome }` for a logged activity — used only to catch
+  // a bare, note-free CALL.
+  async function refreshTouched(meta) {
+    if (meta?.type === 'CALL' && !meta?.outcome) setBareCallLogged(true);
     setTouchedSinceDisposition(true);
     await refresh();
   }
@@ -129,17 +138,30 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
     await refresh();
   }
 
-  // A lead still sitting at a generic auto-state (rank < 3 — never a real
-  // chosen outcome like LEFT_VM, an appointment, a quote, a sale, or a
-  // terminal disposition) after real work was logged on it is exactly the
-  // "still says untouched despite a call and a note" complaint this guards
-  // against — nudge instead of silently closing.
+  // Three-part rule: (1) a bare, note-free call always demands a reminder,
+  // no matter what else is true — it's zero information. (2) A lead that's
+  // ever actually been dispositioned by a human (a real `lead.disposition`
+  // event exists in its history, not just an automatic advance) doesn't
+  // need re-nagging just because routine follow-up activity got logged on
+  // it — that's normal working of an already-real lead, not "untouched."
+  // (3) A lead that's NEVER been really dispositioned, still sitting at a
+  // generic auto-state (rank < 3) after real work happened on it this
+  // session, is exactly the original "still says untouched" complaint.
   function requestClose() {
-    if (lead && touchedSinceDisposition && (STATUS_RANK[lead.status] ?? 0) < 3) {
+    if (!lead) return onClose();
+
+    if (bareCallLogged) {
       setConfirmClose(true);
-    } else {
-      onClose();
+      return;
     }
+
+    const everDispositioned = (lead.events || []).some((e) => e.type === 'lead.disposition');
+    if (!everDispositioned && touchedSinceDisposition && (STATUS_RANK[lead.status] ?? 0) < 3) {
+      setConfirmClose(true);
+      return;
+    }
+
+    onClose();
   }
 
   if (loading) {
@@ -174,7 +196,9 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
           <div style={s.confirmBox}>
             <div style={s.confirmTitle}>Disposition this lead?</div>
             <div style={s.confirmBody}>
-              You logged real activity on this lead, but it's still sitting as <strong>{lead.status.replace(/_/g, ' ')}</strong> — pick a real disposition below before you go, or it'll keep showing as untouched.
+              {bareCallLogged
+                ? 'You logged a call with no outcome or note — add what happened, or set a real disposition, before you go.'
+                : <>You logged real activity on this lead, but it's still sitting as <strong>{lead.status.replace(/_/g, ' ')}</strong> — pick a real disposition below before you go, or it'll keep showing as untouched.</>}
             </div>
             <div style={s.confirmActions}>
               <Button variant="secondary" size="sm" onClick={() => setConfirmClose(false)}>GO BACK</Button>
@@ -460,7 +484,7 @@ function QuickActionsBlock({ lead, user, onDone }) {
     try {
       await api.logLeadActivity(lead.id, { type, direction: 'OUTBOUND' });
       setStatus(`${label} logged.`);
-      await onDone();
+      await onDone({ type, outcome: undefined });
     } catch (e) {
       setStatus(e.data?.message || `Failed to log ${label.toLowerCase()}.`);
     } finally {
@@ -654,8 +678,9 @@ function ActivityBlock({ lead, onDone }) {
     setErr('');
     try {
       await api.logLeadActivity(lead.id, { type, direction, outcome: outcome || undefined });
+      const loggedOutcome = outcome;
       setOutcome('');
-      await onDone();
+      await onDone({ type, outcome: loggedOutcome || undefined });
     } catch (e) {
       setErr(e.data?.message || 'Failed to log activity.');
     } finally {
