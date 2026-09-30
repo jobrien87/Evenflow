@@ -290,7 +290,7 @@ router.get('/:agencyId/activity', async (req, res, next) => {
   }
 });
 
-const LEAD_TYPES = ['TRANSFER', 'PAID_AD', 'DIRECT_MAIL', 'META_AD', 'MANUAL', 'WINBACK', 'CROSS_SELL'];
+const LEAD_TYPES = ['TRANSFER', 'REFERRAL', 'PAID_AD', 'META_AD', 'INTERNET', 'DIRECT_MAIL', 'MANUAL', 'WINBACK', 'CROSS_SELL'];
 const priorityRulesSchema = z.object({
   typeRank: z.array(z.enum(LEAD_TYPES)).min(1).optional(),
   statusRules: z.record(z.object({

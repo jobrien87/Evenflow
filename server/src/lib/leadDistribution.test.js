@@ -7,7 +7,7 @@
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { prisma } = require('./db');
-const { pickAgentIndex, resolveVendorAssignment } = require('./leadDistribution');
+const { pickAgentIndex, alphaSplitIndex, resolveVendorAssignment } = require('./leadDistribution');
 
 test('pickAgentIndex cycles through candidates in order as the cursor advances', () => {
   assert.equal(pickAgentIndex(1, 3), 1);
@@ -24,6 +24,27 @@ test('pickAgentIndex handles a single candidate (always index 0)', () => {
 test('pickAgentIndex returns null for zero or invalid candidate counts', () => {
   assert.equal(pickAgentIndex(5, 0), null);
   assert.equal(pickAgentIndex(5, -1), null);
+});
+
+test('alphaSplitIndex partitions A-Z evenly across candidates', () => {
+  // 2 candidates: A-M -> 0, N-Z -> 1
+  assert.equal(alphaSplitIndex('Adams', 2), 0);
+  assert.equal(alphaSplitIndex('Miller', 2), 0);
+  assert.equal(alphaSplitIndex('Nolan', 2), 1);
+  assert.equal(alphaSplitIndex('Zimmerman', 2), 1);
+});
+
+test('alphaSplitIndex is case-insensitive and clamps non-letter/empty names to the first bucket', () => {
+  assert.equal(alphaSplitIndex('adams', 2), 0);
+  assert.equal(alphaSplitIndex('', 2), 0);
+  assert.equal(alphaSplitIndex(null, 2), 0);
+});
+
+test('alphaSplitIndex never returns an out-of-range bucket for an uneven split', () => {
+  for (const name of ['Adams', 'Miller', 'Nolan', 'Zimmerman', '123']) {
+    const index = alphaSplitIndex(name, 5);
+    assert.ok(index >= 0 && index < 5);
+  }
 });
 
 const suffix = Date.now();

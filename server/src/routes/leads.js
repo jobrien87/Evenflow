@@ -366,7 +366,7 @@ router.post('/bulk-import', uploadSpreadsheet.single('file'), async (req, res, n
 
     for (const row of parsedFile.leads) {
       try {
-        const result = await createLeadRecord({ agencyId, source: 'bulk_upload', createdById: req.user.id, data: { ...row, ...categoryFields } });
+        const result = await createLeadRecord({ agencyId, source: categoryFields.sourceOverride || 'bulk_upload', createdById: req.user.id, data: { ...row, ...categoryFields } });
         created += 1;
         await recordAudit({
           actorId: req.user.id,

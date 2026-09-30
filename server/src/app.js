@@ -36,6 +36,7 @@ const chatRoutes = require('./routes/chat');
 const runningReportRoutes = require('./routes/runningReport');
 const healthRoutes = require('./routes/health');
 const roleplayRoutes = require('./routes/roleplay');
+const officeRoutes = require('./routes/offices');
 
 const app = express();
 
@@ -73,6 +74,7 @@ app.use('/api/start-my-day', startMyDayRoutes);
 app.use('/api/telemarketers', telemarketerRoutes);
 app.use('/api/transfers', transferRoutes);
 app.use('/api/vendors', vendorRoutes);
+app.use('/api/offices', officeRoutes);
 app.use('/api/financials', financialRoutes);
 app.use('/api/ed', edRoutes);
 app.use('/api/support', supportRoutes);

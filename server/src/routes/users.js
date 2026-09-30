@@ -130,6 +130,7 @@ router.get('/', async (req, res, next) => {
       select: {
         id: true, email: true, firstName: true, lastName: true, role: true,
         status: true, agencyId: true, createdAt: true, phone: true,
+        officeId: true, office: { select: { id: true, name: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -292,6 +293,8 @@ const updateUserSchema = z.object({
   firstName: z.string().min(1).optional(),
   lastName: z.string().min(1).optional(),
   phone: z.string().optional(),
+  // null explicitly unassigns the producer from any office.
+  officeId: z.string().uuid().nullable().optional(),
 });
 
 // Fix a typo'd name, or keep a producer's real contact number on file — no
@@ -308,14 +311,22 @@ router.patch('/:userId', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM
     if (req.user.role !== 'PLATFORM_OWNER' && target.agencyId !== req.user.agencyId) {
       return res.status(403).json({ success: false, error: 'FORBIDDEN' });
     }
+    if (parsed.data.officeId) {
+      // Never trust a client-supplied officeId blindly — confirm it
+      // belongs to the exact same agency as the producer being assigned.
+      const office = await prisma.office.findUnique({ where: { id: parsed.data.officeId } });
+      if (!office || office.agencyId !== target.agencyId) {
+        return res.status(400).json({ success: false, error: 'VALIDATION', message: 'officeId must belong to this producer\'s own agency.' });
+      }
+    }
     const updated = await prisma.user.update({ where: { id: target.id }, data: parsed.data });
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role, agencyId: target.agencyId,
       action: 'user.updated', entityType: 'User', entityId: target.id,
-      before: { firstName: target.firstName, lastName: target.lastName, phone: target.phone },
+      before: { firstName: target.firstName, lastName: target.lastName, phone: target.phone, officeId: target.officeId },
       after: parsed.data, correlationId: req.correlationId,
     });
-    return res.json({ success: true, user: { id: updated.id, firstName: updated.firstName, lastName: updated.lastName, phone: updated.phone } });
+    return res.json({ success: true, user: { id: updated.id, firstName: updated.firstName, lastName: updated.lastName, phone: updated.phone, officeId: updated.officeId } });
   } catch (err) {
     next(err);
   }

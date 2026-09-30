@@ -124,7 +124,7 @@ router.post('/leads', requireVendorAuth, async (req, res) => {
         });
       }
 
-      const assignment = await resolveVendorAssignment(tx, req.vendor);
+      const assignment = await resolveVendorAssignment(tx, req.vendor, { lastName: customer.lastName });
 
       const lead = await tx.lead.create({
         data: {

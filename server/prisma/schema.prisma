@@ -173,31 +173,44 @@ enum CredentialStatus {
 // SELECTED_AGENTS: cycle through only Vendor.selectedAgentIds.
 // MOSHPIT: leave unassigned — any eligible producer can claim it (see
 // leadDistribution.js / GET /leads/moshpit).
+// ALPHA_SPLIT: partition every ACTIVE producer's customer last names into
+// contiguous A-Z ranges and route by the lead's customer's last name.
+// OFFICE_SPLIT: cycle through the agency's Offices, then within the chosen
+// office cycle through that office's ACTIVE producers.
 enum LeadDistributionMode {
   ROUND_ROBIN
   SELECTED_AGENTS
   MOSHPIT
+  ALPHA_SPLIT
+  OFFICE_SPLIT
 }
 
 // Marketing category a vendor's leads come from — drives the default
 // Lead.leadType for anything sourced from that vendor (set once per vendor,
 // not per lead). See Agency.priorityRules for how this feeds the producer
-// queue's ordering.
+// queue's ordering. INTERNET: real-time internet leads sent via the vendor
+// API, distinct from a scheduled PAID_AD/META_AD campaign feed.
 enum VendorCategory {
   PAID_AD
   DIRECT_MAIL
   META_AD
+  INTERNET
   OTHER
 }
 
 // Coarse lead-source category the configurable priority engine
 // (lib/priority.js) ranks against Agency.priorityRules.typeRank. Derived
-// automatically at creation — never picked by hand.
+// automatically at creation — never picked by hand. INTERNET: vendor-API
+// real-time internet leads (Vendor.category INTERNET). REFERRAL: a lead
+// referred by an existing customer, set via the bulk-upload category
+// picker or a manual disposition, never vendor-derived.
 enum LeadType {
   TRANSFER
+  REFERRAL
   PAID_AD
-  DIRECT_MAIL
   META_AD
+  INTERNET
+  DIRECT_MAIL
   MANUAL
   WINBACK
   CROSS_SELL
@@ -290,6 +303,21 @@ model User {
   backgroundImageStorageKey String?
   backgroundImageMimeType   String?
   fallingEffect             FallingEffect @default(NONE)
+  // Which physical office/branch this producer belongs to, for agencies
+  // with more than one location — drives OFFICE_SPLIT lead distribution
+  // and the roster's office grouping. Optional: an agency with one office
+  // (or one that hasn't set any up) just leaves every producer unassigned.
+  officeId      String?
+  office        Office?      @relation(fields: [officeId], references: [id])
+  // Month/day used for a birthday celebration popup — the year is stored
+  // but ignored everywhere it's read (isBirthdayToday only compares month
+  // and day). Never required, never shown to anyone but the account owner
+  // and their agency leadership.
+  birthday      DateTime?
+  // Set the first time this user's post-signup "welcome" celebration
+  // (confetti) has been shown — mirrors tourCompletedAt's exact pattern,
+  // just for a one-time celebratory moment instead of the product tour.
+  firstLoginCelebratedAt DateTime?
 
   invitations       Invitation[]     @relation("InvitationsSent")
   ownInvitation     Invitation?      @relation("InvitationForUser")
@@ -411,6 +439,24 @@ model Agency {
   timeClockEntries TimeClockEntry[]
   announcements Announcement[]
   producerNotes ProducerNote[]
+  offices       Office[]
+}
+
+// A physical branch/location within an agency — lets an agency with more
+// than one office assign producers to the right one and split vendor lead
+// flow across offices (LeadDistributionMode.OFFICE_SPLIT). Purely optional:
+// an agency that never creates one just has every producer unassigned.
+model Office {
+  id        String   @id @default(uuid())
+  agencyId  String
+  agency    Agency   @relation(fields: [agencyId], references: [id])
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users User[]
+
+  @@index([agencyId])
 }
 
 model Customer {

@@ -56,7 +56,7 @@ router.get('/', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'),
   }
 });
 
-const VENDOR_CATEGORIES = ['PAID_AD', 'DIRECT_MAIL', 'META_AD', 'OTHER'];
+const VENDOR_CATEGORIES = ['PAID_AD', 'DIRECT_MAIL', 'META_AD', 'INTERNET', 'OTHER'];
 
 const createVendorSchema = z.object({
   agencyId: z.string().uuid().optional(),
@@ -64,7 +64,7 @@ const createVendorSchema = z.object({
   email: z.string().email(),
   product: z.string().min(1),
   costPerLeadCents: z.number().int().positive().nullable().optional(),
-  distributionMode: z.enum(['ROUND_ROBIN', 'SELECTED_AGENTS', 'MOSHPIT']).optional(),
+  distributionMode: z.enum(['ROUND_ROBIN', 'SELECTED_AGENTS', 'MOSHPIT', 'ALPHA_SPLIT', 'OFFICE_SPLIT']).optional(),
   selectedAgentIds: z.array(z.string().uuid()).optional(),
   // What kind of leads this vendor supplies — every lead sourced from it
   // inherits this as its Lead.leadType (see lib/leadType.js), which drives
@@ -207,7 +207,7 @@ const updateVendorSchema = z.object({
   email: z.string().email().optional(),
   product: z.string().min(1).optional(),
   costPerLeadCents: z.number().int().positive().nullable().optional(),
-  distributionMode: z.enum(['ROUND_ROBIN', 'SELECTED_AGENTS', 'MOSHPIT']).optional(),
+  distributionMode: z.enum(['ROUND_ROBIN', 'SELECTED_AGENTS', 'MOSHPIT', 'ALPHA_SPLIT', 'OFFICE_SPLIT']).optional(),
   selectedAgentIds: z.array(z.string().uuid()).optional(),
   category: z.enum(VENDOR_CATEGORIES).optional(),
 });
