@@ -57,11 +57,11 @@ export default function LeadsSnapshotBox({ agencyId, title = 'LEADS SNAPSHOT' })
       {error && <div style={s.error}>{error}</div>}
 
       <div style={s.statsGrid}>
-        <StatTile label="Total Leads" value={snapshot.totalLeads} />
+        <StatTile label="Total Leads" tone="white" value={snapshot.totalLeads} />
         <StatTile label="In Moshpit" value={snapshot.inMoshpit} sub={snapshot.inMoshpit > 0 ? 'unclaimed right now' : undefined} />
         <StatTile label="Untouched" value={snapshot.untouched} sub={snapshot.untouched > 0 ? 'no attempt yet' : undefined} />
-        <StatTile label="Quoted" value={snapshot.quoted} />
-        <StatTile label="Sold" value={snapshot.sold} />
+        <StatTile label="Quoted" tone="green" value={snapshot.quoted} />
+        <StatTile label="Sold" tone="lime" value={snapshot.sold} />
       </div>
     </Card>
   );

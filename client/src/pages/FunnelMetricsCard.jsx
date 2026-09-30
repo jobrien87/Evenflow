@@ -102,8 +102,8 @@ export default function FunnelMetricsCard({ scope = 'me', title = 'FUNNEL', onSe
           tone={primary.speedToFirstAttemptMedianMinutes !== null && primary.speedToFirstAttemptMedianMinutes > SLA_MINUTES ? 'danger' : undefined}
         />
         <Rate label="Contact rate" value={primary.contactRate} sampleSize={primary.contactRateSampleSize} onClick={onSelectStage && (() => onSelectStage('contacted', range))} />
-        <Rate label="Quote rate" value={primary.quoteRate} sampleSize={primary.quoteRateSampleSize} onClick={onSelectStage && (() => onSelectStage('quoted', range))} />
-        <Rate label="Close rate" value={primary.closeRate} sampleSize={primary.closeRateSampleSize} onClick={onSelectStage && (() => onSelectStage('sold', range))} />
+        <Rate label="Quote rate" tone="green" value={primary.quoteRate} sampleSize={primary.quoteRateSampleSize} onClick={onSelectStage && (() => onSelectStage('quoted', range))} />
+        <Rate label="Close rate" tone="lime" value={primary.closeRate} sampleSize={primary.closeRateSampleSize} onClick={onSelectStage && (() => onSelectStage('sold', range))} />
       </div>
       {primary.totalLeads === 0 && <div style={s.comparisonNote}>No Leads Yet — these will fill in as leads come through this period.</div>}
       {comparison && comparison.totalLeads > 0 && (

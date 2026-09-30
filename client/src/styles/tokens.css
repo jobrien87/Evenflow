@@ -45,6 +45,19 @@
   --warning-soft: rgba(255, 184, 77, 0.14);
   --success: var(--accent);
 
+  /* --- color blocking: tinted surface washes for stat tiles, section
+     blocks, and other "blocked" areas — greens/greys/whites drawn from
+     the same palette above, just used as fills instead of only text/
+     border accents, so the app doesn't read as one flat grey field. --- */
+  --surface-tint-green: rgba(22, 224, 160, 0.09);
+  --surface-tint-green-border: rgba(22, 224, 160, 0.3);
+  --surface-tint-lime: rgba(198, 255, 46, 0.09);
+  --surface-tint-lime-border: rgba(198, 255, 46, 0.3);
+  --surface-tint-grey: rgba(196, 202, 210, 0.07);
+  --surface-tint-grey-border: rgba(196, 202, 210, 0.24);
+  --surface-tint-white: rgba(246, 246, 241, 0.06);
+  --surface-tint-white-border: rgba(246, 246, 241, 0.2);
+
   /* --- shape / elevation --- */
   --radius-sm: 6px;
   --radius-md: 10px;
