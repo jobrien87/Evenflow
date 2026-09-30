@@ -91,8 +91,11 @@ router.delete('/me/background', async (req, res, next) => {
   }
 });
 
+// birthday drives lib/useAccountCelebrations.js's yearly celebration —
+// the falling-effect picker that used to live at this route is retired
+// in favor of real event-driven celebrations (see lib/celebrations.js).
 const personalizeSchema = z.object({
-  fallingEffect: z.enum(['NONE', 'HEARTS', 'STARS', 'SNOW', 'MONEY', 'BUBBLES', 'CONFETTI', 'FIRE']),
+  birthday: z.string().date().nullable(),
 });
 
 router.patch('/me/personalize', async (req, res, next) => {
@@ -103,9 +106,9 @@ router.patch('/me/personalize', async (req, res, next) => {
     }
     const updated = await prisma.user.update({
       where: { id: req.user.id },
-      data: { fallingEffect: parsed.data.fallingEffect },
+      data: { birthday: parsed.data.birthday ? new Date(parsed.data.birthday) : null },
     });
-    return res.json({ success: true, fallingEffect: updated.fallingEffect });
+    return res.json({ success: true, birthday: updated.birthday });
   } catch (err) {
     next(err);
   }

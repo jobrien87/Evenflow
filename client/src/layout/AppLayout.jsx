@@ -3,10 +3,11 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { useIsMobile } from '../lib/useViewport';
 import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
-import { GradientDefs, TourOverlay, ToastHost, FallingEffectOverlay } from '../ui';
+import { GradientDefs, TourOverlay, ToastHost, CelebrationHost } from '../ui';
 import { stepsForRole } from '../lib/tourSteps';
 import { unlockAudio } from '../lib/drumRoll';
 import LeadAlertListener, { LEAD_ALERT_ROLES } from '../lib/useLeadAlerts';
+import useAccountCelebrations from '../lib/useAccountCelebrations';
 import Sidebar from './Sidebar';
 import MobileTopBar from './MobileTopBar';
 import MobileDrawer from './MobileDrawer';
@@ -28,6 +29,7 @@ export default function AppLayout() {
   const [manualTourOpen, setManualTourOpen] = useState(false);
   const [tourStartIndex, setTourStartIndex] = useState(0);
   const roleSteps = user ? stepsForRole(user.role) : null;
+  useAccountCelebrations(user);
   const tourSteps = manualTourOpen ? roleSteps : (user && !user.tourCompletedAt && !tourDismissed ? roleSteps : null);
 
   // "Start with whatever page they're on" — find the step whose route
@@ -77,16 +79,11 @@ export default function AppLayout() {
     }
   }
 
-  // On the Personalize page itself, that page mounts its own overlay (so
-  // hovering an option previews it) — skip the global one there to avoid
-  // two canvases stacking the same effect.
-  const onPersonalizePage = location.pathname === '/personalize';
-
   return (
     <div style={{ minHeight: '100vh' }}>
       <GradientDefs />
       <PersonalizedBackdrop hasBackgroundImage={user?.hasBackgroundImage} />
-      {!onPersonalizePage && <FallingEffectOverlay effect={user?.fallingEffect} />}
+      <CelebrationHost />
       <ImpersonationBar />
       <TimeClockWidget />
       <div style={{ display: 'flex' }}>

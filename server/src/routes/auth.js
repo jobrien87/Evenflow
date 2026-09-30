@@ -145,6 +145,22 @@ router.post('/complete-tour', async (req, res, next) => {
   }
 });
 
+// Marks the one-time first-login celebration (lib/useAccountCelebrations.js)
+// shown so it never fires again for this account. Same req.realUser
+// pattern as /complete-tour, for the same reason.
+router.post('/complete-first-login-celebration', async (req, res, next) => {
+  if (!req.user) return res.status(401).json({ success: false, error: 'UNAUTHENTICATED' });
+  try {
+    const updated = await prisma.user.update({
+      where: { id: req.realUser.id },
+      data: { firstLoginCelebratedAt: new Date() },
+    });
+    return res.json({ success: true, user: publicUser(updated) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 const acceptInvitationSchema = z.object({
   token: z.string().min(10),
   password: z.string().min(10, 'Password must be at least 10 characters.'),
@@ -318,7 +334,10 @@ function publicUser(user) {
     // Personalize page — the storage key itself never leaves the server,
     // the client just needs to know whether to fetch GET /users/me/background.
     hasBackgroundImage: !!user.backgroundImageStorageKey,
-    fallingEffect: user.fallingEffect,
+    // Drives lib/useAccountCelebrations.js's one-time first-login and
+    // yearly birthday celebration moments.
+    birthday: user.birthday,
+    firstLoginCelebratedAt: user.firstLoginCelebratedAt,
   };
 }
 

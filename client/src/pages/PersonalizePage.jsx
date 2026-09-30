@@ -2,32 +2,26 @@ import { useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { useOwnBackgroundImage } from '../lib/useOwnBackgroundImage';
-import { Card, SectionHeader, Button, FileDropzone, Icon, FallingEffectOverlay, FALLING_EFFECTS, FALLING_EFFECT_LABELS, pushToast } from '../ui';
-
-const EFFECT_PREVIEW_ICON = {
-  NONE: 'close',
-  HEARTS: 'heart',
-  STARS: 'sparkle',
-  SNOW: 'sparkle',
-  MONEY: 'dollar',
-  BUBBLES: 'target',
-  CONFETTI: 'sparkle',
-  FIRE: 'flame',
-};
+import { Card, SectionHeader, Button, FileDropzone, pushToast } from '../ui';
 
 // Reachable by every role at /personalize (see App.jsx) — a per-account
 // cosmetic settings page, not tied to any role's nav tree. Background
-// image and falling effect are two independent settings, saved separately
-// (an image upload is a multipart request; the effect is a plain PATCH),
+// image and birthday are two independent settings, saved separately (an
+// image upload is a multipart request; the birthday is a plain PATCH),
 // matching this app's established "no combined form for two different
 // wire formats" pattern (e.g. calls.js's upload vs. its transcript PATCH).
+//
+// The falling-effect picker that used to live here is retired — falling
+// effects are now real event-driven celebrations (a sale, a completed
+// goal, a first login, a birthday), fired by lib/celebrations.js and
+// rendered by ui/CelebrationHost.jsx, not a persistent cosmetic choice.
 export default function PersonalizePage() {
   const { user, refreshUser } = useAuth();
   const blobUrl = useOwnBackgroundImage(user?.hasBackgroundImage);
   const [uploading, setUploading] = useState(false);
   const [removing, setRemoving] = useState(false);
-  const [savingEffect, setSavingEffect] = useState(false);
-  const [previewEffect, setPreviewEffect] = useState(null);
+  const [birthday, setBirthday] = useState(user?.birthday ? user.birthday.slice(0, 10) : '');
+  const [savingBirthday, setSavingBirthday] = useState(false);
   const [error, setError] = useState('');
 
   async function handleFile(file) {
@@ -57,26 +51,23 @@ export default function PersonalizePage() {
     }
   }
 
-  async function handleSelectEffect(effect) {
+  async function handleSaveBirthday(e) {
+    e.preventDefault();
     setError('');
-    setSavingEffect(true);
+    setSavingBirthday(true);
     try {
-      await api.updatePersonalization({ fallingEffect: effect });
+      await api.updatePersonalization({ birthday: birthday || null });
       await refreshUser();
+      pushToast({ title: 'Birthday saved', body: "We'll celebrate it when it comes around.", icon: 'cake' });
     } catch (err) {
-      setError(err.data?.message || 'Could not save that effect.');
+      setError(err.data?.message || 'Could not save your birthday.');
     } finally {
-      setSavingEffect(false);
+      setSavingBirthday(false);
     }
   }
 
-  const activeEffect = user?.fallingEffect || 'NONE';
-  const shownEffect = previewEffect || activeEffect;
-
   return (
     <div style={s.wrap}>
-      <FallingEffectOverlay effect={shownEffect} />
-
       <Card style={{ marginBottom: 'var(--space-5)' }}>
         <SectionHeader>Background Image</SectionHeader>
         {error && <div style={s.error}>{error}</div>}
@@ -100,25 +91,19 @@ export default function PersonalizePage() {
       </Card>
 
       <Card>
-        <SectionHeader>Falling Effect</SectionHeader>
-        <div style={s.hint}>Pick something to fall across your screen while you work. Hover an option to preview it.</div>
-        <div style={s.effectGrid}>
-          {FALLING_EFFECTS.map((effect) => (
-            <button
-              key={effect}
-              type="button"
-              style={s.effectTile(effect === activeEffect)}
-              disabled={savingEffect}
-              onClick={() => handleSelectEffect(effect)}
-              onMouseEnter={() => setPreviewEffect(effect)}
-              onMouseLeave={() => setPreviewEffect(null)}
-            >
-              <Icon name={EFFECT_PREVIEW_ICON[effect] || 'sparkle'} size={20} />
-              <span>{FALLING_EFFECT_LABELS[effect]}</span>
-              {effect === activeEffect && <span style={s.activeBadge}>ACTIVE</span>}
-            </button>
-          ))}
-        </div>
+        <SectionHeader>Birthday</SectionHeader>
+        <div style={s.hint}>Add your birthday and the app will celebrate it when it comes around.</div>
+        <form onSubmit={handleSaveBirthday} style={s.birthdayForm}>
+          <input
+            type="date"
+            style={s.input}
+            value={birthday}
+            onChange={(e) => setBirthday(e.target.value)}
+          />
+          <Button variant="primary" type="submit" disabled={savingBirthday}>
+            {savingBirthday ? 'Saving…' : 'Save'}
+          </Button>
+        </form>
       </Card>
     </div>
   );
@@ -136,29 +121,6 @@ const s = {
     borderRadius: 'var(--radius-md)',
     border: '1px solid var(--border-hairline)',
   },
-  effectGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 10 },
-  effectTile: (active) => ({
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: 6,
-    padding: '14px 8px',
-    borderRadius: 'var(--radius-sm)',
-    border: `1px solid ${active ? 'var(--accent)' : 'var(--border-hairline)'}`,
-    background: active ? 'var(--accent-gradient-soft)' : 'var(--bg-sunken)',
-    color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
-    fontSize: 12,
-    fontWeight: 600,
-    cursor: 'pointer',
-    position: 'relative',
-  }),
-  activeBadge: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-    fontSize: 8,
-    fontWeight: 700,
-    letterSpacing: 0.5,
-    color: 'var(--accent)',
-  },
+  birthdayForm: { display: 'flex', gap: 10, alignItems: 'center' },
+  input: { padding: '8px 10px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 13 },
 };

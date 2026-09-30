@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { ProgressBar, EdSuggestionBox } from '../ui';
+import { fireCelebration } from '../lib/celebrations';
 
 const METRICS = ['sales', 'quotes', 'calls', 'contacts', 'premium_cents', 'cross_sells', 'winbacks', 'transfers'];
 
@@ -33,6 +34,9 @@ export default function GoalsPanel() {
       const [goalData, userData] = await Promise.all([api.goals(), api.users('')]);
       setGoals(goalData.goals);
       setUsers(userData.users.filter((u) => u.role === 'PRODUCER'));
+      if (goalData.goals.some((g) => g.justCompleted)) {
+        fireCelebration('CONFETTI', { message: 'Goal complete! 🎯' });
+      }
     } catch (err) {
       setLoadError(err.data?.message || 'Could not load goals. Try refreshing.');
     } finally {

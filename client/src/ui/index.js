@@ -21,4 +21,5 @@ export { default as TourOverlay } from './TourOverlay';
 export { default as ToastHost, pushToast } from './Toast';
 export { default as FallingEffectOverlay, FALLING_EFFECTS, FALLING_EFFECT_LABELS } from './FallingEffectOverlay';
 export { default as MicButton } from './MicButton';
+export { default as CelebrationHost } from './CelebrationHost';
 export * from './statusTones';

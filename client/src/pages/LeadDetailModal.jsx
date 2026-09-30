@@ -3,6 +3,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { Modal, Badge, Button, Icon, LeadTypeIcon, StatTile, MicButton } from '../ui';
 import { PRODUCTS, PRODUCT_META } from '../lib/productMeta';
+import { fireCelebration } from '../lib/celebrations';
 
 const LEAD_STATUSES = [
   'NEW', 'ASSIGNED', 'CONTACTED', 'LEFT_VM', 'APPOINTMENT', 'QUOTE_STARTED',
@@ -568,6 +569,9 @@ function DispositionBlock({ lead, onDone }) {
     try {
       await api.dispositionLead(lead.id, { status, note: note || undefined });
       setNote('');
+      if (status === 'SOLD' && lead.status !== 'SOLD') {
+        fireCelebration('MONEY', { message: 'Sale logged! 🎉' });
+      }
       await onDone();
     } catch (e) {
       setErr(e.data?.message || 'Failed to update disposition.');
