@@ -315,6 +315,10 @@ function publicUser(user) {
     agencyId: user.agencyId,
     status: user.status,
     tourCompletedAt: user.tourCompletedAt,
+    // Personalize page — the storage key itself never leaves the server,
+    // the client just needs to know whether to fetch GET /users/me/background.
+    hasBackgroundImage: !!user.backgroundImageStorageKey,
+    fallingEffect: user.fallingEffect,
   };
 }
 

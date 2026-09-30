@@ -1,4 +1,5 @@
 const express = require('express');
+const multer = require('multer');
 const { z } = require('zod');
 const crypto = require('crypto');
 const { prisma } = require('../lib/db');
@@ -11,9 +12,104 @@ const { syncSeatCountForAgency } = require('../lib/seatBilling');
 const { explainScore, componentPlaceholders } = require('../lib/flowScore');
 const { computeFunnel } = require('../lib/funnelMetrics');
 const { computeVendorBreakdown, computeProductBreakdown } = require('../lib/performanceBreakdown');
+const { save, read } = require('../lib/storage');
+const { validateImageUpload } = require('../lib/fileValidation');
 
 const router = express.Router();
 router.use(requireAuth);
+
+const backgroundUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
+
+// Personalize page — every user's own account, never another user's
+// (no :userId param at all here, always req.user.id, so there is no IDOR
+// surface to guard). Mirrors calls.js's upload/read-back shape: the image
+// bytes live in lib/storage.js, the DB stores only the storage key, and
+// the bytes are streamed back through an authenticated GET, never a
+// public/static URL.
+router.post('/me/background', backgroundUpload.single('image'), async (req, res, next) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'No file uploaded (expected multipart field "image").' });
+    }
+    const validation = validateImageUpload(req.file.buffer);
+    if (!validation.valid) {
+      return res.status(400).json({ success: false, error: 'INVALID_FILE', message: validation.reason });
+    }
+
+    let storageKey;
+    try {
+      storageKey = await save(req.file.buffer, req.file.originalname);
+    } catch (err) {
+      return res.status(500).json({ success: false, error: 'STORAGE_ERROR', message: err.message });
+    }
+
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: { backgroundImageStorageKey: storageKey, backgroundImageMimeType: validation.detectedType },
+    });
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: req.user.agencyId,
+      action: 'user.background_image_uploaded', entityType: 'User', entityId: req.user.id,
+      correlationId: req.correlationId,
+    });
+
+    return res.status(201).json({ success: true, hasBackgroundImage: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/me/background', async (req, res, next) => {
+  try {
+    if (!req.user.backgroundImageStorageKey) {
+      return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    }
+    const buffer = await read(req.user.backgroundImageStorageKey);
+    res.set('Content-Type', req.user.backgroundImageMimeType || 'application/octet-stream');
+    res.set('Cache-Control', 'private, max-age=3600');
+    return res.send(buffer);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/me/background', async (req, res, next) => {
+  try {
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: { backgroundImageStorageKey: null, backgroundImageMimeType: null },
+    });
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: req.user.agencyId,
+      action: 'user.background_image_removed', entityType: 'User', entityId: req.user.id,
+      correlationId: req.correlationId,
+    });
+    return res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const personalizeSchema = z.object({
+  fallingEffect: z.enum(['NONE', 'HEARTS', 'STARS', 'SNOW', 'MONEY', 'BUBBLES', 'CONFETTI', 'FIRE']),
+});
+
+router.patch('/me/personalize', async (req, res, next) => {
+  try {
+    const parsed = personalizeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+    const updated = await prisma.user.update({
+      where: { id: req.user.id },
+      data: { fallingEffect: parsed.data.fallingEffect },
+    });
+    return res.json({ success: true, fallingEffect: updated.fallingEffect });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // List users in the caller's own agency (or, for Platform Owner, filterable by agencyId).
 router.get('/', async (req, res, next) => {

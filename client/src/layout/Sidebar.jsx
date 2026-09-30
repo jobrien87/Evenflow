@@ -59,6 +59,15 @@ export default function Sidebar({ onTakeTour }) {
           variant="secondary"
           size="sm"
           style={{ width: '100%' }}
+          onClick={() => navigate('/personalize')}
+        >
+          <Icon name="palette" size={14} style={{ marginRight: 6 }} />
+          Personalize
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          style={{ width: '100%' }}
           onClick={async () => {
             await logout();
             navigate('/login');

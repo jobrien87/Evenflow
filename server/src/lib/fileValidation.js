@@ -37,4 +37,34 @@ function validateAudioUpload(buffer) {
   return { valid: true, detectedType };
 }
 
-module.exports = { validateAudioUpload, sniffAudioType, MAX_BYTES };
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 8MB — a personal background photo, not a print asset
+
+function sniffImageType(buffer) {
+  if (!buffer || buffer.length < 12) return null;
+
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
+  if (buffer.slice(0, 8).toString('hex') === '89504e470d0a1a0a') return 'image/png';
+  if (buffer.slice(0, 6).toString('ascii') === 'GIF87a' || buffer.slice(0, 6).toString('ascii') === 'GIF89a') return 'image/gif';
+  if (buffer.slice(0, 4).toString('ascii') === 'RIFF' && buffer.slice(8, 12).toString('ascii') === 'WEBP') return 'image/webp';
+
+  return null;
+}
+
+function validateImageUpload(buffer) {
+  if (!buffer || buffer.length === 0) {
+    return { valid: false, reason: 'File is empty.' };
+  }
+  if (buffer.length > MAX_IMAGE_BYTES) {
+    return { valid: false, reason: `File exceeds the ${MAX_IMAGE_BYTES / (1024 * 1024)}MB limit.` };
+  }
+  const detectedType = sniffImageType(buffer);
+  if (!detectedType) {
+    return { valid: false, reason: 'File does not match a recognized image format (checked actual file signature, not just the reported type). Use JPG, PNG, GIF, or WEBP.' };
+  }
+  return { valid: true, detectedType };
+}
+
+module.exports = {
+  validateAudioUpload, sniffAudioType, MAX_BYTES,
+  validateImageUpload, sniffImageType, MAX_IMAGE_BYTES,
+};

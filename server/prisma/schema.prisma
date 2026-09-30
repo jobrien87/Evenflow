@@ -53,6 +53,19 @@ enum PresenceStatus {
   COACHING
 }
 
+// Personalize page — a MySpace-style falling-object overlay the user picks
+// for their own account. NONE renders nothing.
+enum FallingEffect {
+  NONE
+  HEARTS
+  STARS
+  SNOW
+  MONEY
+  BUBBLES
+  CONFETTI
+  FIRE
+}
+
 enum LeadStatus {
   NEW
   ASSIGNED
@@ -270,6 +283,13 @@ model User {
   // Set once the first-login product tour is dismissed (finished or
   // skipped) — null means "show it next time this user logs in."
   tourCompletedAt DateTime?
+  // Per-account cosmetic personalization (Personalize page). The image
+  // itself lives in lib/storage.js like a Call recording does — this
+  // stores the storage key, never a public URL, and is served back only
+  // through an authenticated GET route.
+  backgroundImageStorageKey String?
+  backgroundImageMimeType   String?
+  fallingEffect             FallingEffect @default(NONE)
 
   invitations       Invitation[]     @relation("InvitationsSent")
   ownInvitation     Invitation?      @relation("InvitationForUser")

@@ -93,6 +93,25 @@ export const api = {
 
   users: (params = '') => request(`/users${params}`),
   inviteUser: (payload) => request('/users/invite', { method: 'POST', body: payload }),
+
+  // Personalize page — every user's own account.
+  myBackgroundUrl: () => `${BASE}/users/me/background`,
+  // Not JSON — a multipart upload, same bypass-request() shape as uploadCall.
+  uploadBackgroundImage: async (file) => {
+    const formData = new FormData();
+    formData.append('image', file);
+    const res = await fetch(`${BASE}/users/me/background`, { method: 'POST', credentials: 'include', body: formData });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(data.message || data.error || 'Upload failed');
+      err.data = data;
+      err.status = res.status;
+      throw err;
+    }
+    return data;
+  },
+  deleteBackgroundImage: () => request('/users/me/background', { method: 'DELETE' }),
+  updatePersonalization: (payload) => request('/users/me/personalize', { method: 'PATCH', body: payload }),
   updateUser: (userId, payload) => request(`/users/${userId}`, { method: 'PATCH', body: payload }),
   deactivateUser: (userId) => request(`/users/${userId}/deactivate`, { method: 'POST' }),
   resendUserInvite: (userId) => request(`/users/${userId}/resend-invite`, { method: 'POST' }),

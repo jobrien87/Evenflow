@@ -36,6 +36,7 @@ import TelemarketersPanel from './pages/TelemarketersPanel';
 import BillingPanel from './pages/BillingPanel';
 
 import TelemarketerDashboard from './pages/TelemarketerDashboard';
+import PersonalizePage from './pages/PersonalizePage';
 
 function RequireAuth() {
   const { user, loading } = useAuth();
@@ -58,6 +59,7 @@ export default function App() {
 
       <Route element={<RequireAuth />}>
         <Route index element={<RoleRedirect />} />
+        <Route path="personalize" element={<PersonalizePage />} />
 
         <Route element={<RoleGate allow={['PRODUCER']} />}>
           <Route path="producer" element={<ProducerDashboard />} />

@@ -3,7 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { useIsMobile } from '../lib/useViewport';
 import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
-import { GradientDefs, TourOverlay, ToastHost } from '../ui';
+import { GradientDefs, TourOverlay, ToastHost, FallingEffectOverlay } from '../ui';
 import { stepsForRole } from '../lib/tourSteps';
 import { unlockAudio } from '../lib/drumRoll';
 import LeadAlertListener, { LEAD_ALERT_ROLES } from '../lib/useLeadAlerts';
@@ -11,6 +11,7 @@ import Sidebar from './Sidebar';
 import MobileTopBar from './MobileTopBar';
 import MobileDrawer from './MobileDrawer';
 import MobileBottomNav from './MobileBottomNav';
+import PersonalizedBackdrop from './PersonalizedBackdrop';
 import ImpersonationBar from '../pages/ImpersonationBar';
 import TimeClockWidget from '../pages/TimeClockWidget';
 import AnnouncementModal from '../pages/AnnouncementModal';
@@ -76,9 +77,16 @@ export default function AppLayout() {
     }
   }
 
+  // On the Personalize page itself, that page mounts its own overlay (so
+  // hovering an option previews it) — skip the global one there to avoid
+  // two canvases stacking the same effect.
+  const onPersonalizePage = location.pathname === '/personalize';
+
   return (
     <div style={{ minHeight: '100vh' }}>
       <GradientDefs />
+      <PersonalizedBackdrop hasBackgroundImage={user?.hasBackgroundImage} />
+      {!onPersonalizePage && <FallingEffectOverlay effect={user?.fallingEffect} />}
       <ImpersonationBar />
       <TimeClockWidget />
       <div style={{ display: 'flex' }}>
