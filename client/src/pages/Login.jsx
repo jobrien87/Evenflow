@@ -48,7 +48,7 @@ export default function Login() {
     <div style={styles.wrap}>
       <div style={styles.glowBackdrop} />
       <div style={styles.hero}>
-        <Logo variant="hero" size="lg" tagline="THE AI-POWERED CRM FOR INSURANCE AGENCIES" />
+        <Logo variant="hero" size="lg" tagline="THE SUPER INTELLIGENCE POWERED ECOSYSTEM FOR INSURANCE AGENCIES" />
       </div>
       <div style={styles.card}>
         {mode === 'login' ? (
