@@ -22,6 +22,17 @@ const PRODUCT_STATUS_OPTIONS = [
 
 const ACTIVITY_ICON = { CALL: 'phone', EMAIL: 'mail', TEXT: 'chat' };
 
+// Mirrors server/src/lib/leadStatusAuto.js's STATUS_RANK — used only to
+// decide whether the "you touched this lead but never dispositioned it"
+// close-reminder should fire (rank < 3 means still a generic auto-state,
+// never a real chosen outcome), kept in sync manually like this app's other
+// small server/client constant pairs.
+const STATUS_RANK = {
+  NEW: 0, ASSIGNED: 0, ATTEMPTED: 1, LEFT_VM: 1, CONTACTED: 2,
+  APPOINTMENT: 3, QUOTE_STARTED: 3, QUOTED: 4, QUOTED_HOT: 4, FOLLOW_UP: 4, SOLD: 5,
+  LOST: 99, NOT_INTERESTED: 99, BAD_CONTACT: 99, DUPLICATE: 99, DO_NOT_CONTACT: 99, INELIGIBLE: 99, ARCHIVED: 99,
+};
+
 function statusTone(status) {
   if (['SOLD', 'QUOTED_HOT'].includes(status)) return 'accent';
   if (['LOST', 'NOT_INTERESTED', 'BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT', 'INELIGIBLE'].includes(status)) return 'danger';
@@ -81,6 +92,11 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
   const [lead, setLead] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // Set true by any real logged action (activity, note, product quote/sale)
+  // and cleared the moment a real disposition is saved — drives the
+  // close-time reminder below.
+  const [touchedSinceDisposition, setTouchedSinceDisposition] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
 
   useEffect(() => {
     load();
@@ -101,6 +117,29 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
   async function refresh() {
     await load();
     onChanged?.();
+  }
+
+  async function refreshTouched() {
+    setTouchedSinceDisposition(true);
+    await refresh();
+  }
+
+  async function refreshDispositioned() {
+    setTouchedSinceDisposition(false);
+    await refresh();
+  }
+
+  // A lead still sitting at a generic auto-state (rank < 3 — never a real
+  // chosen outcome like LEFT_VM, an appointment, a quote, a sale, or a
+  // terminal disposition) after real work was logged on it is exactly the
+  // "still says untouched despite a call and a note" complaint this guards
+  // against — nudge instead of silently closing.
+  function requestClose() {
+    if (lead && touchedSinceDisposition && (STATUS_RANK[lead.status] ?? 0) < 3) {
+      setConfirmClose(true);
+    } else {
+      onClose();
+    }
   }
 
   if (loading) {
@@ -129,7 +168,21 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
   const soldCount = productQuotes.filter((q) => q.status === 'SOLD').length;
 
   return (
-    <Modal onClose={onClose} title="LEAD PROFILE" maxWidth={800}>
+    <Modal onClose={requestClose} title="LEAD PROFILE" maxWidth={800}>
+      {confirmClose && (
+        <div style={s.confirmOverlay}>
+          <div style={s.confirmBox}>
+            <div style={s.confirmTitle}>Disposition this lead?</div>
+            <div style={s.confirmBody}>
+              You logged real activity on this lead, but it's still sitting as <strong>{lead.status.replace(/_/g, ' ')}</strong> — pick a real disposition below before you go, or it'll keep showing as untouched.
+            </div>
+            <div style={s.confirmActions}>
+              <Button variant="secondary" size="sm" onClick={() => setConfirmClose(false)}>GO BACK</Button>
+              <Button variant="danger" size="sm" onClick={onClose}>CLOSE ANYWAY</Button>
+            </div>
+          </div>
+        </div>
+      )}
       <div style={s.header}>
         <div style={s.headerAvatar}>
           <LeadTypeIcon type={lead.leadType} size={22} />
@@ -151,7 +204,7 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
       </div>
 
       <Section title="PRODUCTS" icon="tag">
-        <ProductsBlock lead={lead} onDone={refresh} />
+        <ProductsBlock lead={lead} onDone={refreshTouched} />
       </Section>
 
       <Section title="CONTACT & INTAKE INFO" icon="support">
@@ -173,11 +226,11 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
       </Section>
 
       <Section title="QUICK ACTIONS" icon="sparkle">
-        <QuickActionsBlock lead={lead} user={user} onDone={refresh} />
+        <QuickActionsBlock lead={lead} user={user} onDone={refreshTouched} />
       </Section>
 
       <Section title="DISPOSITION" icon="flag">
-        <DispositionBlock lead={lead} onDone={refresh} />
+        <DispositionBlock lead={lead} onDone={refreshDispositioned} />
       </Section>
 
       <Section title={`FOLLOW-UP / APPOINTMENTS (${lead.tasks?.length || 0})`} icon="checklist">
@@ -185,11 +238,11 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
       </Section>
 
       <Section title={`ACTIVITY LOG (${lead.activities?.length || 0})`} icon="phone">
-        <ActivityBlock lead={lead} onDone={refresh} />
+        <ActivityBlock lead={lead} onDone={refreshTouched} />
       </Section>
 
       <Section title={`NOTES (${lead.notes?.length || 0})`} icon="pencil">
-        <NotesBlock lead={lead} onDone={refresh} />
+        <NotesBlock lead={lead} onDone={refreshTouched} />
       </Section>
 
       <Section title={`HISTORY (${lead.events?.length || 0})`} icon="clock">
@@ -355,6 +408,11 @@ function describeEvent(e) {
       return {
         title: `Disposition: ${e.fromStatus?.replace(/_/g, ' ') || '—'} → ${e.toStatus?.replace(/_/g, ' ') || '—'}${note ? ` — "${note}"` : ''}`,
         icon: 'flag',
+      };
+    case 'lead.status_auto_advanced':
+      return {
+        title: `Auto-advanced: ${e.fromStatus?.replace(/_/g, ' ') || '—'} → ${e.toStatus?.replace(/_/g, ' ') || '—'} (real activity logged)`,
+        icon: 'refresh',
       };
     default:
       return { title: e.type.replace(/_/g, ' '), icon: 'clock' };
@@ -695,6 +753,17 @@ function NotesBlock({ lead, onDone }) {
 const s = {
   loading: { color: 'var(--text-secondary)', padding: 20, textAlign: 'center' },
   error: { color: 'var(--danger)', padding: 20, textAlign: 'center' },
+  confirmOverlay: {
+    position: 'fixed', inset: 0, zIndex: 'var(--z-toast)', background: 'rgba(6, 7, 9, 0.7)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+  },
+  confirmBox: {
+    width: '100%', maxWidth: 420, padding: 'var(--space-5)', borderRadius: 'var(--radius-md)',
+    background: 'var(--bg-elevated)', border: '1px solid var(--border-accent)', boxShadow: 'var(--shadow-glow-accent)',
+  },
+  confirmTitle: { fontWeight: 700, fontSize: 15, color: 'var(--text-primary)', marginBottom: 8 },
+  confirmBody: { fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 },
+  confirmActions: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 },
   header: {
     display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 'var(--space-4)',
     paddingBottom: 'var(--space-4)', borderBottom: '1px solid var(--border-hairline)',

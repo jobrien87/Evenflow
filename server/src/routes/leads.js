@@ -9,6 +9,7 @@ const { deriveLeadType, BULK_UPLOAD_CATEGORIES, applyBulkUploadCategory } = requ
 const { normalizePhone, normalizeEmail } = require('../lib/normalize');
 const { recordLeadSaleRevenue, recordLeadProductSaleRevenue } = require('../lib/financialEvents');
 const { PRODUCTS, PRODUCT_LABELS } = require('../lib/products');
+const { autoAdvanceLeadStatus } = require('../lib/leadStatusAuto');
 const { notifyUser, notifyUsers, notifyAgencyOwners } = require('../lib/notifications');
 const { updateCustomerProductsAndDetectCrossSells } = require('../lib/opportunityEvents');
 const { computeProducerScore, computeAgencyScore, computeTelemarketerScore } = require('../lib/flowScore');
@@ -706,6 +707,14 @@ router.post('/:leadId/activities', async (req, res, next) => {
       after: { type: activity.type, direction: activity.direction }, correlationId: req.correlationId,
     });
 
+    // A real logged activity is real pipeline progress — a lead a producer
+    // actually called/texted/emailed should never keep reading "untouched"
+    // just because nobody separately picked a disposition. Inbound contact
+    // implies more than an attempt (the customer engaged back), so it
+    // targets CONTACTED instead of ATTEMPTED.
+    const autoTarget = parsed.data.direction === 'INBOUND' ? 'CONTACTED' : 'ATTEMPTED';
+    await autoAdvanceLeadStatus({ leadId: lead.id, targetStatus: autoTarget, reason: `activity_logged:${parsed.data.type}` });
+
     return res.status(201).json({ success: true, activity });
   } catch (err) {
     next(err);
@@ -818,6 +827,10 @@ router.post('/:leadId/products', async (req, res, next) => {
     }
 
     await syncLeadSaleFieldsFromProductQuotes(lead.id);
+
+    // A real quote or sale is real pipeline progress — the lead's overall
+    // status should never lag behind what actually happened on it.
+    await autoAdvanceLeadStatus({ leadId: lead.id, targetStatus: status === 'SOLD' ? 'SOLD' : 'QUOTED', reason: `product_${status.toLowerCase()}:${product}` });
 
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role, agencyId: lead.agencyId,
