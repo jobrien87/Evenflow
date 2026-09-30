@@ -45,6 +45,7 @@ const PATHS = {
   speaker: 'M4 9h4l5-4v14l-5-4H4V9zM16 8a5 5 0 0 1 0 8M18.5 6a8 8 0 0 1 0 12',
   building: 'M4 21V6l7-3 7 3v15M4 21h16M9 9h1M9 13h1M14 9h1M14 13h1M9 21v-5h6v5',
   cake: 'M4 21v-8a2 2 0 0 1 2-2h1V9a1 1 0 0 1 2 0v2h1v-2a1 1 0 0 1 2 0v2h1v-2a1 1 0 0 1 2 0v2h1a2 2 0 0 1 2 2v8zM4 17h16M11 3a1 1 0 1 0 2 0c0-1-1-1-1-2',
+  alert: 'M12 3l10 18H2L12 3zM12 10v4M12 17h.01',
 };
 
 export default function Icon({ name, size = 18, style }) {
