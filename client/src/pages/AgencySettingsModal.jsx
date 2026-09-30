@@ -6,7 +6,7 @@ import BulkLeadUploadBox from './BulkLeadUploadBox';
 
 // Mirrors lib/priority.js's DEFAULT_TYPE_RANK/DEFAULT_STATUS_RULES exactly
 // — what an agency that's never touched this section is already getting.
-const DEFAULT_TYPE_RANK = ['TRANSFER', 'PAID_AD', 'META_AD', 'DIRECT_MAIL', 'MANUAL', 'WINBACK', 'CROSS_SELL'];
+const DEFAULT_TYPE_RANK = ['TRANSFER', 'REFERRAL', 'PAID_AD', 'META_AD', 'INTERNET', 'DIRECT_MAIL', 'MANUAL', 'WINBACK', 'CROSS_SELL'];
 const DEFAULT_STATUS_RULES = {
   SOLD: { afterDays: 0, action: 'DROP_OFF' },
   QUOTED: { afterDays: 3, action: 'BUMP_UP' },

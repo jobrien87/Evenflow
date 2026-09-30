@@ -10,6 +10,9 @@ import { FileDropzone } from '../ui';
 const CATEGORY_OPTIONS = [
   { value: 'WINBACK', label: 'Winbacks' },
   { value: 'CROSS_SELL', label: 'Cross-Sell' },
+  { value: 'REFERRAL', label: 'Referral' },
+  { value: 'INTERNET', label: 'Internet' },
+  { value: 'WALK_IN', label: 'Walk In' },
   { value: 'AUTO', label: 'Auto' },
   { value: 'HOME', label: 'Home' },
   { value: 'COMMERCIAL', label: 'Commercial' },

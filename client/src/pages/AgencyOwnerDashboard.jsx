@@ -39,10 +39,14 @@ export default function AgencyOwnerDashboard() {
   const [showAnnounce, setShowAnnounce] = useState(false);
   const [agency, setAgency] = useState(null);
   const [editingUserId, setEditingUserId] = useState(null);
-  const [editUserForm, setEditUserForm] = useState({ firstName: '', lastName: '' });
+  const [editUserForm, setEditUserForm] = useState({ firstName: '', lastName: '', officeId: '' });
   const [editUserError, setEditUserError] = useState('');
   const [loadError, setLoadError] = useState('');
   const [producerScores, setProducerScores] = useState({});
+  const [offices, setOffices] = useState([]);
+  const [showOffices, setShowOffices] = useState(false);
+  const [newOfficeName, setNewOfficeName] = useState('');
+  const [officeError, setOfficeError] = useState('');
 
   // The funnel drill-down's filter lives in the URL (not component state)
   // so it's shareable and survives the back button.
@@ -72,10 +76,11 @@ export default function AgencyOwnerDashboard() {
       ? `?stage=${stageFilter.stage}&from=${stageFilter.from}&to=${stageFilter.to}`
       : '';
     try {
-      const [leadData, userData, agencyData] = await Promise.all([api.leads(leadParams), api.users(''), api.agencyDetail(user.agencyId)]);
+      const [leadData, userData, agencyData, officeData] = await Promise.all([api.leads(leadParams), api.users(''), api.agencyDetail(user.agencyId), api.offices()]);
       setLeads(leadData.leads);
       setUsers(userData.users);
       setAgency(agencyData.agency);
+      setOffices(officeData.offices || []);
       loadProducerScores(userData.users);
     } catch (err) {
       setLoadError(err.data?.message || 'Could not load your agency dashboard. Try refreshing.');
@@ -99,18 +104,42 @@ export default function AgencyOwnerDashboard() {
 
   function startEditUser(u) {
     setEditingUserId(u.id);
-    setEditUserForm({ firstName: u.firstName, lastName: u.lastName });
+    setEditUserForm({ firstName: u.firstName, lastName: u.lastName, officeId: u.officeId || '' });
   }
 
   async function saveEditUser(userId) {
     setEditUserError('');
     try {
-      await api.updateUser(userId, editUserForm);
+      await api.updateUser(userId, { ...editUserForm, officeId: editUserForm.officeId || null });
       setEditingUserId(null);
       await load();
     } catch (err) {
       setEditUserError(err.data?.message || 'Failed to save.');
     }
+  }
+
+  async function createOffice(e) {
+    e.preventDefault();
+    setOfficeError('');
+    try {
+      await api.createOffice({ name: newOfficeName });
+      setNewOfficeName('');
+      await load();
+    } catch (err) {
+      setOfficeError(err.data?.message || 'Failed to create office.');
+    }
+  }
+
+  async function renameOffice(id, name) {
+    if (!name.trim()) return;
+    await api.updateOffice(id, { name });
+    await load();
+  }
+
+  async function removeOffice(id) {
+    if (!confirm('Delete this office? Producers assigned to it will become unassigned.')) return;
+    await api.deleteOffice(id);
+    await load();
   }
 
   function selectFunnelStage(stageKey, range) {
@@ -231,6 +260,39 @@ export default function AgencyOwnerDashboard() {
 
       <section style={s.section}>
         <div style={s.headerRow}>
+          <h3 style={s.h3}>OFFICES ({offices.length})</h3>
+          <button style={s.smallButtonOutline} onClick={() => setShowOffices(!showOffices)}>
+            {showOffices ? 'HIDE' : 'MANAGE OFFICES'}
+          </button>
+        </div>
+        {showOffices && (
+          <>
+            <div style={s.hint}>
+              Assign producers to a physical office/branch below in TEAM, and split vendor leads across offices
+              using the "Office Split" lead distribution mode on the Vendors tab.
+            </div>
+            <form onSubmit={createOffice} style={{ ...s.form, flexDirection: 'row', alignItems: 'center' }}>
+              <input style={{ ...s.input, flex: 1 }} placeholder="Office name (e.g. Downtown, North Branch)" value={newOfficeName} onChange={(e) => setNewOfficeName(e.target.value)} required />
+              <button style={s.submitButton} type="submit">+ ADD OFFICE</button>
+            </form>
+            {officeError && <div style={s.editUserError}>{officeError}</div>}
+            {offices.map((o) => (
+              <div key={o.id} style={s.row}>
+                <div style={{ flex: 1 }}>
+                  <div style={s.rowTitle}>{o.name}</div>
+                  <div style={s.rowSub}>{(o.users || []).length} producer{(o.users || []).length === 1 ? '' : 's'}</div>
+                </div>
+                <button style={s.resendButton} onClick={() => { const name = prompt('Rename office', o.name); if (name) renameOffice(o.id, name); }}>RENAME</button>
+                <button style={s.deactivateButton} onClick={() => removeOffice(o.id)}>DELETE</button>
+              </div>
+            ))}
+            {offices.length === 0 && <div style={s.hint}>No offices yet — add one above if your agency has more than one location.</div>}
+          </>
+        )}
+      </section>
+
+      <section style={s.section}>
+        <div style={s.headerRow}>
           <h3 style={s.h3}>TEAM ({users.length})</h3>
           <button style={s.smallButton} onClick={() => setShowInvite(!showInvite)}>
             + INVITE PRODUCER
@@ -261,7 +323,7 @@ export default function AgencyOwnerDashboard() {
             <div style={s.row} className="ui-row-stack">
               <div>
                 <div style={s.rowTitle}>{u.firstName} {u.lastName}</div>
-                <div style={s.rowSub}>{u.email} · {u.role}</div>
+                <div style={s.rowSub}>{u.email} · {u.role}{u.office ? ` · ${u.office.name}` : ''}</div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <div style={s.badge}>{u.status}</div>
@@ -289,6 +351,12 @@ export default function AgencyOwnerDashboard() {
               <div style={s.inlineEditForm}>
                 <input style={s.input} value={editUserForm.firstName} onChange={(e) => setEditUserForm({ ...editUserForm, firstName: e.target.value })} placeholder="First name" />
                 <input style={s.input} value={editUserForm.lastName} onChange={(e) => setEditUserForm({ ...editUserForm, lastName: e.target.value })} placeholder="Last name" />
+                {u.role === 'PRODUCER' && (
+                  <select style={s.input} value={editUserForm.officeId} onChange={(e) => setEditUserForm({ ...editUserForm, officeId: e.target.value })}>
+                    <option value="">No office</option>
+                    {offices.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                  </select>
+                )}
                 <button style={s.smallButton} onClick={() => saveEditUser(u.id)}>SAVE</button>
                 <button style={s.smallButtonOutline} onClick={() => setEditingUserId(null)}>CANCEL</button>
                 {editUserError && <div style={s.editUserError}>{editUserError}</div>}
@@ -390,6 +458,7 @@ const s = {
   wrap: { color: 'var(--text-primary)' },
   loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 24 },
   editUserError: { color: 'var(--danger)', fontSize: 12, width: '100%', marginTop: 4 },
+  hint: { color: 'var(--text-muted)', fontSize: 12, marginBottom: 10 },
   section: { marginBottom: 32 },
   settingsRow: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 8 },
   topSplit: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'stretch' },

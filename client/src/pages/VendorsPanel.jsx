@@ -7,6 +7,7 @@ const VENDOR_CATEGORIES = [
   { value: 'PAID_AD', label: 'Paid Ad' },
   { value: 'DIRECT_MAIL', label: 'Direct Mail' },
   { value: 'META_AD', label: 'Meta Ad' },
+  { value: 'INTERNET', label: 'Internet' },
   { value: 'OTHER', label: 'Other' },
 ];
 const categoryLabel = (category) => VENDOR_CATEGORIES.find((c) => c.value === category)?.label || 'Other';
@@ -14,10 +15,12 @@ const categoryLabel = (category) => VENDOR_CATEGORIES.find((c) => c.value === ca
 const DISTRIBUTION_MODES = [
   { value: 'ROUND_ROBIN', label: 'Round Robin', hint: 'Cycles evenly through every active producer.' },
   { value: 'SELECTED_AGENTS', label: 'Select Agents', hint: 'Cycles only through the agents you pick below.' },
+  { value: 'ALPHA_SPLIT', label: 'Alpha Split', hint: "Splits leads by the customer's last name — every active producer gets a fixed A-Z range." },
+  { value: 'OFFICE_SPLIT', label: 'Office Split', hint: 'Splits leads across your agency\'s offices, then cycles through that office\'s producers. Manage offices from Main Stage.' },
   { value: 'MOSHPIT', label: 'Moshpit', hint: 'Unassigned — any active producer can claim it first.' },
 ];
 
-const distributionTone = (mode) => (mode === 'MOSHPIT' ? 'warning' : mode === 'SELECTED_AGENTS' ? 'info' : 'accent');
+const distributionTone = (mode) => (mode === 'MOSHPIT' ? 'warning' : mode === 'SELECTED_AGENTS' || mode === 'ALPHA_SPLIT' || mode === 'OFFICE_SPLIT' ? 'info' : 'accent');
 const distributionLabel = (mode) => DISTRIBUTION_MODES.find((m) => m.value === mode)?.label || 'Round Robin';
 
 function AgentPicker({ producers, selectedIds, onChange }) {
@@ -200,7 +203,7 @@ export default function VendorsPanel() {
     <div style={s.wrap}>
       <div style={s.headerRow}>
         <h3 style={s.h3}>VENDORS ({vendors.length})</h3>
-        <button style={s.button} onClick={() => setShowForm(!showForm)}>+ SEND POSTING INSTRUCTIONS</button>
+        <button style={s.button} onClick={() => setShowForm(!showForm)}>+ ADD VENDOR</button>
       </div>
 
       <section style={s.atGlanceSection}>

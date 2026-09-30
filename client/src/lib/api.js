@@ -145,6 +145,11 @@ export const api = {
   updateVendor: (id, payload) => request(`/vendors/${id}`, { method: 'PATCH', body: payload }),
   vendorTransactions: (id) => request(`/vendors/${id}/transactions`),
 
+  offices: (params = '') => request(`/offices${params}`),
+  createOffice: (payload) => request('/offices', { method: 'POST', body: payload }),
+  updateOffice: (id, payload) => request(`/offices/${id}`, { method: 'PATCH', body: payload }),
+  deleteOffice: (id) => request(`/offices/${id}`, { method: 'DELETE' }),
+
   financialSummary: (params = '') => request(`/financials/summary${params}`),
   financialByVendor: (params = '') => request(`/financials/by-vendor${params}`),
   financialByAgent: (params = '') => request(`/financials/by-agent${params}`),

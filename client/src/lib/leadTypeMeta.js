@@ -5,9 +5,11 @@
 // map (AgencySettingsModal.jsx used to keep a private copy of this).
 export const LEAD_TYPE_META = {
   TRANSFER: { label: 'Transfer', icon: 'transfer', tone: 'warning' },
+  REFERRAL: { label: 'Referral', icon: 'handshake', tone: 'accent' },
   PAID_AD: { label: 'Paid Ad', icon: 'megaphone', tone: 'neutral' },
-  DIRECT_MAIL: { label: 'Direct Mail', icon: 'mail', tone: 'neutral' },
   META_AD: { label: 'Meta Ad', icon: 'megaphone', tone: 'neutral' },
+  INTERNET: { label: 'Internet', icon: 'globe', tone: 'neutral' },
+  DIRECT_MAIL: { label: 'Direct Mail', icon: 'mail', tone: 'neutral' },
   MANUAL: { label: 'Manual / Organic', icon: 'pencil', tone: 'neutral' },
   WINBACK: { label: 'Winback', icon: 'refresh', tone: 'accent' },
   CROSS_SELL: { label: 'Cross-Sell', icon: 'tag', tone: 'accent' },
