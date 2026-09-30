@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
-import { Card, Button, SectionHeader, Icon } from '../ui';
+import { Card, Button, SectionHeader, Icon, MicButton } from '../ui';
 import { parseDrillContent, parseNumberedSteps, parseBulletList, parseDialogue } from '../lib/drillContent';
+import { useTextToSpeech } from '../lib/useTextToSpeech';
 
 // Each of the 5 real section headings every drill has gets its own
 // module treatment — icon, tone, and layout — instead of one flat
@@ -131,6 +132,8 @@ function DrillModule({ index, section }) {
   );
 }
 
+const AUTO_SPEAK_KEY = 'roleplay_auto_speak';
+
 function RoleplayPanel({ lessonId }) {
   const [messages, setMessages] = useState([]);
   const [started, setStarted] = useState(false);
@@ -138,11 +141,44 @@ function RoleplayPanel({ lessonId }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [degraded, setDegraded] = useState(false);
+  const [showVoicePicker, setShowVoicePicker] = useState(false);
+  const [autoSpeak, setAutoSpeak] = useState(() => {
+    try {
+      return localStorage.getItem(AUTO_SPEAK_KEY) !== 'off';
+    } catch {
+      return true;
+    }
+  });
   const bottomRef = useRef(null);
+  const spokenCountRef = useRef(0);
+  const tts = useTextToSpeech();
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' });
   }, [messages]);
+
+  // Auto-speak the newest ED reply as it arrives — never replays older
+  // turns, and never speaks while a message is still loading.
+  useEffect(() => {
+    if (!autoSpeak || busy) return;
+    if (messages.length <= spokenCountRef.current) return;
+    const latest = messages[messages.length - 1];
+    spokenCountRef.current = messages.length;
+    if (latest.role === 'assistant') tts.speak(latest.content);
+  }, [messages, busy, autoSpeak]);
+
+  function toggleAutoSpeak() {
+    setAutoSpeak((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem(AUTO_SPEAK_KEY, next ? 'on' : 'off');
+      } catch {
+        // per-viewer convenience only
+      }
+      if (!next) tts.stop();
+      return next;
+    });
+  }
 
   async function startRoleplay() {
     setStarted(true);
@@ -150,12 +186,8 @@ function RoleplayPanel({ lessonId }) {
     setError('');
     try {
       const res = await api.roleplayMessage(lessonId, []);
-      if (!res.available) {
-        setDegraded(true);
-        setMessages([{ role: 'assistant', content: res.message }]);
-      } else {
-        setMessages([{ role: 'assistant', content: res.message }]);
-      }
+      if (!res.available) setDegraded(true);
+      setMessages([{ role: 'assistant', content: res.message }]);
     } catch (err) {
       setError(err.data?.message || 'Could not start the roleplay.');
       setStarted(false);
@@ -188,7 +220,8 @@ function RoleplayPanel({ lessonId }) {
       <Card>
         <p style={s.roleplayIntro}>
           Run a live back-and-forth roleplay of this exact drill. Play the agent, or play the customer —
-          the AI figures out which one you're doing and takes the other role.
+          the AI figures out which one you're doing and takes the other role. Talk or type your lines,
+          and hear ED's replies read back in the voice you pick.
         </p>
         <Button variant="primary" onClick={startRoleplay}>START ROLEPLAY</Button>
       </Card>
@@ -197,11 +230,51 @@ function RoleplayPanel({ lessonId }) {
 
   return (
     <Card style={s.roleplayCard}>
-      {degraded && <div style={s.degradedNote}>AI roleplay isn't fully configured on this environment right now.</div>}
+      <div style={s.roleplayHeader}>
+        {degraded && <div style={s.degradedNote}>AI roleplay isn't fully configured on this environment right now.</div>}
+        {tts.isSupported && (
+          <div style={s.roleplayControls}>
+            <button
+              type="button"
+              style={s.voiceToggle(autoSpeak)}
+              onClick={toggleAutoSpeak}
+              title={autoSpeak ? 'Turn off spoken replies' : 'Turn on spoken replies'}
+            >
+              <Icon name="speaker" size={13} /> {autoSpeak ? 'VOICE ON' : 'VOICE OFF'}
+            </button>
+            <button
+              type="button"
+              style={s.gearButton}
+              onClick={() => setShowVoicePicker((v) => !v)}
+              title="Choose a voice"
+              aria-label="Choose a voice"
+            >
+              <Icon name="gear" size={13} />
+            </button>
+            {showVoicePicker && (
+              <select
+                style={s.voiceSelect}
+                value={tts.voiceURI}
+                onChange={(e) => tts.selectVoice(e.target.value)}
+              >
+                <option value="">Default voice</option>
+                {tts.voices.map((v) => (
+                  <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>
+                ))}
+              </select>
+            )}
+          </div>
+        )}
+      </div>
       <div style={s.thread}>
         {messages.map((m, i) => (
           <div key={i} style={s.bubbleRow(m.role === 'user')}>
             <div style={s.bubble(m.role === 'user')}>{m.content}</div>
+            {m.role === 'assistant' && tts.isSupported && (
+              <button type="button" style={s.replayButton} onClick={() => tts.speak(m.content)} title="Play this line">
+                <Icon name="speaker" size={12} />
+              </button>
+            )}
           </div>
         ))}
         {busy && <div style={s.thinking}>…</div>}
@@ -217,6 +290,7 @@ function RoleplayPanel({ lessonId }) {
           onKeyDown={(e) => { if (e.key === 'Enter') send(); }}
           disabled={busy || degraded}
         />
+        <MicButton onTranscript={(text) => setDraft((d) => (d ? `${d} ${text}` : text))} />
         <Button variant="primary" onClick={send} disabled={busy || degraded || !draft.trim()}>SEND</Button>
       </div>
     </Card>
@@ -263,15 +337,33 @@ const s = {
   },
   roleplayIntro: { color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6, marginBottom: 14 },
   roleplayCard: { display: 'flex', flexDirection: 'column', height: 480 },
+  roleplayHeader: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginBottom: 8, position: 'relative' },
+  roleplayControls: { display: 'flex', alignItems: 'center', gap: 6, position: 'relative' },
+  voiceToggle: (on) => ({
+    display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, letterSpacing: 0.5, padding: '4px 8px', borderRadius: 20, cursor: 'pointer',
+    border: on ? 'none' : '1px solid var(--border-strong)',
+    background: on ? 'var(--accent-gradient)' : 'transparent',
+    color: on ? 'var(--accent-on)' : 'var(--text-secondary)', fontWeight: 700,
+  }),
+  gearButton: { background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 4, borderRadius: 6 },
+  voiceSelect: {
+    position: 'absolute', top: 30, right: 0, zIndex: 1, width: 200,
+    padding: '6px 8px', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8,
+    color: 'var(--text-primary)', fontSize: 12,
+  },
   thread: { flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 },
-  bubbleRow: (mine) => ({ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start' }),
+  bubbleRow: (mine) => ({ display: 'flex', alignItems: 'center', gap: 6, justifyContent: mine ? 'flex-end' : 'flex-start' }),
   bubble: (mine) => ({
     maxWidth: '80%', padding: '8px 12px', borderRadius: 10, fontSize: 13,
     background: mine ? 'var(--accent)' : 'var(--bg-hover)', color: mine ? 'var(--accent-on)' : 'var(--text-primary)',
     border: mine ? 'none' : '1px solid var(--border-strong)',
   }),
+  replayButton: {
+    flexShrink: 0, width: 22, height: 22, borderRadius: '50%', border: 'none', cursor: 'pointer',
+    background: 'var(--bg-hover)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+  },
   thinking: { color: 'var(--text-muted)', fontSize: 13, fontStyle: 'italic' },
-  degradedNote: { color: 'var(--warning)', fontSize: 12, marginBottom: 8 },
+  degradedNote: { color: 'var(--warning)', fontSize: 12 },
   error: { color: 'var(--danger)', fontSize: 12, marginBottom: 8 },
   inputRow: { display: 'flex', gap: 8 },
   input: { flex: 1, padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 13 },

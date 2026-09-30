@@ -83,3 +83,9 @@ input:focus, select:focus, button:focus, textarea:focus {
   color: var(--accent);
   box-shadow: inset 2px 0 0 var(--accent);
 }
+
+/* ui/MicButton.jsx — pulses while actively dictating */
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 77, 94, 0.45); }
+  50% { box-shadow: 0 0 0 6px rgba(255, 77, 94, 0); }
+}

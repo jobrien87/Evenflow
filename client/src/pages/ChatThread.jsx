@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
+import { MicButton } from '../ui';
 
 const POLL_MS = 5000;
 
@@ -113,6 +114,7 @@ export default function ChatThread({ entityType, entityId, title, onClose, varia
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
           disabled={!conversationId}
         />
+        <MicButton onTranscript={(text) => setDraft((d) => (d ? `${d} ${text}` : text))} />
         <button style={s.sendButton} disabled={sending || !draft.trim() || !conversationId} onClick={send}>
           SEND
         </button>

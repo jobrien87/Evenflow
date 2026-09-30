@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { useIsMobile } from '../lib/useViewport';
-import { Card, Badge, Button, SectionHeader, EmptyState, StatTile, BarRow } from '../ui';
+import { Card, Badge, Button, SectionHeader, EmptyState, StatTile, BarRow, MicButton } from '../ui';
 import ChatThread from './ChatThread';
 
 const PRODUCTS = ['Auto', 'Home', 'Life', 'Health'];
@@ -280,7 +280,13 @@ function LeadForm({ form, setField, onSubmit, busy, result }) {
           <Field label="Callback time"><input style={s.input} value={form.callbackTime} onChange={(e) => setField('callbackTime', e.target.value)} /></Field>
         </div>
         <Field label="TM notes">
-          <textarea style={{ ...s.input, minHeight: 70 }} value={form.tmNotes} onChange={(e) => setField('tmNotes', e.target.value)} />
+          <div style={{ position: 'relative' }}>
+            <textarea style={{ ...s.input, minHeight: 70, width: '100%' }} value={form.tmNotes} onChange={(e) => setField('tmNotes', e.target.value)} />
+            <MicButton
+              style={{ position: 'absolute', bottom: 8, right: 8 }}
+              onTranscript={(text) => setField('tmNotes', form.tmNotes ? `${form.tmNotes} ${text}` : text)}
+            />
+          </div>
         </Field>
 
         <Button variant="primary" type="submit" disabled={busy}>{busy ? 'SUBMITTING…' : 'SUBMIT LEAD'}</Button>

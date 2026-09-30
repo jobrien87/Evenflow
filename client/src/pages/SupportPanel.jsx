@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { Card, Badge, Button, StatTile, BarRow, SectionHeader, EmptyState } from '../ui';
+import { Card, Badge, Button, StatTile, BarRow, SectionHeader, EmptyState, MicButton } from '../ui';
 
 const CATEGORIES = ['general', 'billing', 'technical', 'transfer_issue', 'vendor_issue', 'other'];
 const STATUS_ORDER = ['OPEN', 'IN_PROGRESS', 'WAITING_ON_CUSTOMER', 'RESOLVED', 'CLOSED'];
@@ -130,7 +130,13 @@ export default function SupportPanel() {
               {CATEGORIES.map((c) => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
             </select>
             <input style={s.input} placeholder="Subject" value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} required />
-            <textarea style={{ ...s.input, minHeight: 70 }} placeholder="Describe the issue" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} required />
+            <div style={{ position: 'relative' }}>
+              <textarea style={{ ...s.input, minHeight: 70, width: '100%' }} placeholder="Describe the issue" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} required />
+              <MicButton
+                style={{ position: 'absolute', bottom: 8, right: 8 }}
+                onTranscript={(text) => setForm((f) => ({ ...f, description: f.description ? `${f.description} ${text}` : text }))}
+              />
+            </div>
             <Button variant="primary" type="submit">Submit Ticket</Button>
           </form>
         </Card>

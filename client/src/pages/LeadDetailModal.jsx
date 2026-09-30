@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { Modal, Badge, Button, Icon, LeadTypeIcon, StatTile } from '../ui';
+import { Modal, Badge, Button, Icon, LeadTypeIcon, StatTile, MicButton } from '../ui';
 import { PRODUCTS, PRODUCT_META } from '../lib/productMeta';
 
 const LEAD_STATUSES = [
@@ -705,6 +705,7 @@ function ActivityBlock({ lead, onDone }) {
         <Field label="Outcome (optional)" width="1fr">
           <input style={{ ...s.input, width: '100%' }} placeholder="e.g. 'no answer', 'left voicemail'" value={outcome} onChange={(e) => setOutcome(e.target.value)} />
         </Field>
+        <MicButton onTranscript={(text) => setOutcome((v) => (v ? `${v} ${text}` : text))} />
         <Button variant="secondary" size="sm" disabled={busy} onClick={log} style={s.formBarButton}>LOG</Button>
       </div>
       {err && <div style={s.formError}>{err}</div>}
@@ -753,6 +754,7 @@ function NotesBlock({ lead, onDone }) {
         <Field label="Add a note" width="1fr">
           <input style={{ ...s.input, width: '100%' }} placeholder="Type a note…" value={content} onChange={(e) => setContent(e.target.value)} />
         </Field>
+        <MicButton onTranscript={(text) => setContent((v) => (v ? `${v} ${text}` : text))} />
         <Button variant="secondary" size="sm" disabled={busy || !content.trim()} onClick={add} style={s.formBarButton}>ADD NOTE</Button>
       </div>
       {err && <div style={s.formError}>{err}</div>}

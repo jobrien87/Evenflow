@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
-import { Card, Badge, Button, SectionHeader, StatTile, ProgressRing, EmptyState } from '../ui';
+import { Card, Badge, Button, SectionHeader, StatTile, ProgressRing, EmptyState, MicButton } from '../ui';
 
 const PERIODS = [
   { key: 'month', label: 'This month', from: () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); } },
@@ -314,6 +314,7 @@ function CoachingHelperSection({ userId, user, onPhoneSaved }) {
         <div style={s.sectionLabel}>COACHING NOTES ({notes?.length || 0})</div>
         <div style={s.noteForm}>
           <textarea style={s.noteInput} placeholder="Add a coaching note…" value={noteContent} onChange={(e) => setNoteContent(e.target.value)} />
+          <MicButton onTranscript={(text) => setNoteContent((v) => (v ? `${v} ${text}` : text))} />
           <Button variant="secondary" size="sm" disabled={noteBusy || !noteContent.trim()} onClick={addNote}>ADD NOTE</Button>
         </div>
         {notesError && <div style={s.summaryError}>{notesError}</div>}

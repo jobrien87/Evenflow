@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
-import { Icon } from '../ui';
+import { Icon, MicButton } from '../ui';
 
 const HUMOR_LEVELS = ['LOW', 'NORMAL', 'SPICY'];
 const HUMOR_DESCRIPTIONS = {
@@ -178,13 +178,19 @@ export default function EdWidget() {
                 onChange={(e) => setEscalateForm({ ...escalateForm, subject: e.target.value })}
                 required
               />
-              <textarea
-                style={{ ...s.input, minHeight: 100, resize: 'none' }}
-                placeholder="What's going on?"
-                value={escalateForm.description}
-                onChange={(e) => setEscalateForm({ ...escalateForm, description: e.target.value })}
-                required
-              />
+              <div style={s.escalateTextareaWrap}>
+                <textarea
+                  style={{ ...s.input, minHeight: 100, resize: 'none' }}
+                  placeholder="What's going on?"
+                  value={escalateForm.description}
+                  onChange={(e) => setEscalateForm({ ...escalateForm, description: e.target.value })}
+                  required
+                />
+                <MicButton
+                  style={s.escalateMic}
+                  onTranscript={(text) => setEscalateForm((f) => ({ ...f, description: f.description ? `${f.description} ${text}` : text }))}
+                />
+              </div>
               <button style={s.sendButtonFull} type="submit">Create Ticket</button>
               {escalateStatus && <div style={s.escalateStatus}>{escalateStatus}</div>}
             </form>
@@ -210,6 +216,7 @@ export default function EdWidget() {
                   onKeyDown={(e) => e.key === 'Enter' && send()}
                   placeholder="Ask ED…"
                 />
+                <MicButton onTranscript={(text) => setInput((v) => (v ? `${v} ${text}` : text))} />
                 <button style={s.sendButton} onClick={send} disabled={busy}>
                   →
                 </button>
@@ -273,6 +280,8 @@ const s = {
   sendButton: { width: 36, background: 'var(--accent-gradient)', color: 'var(--accent-on)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
   escalateForm: { flex: 1, display: 'flex', flexDirection: 'column', gap: 10, padding: 12, overflowY: 'auto' },
   escalateHint: { color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 },
+  escalateTextareaWrap: { position: 'relative' },
+  escalateMic: { position: 'absolute', bottom: 8, right: 8 },
   sendButtonFull: { padding: '10px', background: 'var(--accent-gradient)', color: 'var(--accent-on)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 13 },
   escalateStatus: { color: 'var(--accent)', fontSize: 12 },
 };

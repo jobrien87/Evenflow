@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../lib/api';
-import { Modal, Button } from '../ui';
+import { Modal, Button, MicButton } from '../ui';
 
 // Shared compose form for both Agency Owner/Manager and Platform Owner —
 // only the `targets` list differs per role (each role's real allowed
@@ -77,7 +77,10 @@ export default function AnnouncementComposer({ open, onClose, targets }) {
     <Modal title="NEW ANNOUNCEMENT" onClose={onClose} maxWidth={480}>
       <form onSubmit={submit} style={s.form}>
         <input style={s.input} placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} required />
-        <textarea style={{ ...s.input, minHeight: 90 }} placeholder="Message" value={body} onChange={(e) => setBody(e.target.value)} required />
+        <div style={{ position: 'relative' }}>
+          <textarea style={{ ...s.input, minHeight: 90, width: '100%' }} placeholder="Message" value={body} onChange={(e) => setBody(e.target.value)} required />
+          <MicButton style={{ position: 'absolute', bottom: 8, right: 8 }} onTranscript={(text) => setBody((b) => (b ? `${b} ${text}` : text))} />
+        </div>
 
         <select style={s.input} value={target} onChange={(e) => selectTarget(e.target.value)}>
           {targets.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
