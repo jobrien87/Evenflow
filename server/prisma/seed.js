@@ -82,6 +82,26 @@ async function main() {
       console.log(`Created default plan: ${p.name}`);
     }
   }
+
+  // Seed the Record Store's initial 5 product templates so the storefront
+  // isn't empty on first login — prices and real Boberdoo IDs are left
+  // null until a Super Admin configures them (routes/recordStore.js
+  // refuses to let an Agency Owner order an unpriced template), matching
+  // this app's "never fabricate a number/ID" rule.
+  const recordStoreTemplates = [
+    { slug: 'HOME_BASIC', displayName: 'Home Basic', description: 'Real-time home insurance leads at wholesale pricing.', productCategory: 'HOME', leadType: 'INTERNET', sortOrder: 1 },
+    { slug: 'AUTO_BASIC', displayName: 'Auto Basic', description: 'Real-time auto insurance leads at wholesale pricing.', productCategory: 'AUTO', leadType: 'INTERNET', sortOrder: 2 },
+    { slug: 'HOME_PREFERRED', displayName: 'Home Preferred', description: 'Our higher-quality home insurance lead tier.', productCategory: 'HOME', leadType: 'INTERNET', sortOrder: 3 },
+    { slug: 'AUTO_PREFERRED', displayName: 'Auto Preferred', description: 'Our higher-quality auto insurance lead tier.', productCategory: 'AUTO', leadType: 'INTERNET', sortOrder: 4 },
+    { slug: 'LIVE_CALL_SETUP', displayName: 'Live Call Setup', description: 'Real-time inbound phone transfers — a live caller on the line, ready to talk.', productCategory: 'AUTO', leadType: 'LIVE_CALL', filterSetType: 'IPR', isIpr: true, sortOrder: 5, minimumDailyVolume: 1, maximumDailyVolume: 50, defaultDailyVolume: 5 },
+  ];
+  for (const t of recordStoreTemplates) {
+    const existing = await prisma.recordStoreTemplate.findUnique({ where: { slug: t.slug } });
+    if (!existing) {
+      await prisma.recordStoreTemplate.create({ data: t });
+      console.log(`Created Record Store template: ${t.slug}`);
+    }
+  }
 }
 
 main()

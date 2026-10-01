@@ -20,13 +20,11 @@ export const NAV_BY_ROLE = {
     { label: 'Training', to: '/producer/training', icon: 'book', primary: true, dataTour: 'nav-training' },
     { label: 'Moshpit', to: '/producer/moshpit', icon: 'flame', primary: true, dataTour: 'nav-moshpit' },
     { label: 'Winbacks & Cross-Sells', to: '/producer/opportunities', icon: 'target', dataTour: 'nav-opportunities' },
-    { label: 'Record Store', to: '/producer/record-store', icon: 'vinyl', stub: true, dataTour: 'nav-record-store' },
   ],
   TELEMARKETER: [
     { label: 'Home', to: '/telemarketer', icon: 'home', primary: true, dataTour: 'nav-home' },
     { label: 'Drills', to: '/telemarketer/drills', icon: 'sparkle', primary: true, dataTour: 'nav-drills' },
     { label: 'Tasks', to: '/telemarketer/tasks', icon: 'checklist', dataTour: 'nav-tasks' },
-    { label: 'Record Store', to: '/telemarketer/record-store', icon: 'vinyl', stub: true, dataTour: 'nav-record-store' },
   ],
   AGENCY_OWNER: [
     { label: 'Main Stage', to: '/agency', icon: 'home', primary: true, dataTour: 'nav-home' },
@@ -43,7 +41,7 @@ export const NAV_BY_ROLE = {
     { label: 'Training', to: '/agency/training', icon: 'book', dataTour: 'nav-training' },
     { label: 'Hours Report', to: '/agency/hours-report', icon: 'clock', secondary: true, dataTour: 'nav-hours-report' },
     { label: 'Billing', to: '/agency/billing', icon: 'card', secondary: true, dataTour: 'nav-billing' },
-    { label: 'Record Store', to: '/agency/record-store', icon: 'vinyl', stub: true, secondary: true, dataTour: 'nav-record-store' },
+    { label: 'Record Store', to: '/agency/record-store', icon: 'vinyl', dataTour: 'nav-record-store' },
     { label: 'Coaching', to: '/agency/coaching', icon: 'phone', secondary: true, dataTour: 'nav-coaching' },
     { label: 'Support', to: '/agency/support', icon: 'support', secondary: true, dataTour: 'nav-support' },
   ],
@@ -56,7 +54,7 @@ export const NAV_BY_ROLE = {
     { label: 'Support', to: '/platform/support', icon: 'support', primary: true, dataTour: 'nav-support' },
     { label: 'Billing', to: '/platform/billing', icon: 'card', dataTour: 'nav-billing' },
     { label: 'Training', to: '/platform/training', icon: 'book', dataTour: 'nav-training' },
-    { label: 'Record Store', to: '/platform/record-store', icon: 'vinyl', stub: true, dataTour: 'nav-record-store' },
+    { label: 'Record Store', to: '/platform/record-store', icon: 'vinyl', dataTour: 'nav-record-store' },
   ],
 };
 

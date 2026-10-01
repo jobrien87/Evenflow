@@ -29,6 +29,8 @@ import AgencyBillingPanel from './pages/AgencyBillingPanel';
 import CoursesAdminPanel from './pages/CoursesAdminPanel';
 import GoalsPanel from './pages/GoalsPanel';
 import TimeClockReportPanel from './pages/TimeClockReportPanel';
+import RecordStorePanel from './pages/RecordStorePanel';
+import RecordStoreAdminPanel from './pages/RecordStoreAdminPanel';
 
 import AgenciesPanel from './pages/AgenciesPanel';
 import AgencyDetailPage from './pages/AgencyDetailPage';
@@ -92,6 +94,7 @@ export default function App() {
           <Route path="agency/training" element={<CoursesAdminPanel />} />
           <Route path="agency/opportunities" element={<OpportunitiesPanel />} />
           <Route path="agency/goals" element={<GoalsPanel />} />
+          <Route path="agency/record-store" element={<RecordStorePanel />} />
           <Route path="agency/producers/:userId" element={<ProducerDetailPage />} />
         </Route>
 
@@ -106,6 +109,7 @@ export default function App() {
           <Route path="platform/support" element={<SupportPanel />} />
           <Route path="platform/billing" element={<BillingPanel />} />
           <Route path="platform/training" element={<CoursesAdminPanel />} />
+          <Route path="platform/record-store" element={<RecordStoreAdminPanel />} />
         </Route>
 
         <Route element={<RoleGate allow={['TELEMARKETER']} />}>

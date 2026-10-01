@@ -305,6 +305,12 @@ const updateAgencySchema = z.object({
   officeHours: z.record(z.string()).nullable().optional(),
   products: z.array(z.string()).optional(),
   priorityRules: priorityRulesSchema.optional(),
+  // Company contact info — collected during Record Store setup when
+  // missing (master spec §6) and reused for any future Boberdoo action.
+  address: z.string().trim().min(1).max(200).optional(),
+  city: z.string().trim().min(1).max(100).optional(),
+  state: z.string().trim().length(2).optional(),
+  zip: z.string().trim().min(5).max(10).optional(),
 });
 
 // Edit an agency's own settings — didn't exist at all before this: an

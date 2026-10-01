@@ -96,6 +96,29 @@ export const api = {
   inviteUser: (payload) => request('/users/invite', { method: 'POST', body: payload }),
   inviteUsersBulk: (invites) => request('/users/invite-bulk', { method: 'POST', body: { invites } }),
 
+  // Record Store — wholesale lead marketplace (Boberdoo-backed).
+  recordStoreTemplates: () => request('/record-store/templates'),
+  recordStoreSubscriptions: (params = '') => request(`/record-store/subscriptions${params}`),
+  recordStoreBalance: (params = '') => request(`/record-store/balance${params}`),
+  recordStoreActivity: (params = '') => request(`/record-store/activity${params}`),
+  createRecordStoreOrder: (payload) => request('/record-store/orders', { method: 'POST', body: payload }),
+  provisionRecordStoreOrder: (id) => request(`/record-store/orders/${id}/provision`, { method: 'POST' }),
+  confirmRecordStoreFunding: (id) => request(`/record-store/orders/${id}/confirm-funding`, { method: 'POST' }),
+  pauseRecordStoreSubscription: (id) => request(`/record-store/subscriptions/${id}/pause`, { method: 'POST' }),
+  resumeRecordStoreSubscription: (id) => request(`/record-store/subscriptions/${id}/resume`, { method: 'POST' }),
+  changeRecordStoreVolume: (id, dailyVolume) => request(`/record-store/subscriptions/${id}/volume`, { method: 'POST', body: { dailyVolume } }),
+  pauseRecordStoreAccount: (params = '') => request(`/record-store/account/pause-all${params}`, { method: 'POST' }),
+  resumeRecordStoreAccount: (params = '') => request(`/record-store/account/resume-all${params}`, { method: 'POST' }),
+  // Super Admin control center.
+  adminRecordStoreTemplates: () => request('/record-store/admin/templates'),
+  updateRecordStoreTemplate: (id, patch) => request(`/record-store/admin/templates/${id}`, { method: 'PATCH', body: patch }),
+  adminRecordStoreCustomers: () => request('/record-store/admin/customers'),
+  linkBoberdooPartner: (agencyId, partnerId) => request(`/record-store/admin/agencies/${agencyId}/link-partner`, { method: 'POST', body: { partnerId } }),
+  syncRecordStoreAgency: (agencyId) => request(`/record-store/admin/agencies/${agencyId}/sync`, { method: 'POST' }),
+  retryRecordStoreProvisioning: (id) => request(`/record-store/admin/subscriptions/${id}/retry`, { method: 'POST' }),
+  adminPauseRecordStoreAccount: (agencyId) => request(`/record-store/admin/agencies/${agencyId}/pause-account`, { method: 'POST' }),
+  adminResumeRecordStoreAccount: (agencyId) => request(`/record-store/admin/agencies/${agencyId}/resume-account`, { method: 'POST' }),
+
   // Personalize page — every user's own account.
   myBackgroundUrl: () => `${BASE}/users/me/background`,
   // Not JSON — a multipart upload, same bypass-request() shape as uploadCall.

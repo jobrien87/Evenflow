@@ -48,6 +48,9 @@ const PATHS = {
   alert: 'M12 3l10 18H2L12 3zM12 10v4M12 17h.01',
   send: 'M21 3L3 10.5l7 3.5m11-11l-6.5 17-4.5-7.5m11-9.5l-11 9.5',
   help: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9a2.5 2.5 0 0 1 4.9.75c0 1.5-2.4 1.75-2.4 3.25M12 17h.01',
+  pause: 'M7 4h3v16H7zM14 4h3v16h-3z',
+  play: 'M6 4l14 8-14 8V4z',
+  link: 'M9 15l6-6M8 16l-2 2a4 4 0 0 1-5.66-5.66l3-3A4 4 0 0 1 9 8M15 8l2-2a4 4 0 0 1 5.66 5.66l-3 3A4 4 0 0 1 15 16',
 };
 
 export default function Icon({ name, size = 18, style }) {

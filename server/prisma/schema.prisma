@@ -415,6 +415,43 @@ model Agency {
   // subscription (routes/billing.js's self-serve section). Null until the
   // agency's owner starts a checkout — never fabricated.
   stripeCustomerId String?
+
+  // ======================================================================
+  // RECORD STORE — Boberdoo/LeadPortal wholesale lead marketplace
+  // ======================================================================
+  // Company-level contact info Boberdoo's createNewPartner requires
+  // (Address/City/State/Zip) — collected once, during Record Store setup
+  // if missing, and reused for every subsequent Record Store action. Never
+  // required for agencies that never touch Record Store.
+  address        String?
+  city           String?
+  state          String?
+  zip            String?
+  // One Boberdoo Partner per EvenFlow Agency (never one per product/order —
+  // see lib/recordStoreProvisioning.js's idempotent provisionPartner()).
+  // Null until the agency's first Record Store order provisions one, or a
+  // Platform Owner links an existing Boberdoo account via the admin
+  // "LINK EXISTING BOBERDOO PARTNER" flow.
+  boberdooPartnerId     String?
+  // Local mirror of Boberdoo's own Partner status (0 Not Active / 1
+  // Temporarily Stopped / 2 Active) — EvenFlow is authoritative for DESIRED
+  // state (what the owner wants), Boberdoo is authoritative for EFFECTIVE
+  // state; this field tracks the last status we told Boberdoo to set, not
+  // a guess, and is only ever written right after a confirmed Boberdoo call.
+  boberdooPartnerStatus Int?
+  boberdooSyncStatus    BoberdooSyncStatus @default(SYNCED)
+  boberdooSyncError     String?
+  boberdooLastSyncAt    DateTime?
+  // Set once Boberdoo's own getPartnerCreditandBalance confirms the
+  // initial deposit has landed — never set merely because the owner was
+  // redirected to the payment page (see lib/recordStoreProvisioning.js's
+  // refreshFundingStatus()).
+  recordStoreDepositConfirmedAt DateTime?
+  // Cached balance snapshot — Boberdoo remains the authoritative source;
+  // this is just what the UI shows between refreshes.
+  recordStoreBalanceCents      Int?
+  recordStoreBalanceCheckedAt  DateTime?
+
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   archivedAt     DateTime?
@@ -438,6 +475,13 @@ model Agency {
   announcements Announcement[]
   producerNotes ProducerNote[]
   offices       Office[]
+  recordStoreSubscriptions RecordStoreSubscription[]
+}
+
+enum BoberdooSyncStatus {
+  SYNCED
+  PENDING
+  ERROR
 }
 
 // A physical branch/location within an agency — lets an agency with more
@@ -1556,4 +1600,167 @@ model Message {
   createdAt      DateTime     @default(now())
 
   @@index([conversationId, createdAt])
+}
+
+// ======================================================================
+// RECORD STORE — Boberdoo/LeadPortal wholesale lead marketplace
+// ======================================================================
+// An Agency Owner buys a recurring flow of real leads from Yield
+// Marketing's lead exchange (a white-labeled Boberdoo instance —
+// see docs/lead-portal-api-reference.md and lib/boberdoo.js) directly
+// inside EvenFlow, with EvenFlow handling all Partner/Filter-Set
+// provisioning behind the scenes. EvenFlow is authoritative for product
+// selection, requested daily volume, and desired on/off state; Boberdoo
+// is authoritative for the real Partner/Filter Set, actual balance, and
+// lead delivery — see lib/recordStoreProvisioning.js's own header comment
+// for how the two are reconciled when they disagree.
+
+// A buyable product/template, Super-Admin-configured. Deliberately
+// data-driven (slug/displayName/etc.) rather than a fixed Home/Auto/Life
+// enum, so a new lead type (HVAC, Solar, aged leads, ...) is just a new
+// row, never a code change (see routes/recordStore.js — no
+// if/else-by-product-name branching anywhere).
+model RecordStoreTemplate {
+  id          String   @id @default(uuid())
+  slug        String   @unique
+  displayName String
+  description String?
+  // Free-text, Super-Admin-defined — "HOME" / "AUTO" / future categories.
+  // Not an enum on purpose: adding a new category must never need a schema
+  // migration (see master spec's "future-proof product architecture").
+  productCategory String
+  // Free-text — "INTERNET" / "LIVE_CALL" / future lead-delivery shapes.
+  leadType        String
+  // The real Boberdoo TYPE id (Lead_Type) once a Super Admin has looked it
+  // up against a live account — getFilterSetsAll/getPartnerSettings is the
+  // only reliable source (see docs/lead-portal-api-reference.md §4).
+  // Null = this template isn't wired to a real Boberdoo lead type yet.
+  boberdooTypeId            String?
+  // A human label for whatever Boberdoo-side filter-set blueprint this
+  // template maps to (e.g. a saved filter-set name/ID a Super Admin set up
+  // once in the Boberdoo portal) — purely descriptive, read by admins only.
+  boberdooTemplateReference String?
+  filterSetType  String  @default("STANDARD") // "STANDARD" | "IPR"
+  isIpr          Boolean @default(false)
+  // Null = not priced yet; the storefront must never show a fabricated
+  // price (see ui — StatTile/product cards read this straight from here).
+  wholesalePriceCents  Int?
+  minimumDailyVolume   Int     @default(1)
+  maximumDailyVolume   Int     @default(200)
+  defaultDailyVolume   Int     @default(10)
+  minimumDepositCents  Int     @default(150000) // $1,500 — overridable per template
+  active               Boolean @default(true)
+  sortOrder            Int     @default(0)
+  customerVisible      Boolean @default(true)
+  // Boberdoo-specific config that shouldn't clutter the main schema — e.g.
+  // the exact insertUpdateFilterSet/iprInsertFilterSet field values this
+  // template should submit (Boberdoo's own standard filter-set field list
+  // isn't fully documented — see docs/lead-portal-api-reference.md §3 —
+  // so these are entered by a Super Admin against a real account rather
+  // than guessed at in code), plus IPR defaults (Ring_Timeout,
+  // Successful_Minutes, Record_Phone_Call, etc.) the Agency Owner never
+  // sees or controls directly.
+  configurationJson Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscriptions RecordStoreSubscription[]
+}
+
+enum RecordStoreSubscriptionStatus {
+  DRAFT
+  PENDING_PROVISIONING
+  PENDING_FUNDING
+  ACTIVE
+  PAUSED
+  ACCOUNT_PAUSED
+  PAYMENT_REQUIRED
+  ERROR
+  CANCELLED
+}
+
+// Fine-grained internal step tracker (distinct from the coarse, customer
+// facing `status` above) — what RETRY PROVISIONING actually resumes from,
+// and what tells the retry logic whether createPartner/createFilterSet
+// need to run again or can be safely skipped (idempotency).
+enum RecordStoreProvisioningStatus {
+  EVENFLOW_ORDER_CREATED
+  BOBERDOO_PARTNER_CREATING
+  BOBERDOO_PARTNER_CREATED
+  FILTER_SET_CREATING
+  FILTER_SET_CREATED
+  WAITING_FOR_DEPOSIT
+  DEPOSIT_CONFIRMED
+  ACTIVATING
+  ACTIVE
+  PROVISIONING_ERROR
+}
+
+enum RecordStoreFundingStatus {
+  PENDING
+  CONFIRMED
+}
+
+// What the Agency Owner WANTS this one product to be doing, independent of
+// an account-wide pause — see §19 of the master spec: pausing the whole
+// account must never clear an individually-paused product's own desired
+// state, so resuming the account only restores products that were
+// individually ACTIVE before the account-wide pause.
+enum RecordStoreDesiredStatus {
+  ACTIVE
+  PAUSED
+}
+
+model RecordStoreSubscription {
+  id                    String   @id @default(uuid())
+  agencyId              String
+  agency                Agency   @relation(fields: [agencyId], references: [id])
+  recordStoreTemplateId String
+  template              RecordStoreTemplate @relation(fields: [recordStoreTemplateId], references: [id])
+
+  // Denormalized snapshot of Agency.boberdooPartnerId at provisioning time
+  // — the live value always lives on Agency (one Partner per Agency,
+  // shared across every subscription); this copy is for audit/history so
+  // an old row still shows which Partner it was provisioned under even if
+  // something unusual ever changes the agency-level value later.
+  boberdooPartnerId   String?
+  boberdooFilterSetId String?
+
+  // Snapshots taken at purchase time so a later template rename/re-price
+  // never rewrites this order's own history.
+  productNameSnapshot String
+  leadType            String
+  filterSetType       String
+  isIpr               Boolean @default(false)
+  priceSnapshotCents  Int
+
+  dailyVolume    Int
+  // Live Call (IPR) only — the one real, business-level delivery field an
+  // Agency Owner sets themselves (master spec §7); every other IPR field
+  // (Ring_Timeout, Successful_Minutes, Record_Phone_Call, ...) comes from
+  // the template's own configurationJson, never from the customer.
+  ringToPhone        String?
+  maxConcurrentCalls Int?
+  desiredStatus  RecordStoreDesiredStatus @default(ACTIVE)
+  status         RecordStoreSubscriptionStatus @default(DRAFT)
+  provisioningStatus RecordStoreProvisioningStatus @default(EVENFLOW_ORDER_CREATED)
+  fundingStatus  RecordStoreFundingStatus @default(PENDING)
+
+  failedStep    String?
+  errorCode     String?
+  errorMessage  String?
+  retryCount    Int      @default(0)
+  boberdooSyncError  String?
+  lastBoberdooSyncAt DateTime?
+
+  startedAt   DateTime?
+  pausedAt    DateTime?
+  cancelledAt DateTime?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([agencyId])
+  @@index([status])
 }
