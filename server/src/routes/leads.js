@@ -137,7 +137,7 @@ const INTAKE_FIELD_KEYS = [
 // POST / route below and the bulk-import route, so a spreadsheet-imported
 // lead goes through exactly the same real logic a manually-entered one
 // does, never a second/thinner implementation.
-async function createLeadRecord({ agencyId, source, createdById, data }) {
+async function createLeadRecord({ agencyId, source, createdById, data, importBatchId }) {
   const phoneNormalized = normalizePhone(data.phone);
   const email = normalizeEmail(data.email);
 
@@ -183,6 +183,7 @@ async function createLeadRecord({ agencyId, source, createdById, data }) {
         dob: data.dob ? new Date(data.dob) : null,
         isLiveTransfer: !!data.isLiveTransfer,
         leadType: data.leadTypeOverride || deriveLeadType({ isLiveTransfer: !!data.isLiveTransfer }),
+        importBatchId: importBatchId || null,
         ...intakeFields,
       },
     });
@@ -361,12 +362,19 @@ router.post('/bulk-import', uploadSpreadsheet.single('file'), async (req, res, n
       });
     }
 
+    // Created up front (before the per-row loop) so every Lead this upload
+    // creates can carry its id — that's what POST /import-batches/:id/undo
+    // later uses to find and reverse exactly this batch, and only this one.
+    const batch = await prisma.leadImportBatch.create({
+      data: { agencyId, uploadedById: req.user.id, leadCategory, totalRows: parsedFile.totalRows, created: 0, skipped: 0 },
+    });
+
     let created = 0;
     const failures = parsedFile.skipped.map((s) => ({ row: s.row, reason: s.reason }));
 
     for (const row of parsedFile.leads) {
       try {
-        const result = await createLeadRecord({ agencyId, source: categoryFields.sourceOverride || 'bulk_upload', createdById: req.user.id, data: { ...row, ...categoryFields } });
+        const result = await createLeadRecord({ agencyId, source: categoryFields.sourceOverride || 'bulk_upload', createdById: req.user.id, data: { ...row, ...categoryFields }, importBatchId: batch.id });
         created += 1;
         await recordAudit({
           actorId: req.user.id,
@@ -383,14 +391,134 @@ router.post('/bulk-import', uploadSpreadsheet.single('file'), async (req, res, n
       }
     }
 
+    await prisma.leadImportBatch.update({ where: { id: batch.id }, data: { created, skipped: failures.length } });
+
     return res.json({
       success: true,
+      batchId: batch.id,
       totalRows: parsedFile.totalRows,
       truncated: parsedFile.truncated,
       created,
       skipped: failures.length,
       failures: failures.slice(0, 50),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Undo window — a batch older than this can no longer be undone in one
+// click (matches staleLeadReminders.js's own "a few business hours" scale
+// for what counts as still-fresh activity on a lead).
+const IMPORT_UNDO_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+// Whether a bulk-imported Lead has had zero real activity since creation —
+// the only condition under which undo can safely archive it without
+// throwing away real work (a disposition, a note, an assignment, a call).
+function leadIsUntouchedSinceImport(lead) {
+  return (
+    lead.status === 'NEW' &&
+    !lead.assignedToId &&
+    !lead.firstAttemptAt &&
+    !lead.firstContactAt &&
+    lead.attemptCount === 0 &&
+    lead._count.notes === 0 &&
+    lead._count.activities === 0 &&
+    lead._count.tasks === 0 &&
+    lead._count.calls === 0 &&
+    lead._count.productQuotes === 0
+  );
+}
+
+// Recent bulk-import batches for this agency, each flagged with whether
+// it's still within the undo window and how many of its leads are still
+// untouched (i.e. what undo would actually archive right now).
+router.get('/import-batches', async (req, res, next) => {
+  try {
+    if (!['AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'].includes(req.user.role)) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    const agencyId = req.user.role === 'PLATFORM_OWNER' ? req.query.agencyId : req.user.agencyId;
+    if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+
+    const batches = await prisma.leadImportBatch.findMany({
+      where: { agencyId },
+      include: {
+        uploadedBy: { select: { id: true, firstName: true, lastName: true } },
+        leads: {
+          select: {
+            status: true, assignedToId: true, firstAttemptAt: true, firstContactAt: true, attemptCount: true, archivedAt: true,
+            _count: { select: { notes: true, activities: true, tasks: true, calls: true, productQuotes: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+
+    return res.json({
+      success: true,
+      batches: batches.map((b) => {
+        const activeLeads = b.leads.filter((l) => !l.archivedAt);
+        const undoable = activeLeads.filter(leadIsUntouchedSinceImport).length;
+        return {
+          id: b.id, leadCategory: b.leadCategory, totalRows: b.totalRows, created: b.created, skipped: b.skipped,
+          createdAt: b.createdAt, uploadedBy: b.uploadedBy, undoneAt: b.undoneAt,
+          withinUndoWindow: Date.now() - new Date(b.createdAt).getTime() < IMPORT_UNDO_WINDOW_MS,
+          undoableCount: undoable, totalActive: activeLeads.length,
+        };
+      }),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Archives every still-untouched Lead from one bulk-import batch — never a
+// hard delete (same archivedAt mechanism DUPLICATE/ARCHIVED dispositions
+// already use), and never a lead that's since been worked (assigned,
+// attempted, noted, or dispositioned) so real work is never thrown away.
+router.post('/import-batches/:batchId/undo', async (req, res, next) => {
+  try {
+    if (!['AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'].includes(req.user.role)) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    const batch = await prisma.leadImportBatch.findUnique({ where: { id: req.params.batchId } });
+    if (!batch) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (req.user.role !== 'PLATFORM_OWNER' && batch.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    if (batch.undoneAt) {
+      return res.status(409).json({ success: false, error: 'ALREADY_UNDONE', message: 'This import was already undone.' });
+    }
+    if (Date.now() - new Date(batch.createdAt).getTime() > IMPORT_UNDO_WINDOW_MS) {
+      return res.status(409).json({ success: false, error: 'WINDOW_EXPIRED', message: 'This import is too old to undo automatically — archive the leads individually instead.' });
+    }
+
+    const leads = await prisma.lead.findMany({
+      where: { importBatchId: batch.id, archivedAt: null },
+      include: { _count: { select: { notes: true, activities: true, tasks: true, calls: true, productQuotes: true } } },
+    });
+    const toArchive = leads.filter(leadIsUntouchedSinceImport);
+    const kept = leads.length - toArchive.length;
+
+    await prisma.$transaction([
+      ...toArchive.map((lead) =>
+        prisma.lead.update({ where: { id: lead.id }, data: { archivedAt: new Date() } })
+      ),
+      ...toArchive.map((lead) =>
+        prisma.leadEvent.create({ data: { leadId: lead.id, type: 'lead.import_undone', metadata: { batchId: batch.id } } })
+      ),
+      prisma.leadImportBatch.update({ where: { id: batch.id }, data: { undoneAt: new Date(), undoneById: req.user.id } }),
+    ]);
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: batch.agencyId,
+      action: 'lead.import_undone', entityType: 'LeadImportBatch', entityId: batch.id,
+      after: { archived: toArchive.length, kept }, correlationId: req.correlationId,
+    });
+
+    return res.json({ success: true, archived: toArchive.length, kept });
   } catch (err) {
     next(err);
   }

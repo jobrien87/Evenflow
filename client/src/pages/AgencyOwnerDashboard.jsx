@@ -1,19 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { useIsMobile } from '../lib/useViewport';
-import { Button, EdSuggestionBox, LeadTypeIcon } from '../ui';
+import { Button, EdSuggestionBox } from '../ui';
 import FlowScoreCard from './FlowScoreCard';
 import LeadsSnapshotBox from './LeadsSnapshotBox';
 import ZipCodeBox from './ZipCodeBox';
 import ZipReportPage from './ZipReportPage';
 import FunnelMetricsCard from './FunnelMetricsCard';
-import LeadDetailModal from './LeadDetailModal';
 import RunningReportPage from './RunningReportPage';
 import AgencySettingsModal from './AgencySettingsModal';
 import PerformanceLeaderboards from './PerformanceLeaderboards';
-import BulkLeadUploadBox from './BulkLeadUploadBox';
 import TeamClockStatusBox from './TeamClockStatusBox';
 import AnnouncementComposer from './AnnouncementComposer';
 
@@ -21,20 +19,13 @@ export default function AgencyOwnerDashboard() {
   const { user } = useAuth();
   const isMobile = useIsMobile();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [leads, setLeads] = useState([]);
   const [users, setUsers] = useState([]);
-  const [openLeadId, setOpenLeadId] = useState(null);
   const [showInvite, setShowInvite] = useState(false);
-  const [showAddLead, setShowAddLead] = useState(false);
-  const [showUpload, setShowUpload] = useState(false);
   const [inviteRows, setInviteRows] = useState([{ email: '', firstName: '', lastName: '', role: 'PRODUCER' }]);
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteResults, setInviteResults] = useState(null);
-  const [leadForm, setLeadForm] = useState({ firstName: '', lastName: '', phone: '', email: '', product: 'Auto', assignedToId: '' });
   const [status, setStatus] = useState('');
   const [inviteLink, setInviteLink] = useState('');
-  const [leadStatus, setLeadStatus] = useState('');
   const [showReport, setShowReport] = useState(false);
   const [showZipReport, setShowZipReport] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -50,36 +41,14 @@ export default function AgencyOwnerDashboard() {
   const [newOfficeName, setNewOfficeName] = useState('');
   const [officeError, setOfficeError] = useState('');
 
-  // The funnel drill-down's filter lives in the URL (not component state)
-  // so it's shareable and survives the back button.
-  const stage = searchParams.get('stage');
-  const from = searchParams.get('from');
-  const to = searchParams.get('to');
-  const stageFilter = stage && from && to ? { stage, from, to } : null;
-  const highlightId = searchParams.get('highlight');
-  const handledHighlightRef = useRef(false);
-
   useEffect(() => {
     load();
-  }, [stage, from, to]);
-
-  // Destination side of notification deep-linking: scroll to and highlight
-  // whichever lead a "new lead" notification pointed at.
-  useEffect(() => {
-    if (!highlightId || handledHighlightRef.current || leads.length === 0) return;
-    if (!leads.some((l) => l.id === highlightId)) return;
-    handledHighlightRef.current = true;
-    document.getElementById(`lead-${highlightId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, [highlightId, leads]);
+  }, []);
 
   async function load() {
     setLoadError('');
-    const leadParams = stageFilter
-      ? `?stage=${stageFilter.stage}&from=${stageFilter.from}&to=${stageFilter.to}`
-      : '';
     try {
-      const [leadData, userData, agencyData, officeData] = await Promise.all([api.leads(leadParams), api.users(''), api.agencyDetail(user.agencyId), api.offices()]);
-      setLeads(leadData.leads);
+      const [userData, agencyData, officeData] = await Promise.all([api.users(''), api.agencyDetail(user.agencyId), api.offices()]);
       setUsers(userData.users);
       setAgency(agencyData.agency);
       setOffices(officeData.offices || []);
@@ -145,11 +114,7 @@ export default function AgencyOwnerDashboard() {
   }
 
   function selectFunnelStage(stageKey, range) {
-    setSearchParams({ stage: stageKey, from: range.from, to: range.to });
-  }
-
-  function clearStageFilter() {
-    setSearchParams({});
+    navigate(`/agency/leads?stage=${stageKey}&from=${range.from}&to=${range.to}`);
   }
 
   async function resendUser(userId) {
@@ -216,20 +181,6 @@ export default function AgencyOwnerDashboard() {
       }
     } catch (err) {
       setStatus(err.data?.message || 'Failed to send password reset.');
-    }
-  }
-
-  async function addLead(e) {
-    e.preventDefault();
-    setLeadStatus('Creating…');
-    try {
-      await api.createLead(leadForm);
-      setLeadStatus('Lead created.');
-      setLeadForm({ firstName: '', lastName: '', phone: '', email: '', product: 'Auto', assignedToId: '' });
-      setShowAddLead(false);
-      await load();
-    } catch (err) {
-      setLeadStatus(err.data?.message || 'Failed to create lead.');
     }
   }
 
@@ -405,62 +356,6 @@ export default function AgencyOwnerDashboard() {
         ))}
       </section>
 
-      <section style={s.section}>
-        <div style={s.headerRow}>
-          <h3 style={s.h3}>LEADS ({leads.length}){stageFilter ? ` · ${stageFilter.stage.toUpperCase()}` : ''}</h3>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {stageFilter && (
-              <button style={s.smallButtonOutline} onClick={clearStageFilter}>CLEAR FILTER</button>
-            )}
-            <button style={s.smallButtonOutline} onClick={() => setShowUpload(!showUpload)}>UPLOAD LEADS</button>
-            <button style={s.smallButton} onClick={() => setShowAddLead(!showAddLead)}>+ ADD LEAD</button>
-          </div>
-        </div>
-        {showUpload && (
-          <BulkLeadUploadBox agencyId={user?.agencyId} onImported={load} />
-        )}
-        {showAddLead && (
-          <form onSubmit={addLead} style={s.form}>
-            <input style={s.input} placeholder="First name" value={leadForm.firstName} onChange={(e) => setLeadForm({ ...leadForm, firstName: e.target.value })} required />
-            <input style={s.input} placeholder="Last name" value={leadForm.lastName} onChange={(e) => setLeadForm({ ...leadForm, lastName: e.target.value })} required />
-            <input style={s.input} placeholder="Phone" value={leadForm.phone} onChange={(e) => setLeadForm({ ...leadForm, phone: e.target.value })} />
-            <input style={s.input} type="email" placeholder="Email (optional)" value={leadForm.email} onChange={(e) => setLeadForm({ ...leadForm, email: e.target.value })} />
-            <select style={s.input} value={leadForm.product} onChange={(e) => setLeadForm({ ...leadForm, product: e.target.value })}>
-              <option>Auto</option><option>Home</option><option>Life</option><option>Health</option>
-            </select>
-            <select style={s.input} value={leadForm.assignedToId} onChange={(e) => setLeadForm({ ...leadForm, assignedToId: e.target.value })}>
-              <option value="">Unassigned</option>
-              {producers.map((p) => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
-            </select>
-            <button style={s.submitButton} type="submit">Create Lead</button>
-          </form>
-        )}
-        {leadStatus && <div style={s.status}>{leadStatus}</div>}
-        {leads.map((l) => (
-          <div
-            key={l.id}
-            id={`lead-${l.id}`}
-            style={l.id === highlightId ? { ...s.row, ...s.rowHighlighted } : s.row}
-            className="ui-row-stack"
-            onClick={() => setOpenLeadId(l.id)}
-          >
-            <div>
-              <div style={{ ...s.rowTitle, cursor: 'pointer', textDecoration: 'underline' }}>
-                <LeadTypeIcon type={l.leadType} style={{ marginRight: 6, textDecoration: 'none' }} />
-                {l.customer ? `${l.customer.firstName} ${l.customer.lastName}` : 'Lead'}
-              </div>
-              <div style={s.rowSub}>{l.product || l.source} · {l.assignedTo ? `${l.assignedTo.firstName} ${l.assignedTo.lastName}` : 'Unassigned'}</div>
-            </div>
-            <div style={s.badge}>{l.status}</div>
-          </div>
-        ))}
-        {leads.length === 0 && <div style={s.empty}>No leads yet.</div>}
-      </section>
-
-      {openLeadId && (
-        <LeadDetailModal leadId={openLeadId} onClose={() => setOpenLeadId(null)} onChanged={load} />
-      )}
-
       {showReport && (
         <div style={s.reportOverlay} onClick={() => setShowReport(false)}>
           <div style={s.reportModal} onClick={(e) => e.stopPropagation()}>
@@ -512,7 +407,6 @@ const s = {
   }),
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2 },
-  rowHighlighted: { outline: '2px solid var(--accent)', boxShadow: 'var(--shadow-glow-accent)', borderRadius: 'var(--radius-md)' },
   smallButton: { padding: '8px 14px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
   smallButtonOutline: { padding: '8px 14px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
   form: { display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg-elevated)', padding: 16, borderRadius: 8, marginBottom: 12, border: '1px solid var(--border-hairline)' },

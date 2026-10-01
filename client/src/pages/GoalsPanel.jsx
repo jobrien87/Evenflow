@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { useAuth } from '../lib/AuthContext';
 import { ProgressBar, EdSuggestionBox } from '../ui';
 import { fireCelebration } from '../lib/celebrations';
 
@@ -11,6 +12,8 @@ function formatUserName(user) {
 }
 
 export default function GoalsPanel() {
+  const { user } = useAuth();
+  const canManage = user?.role !== 'PRODUCER';
   const [goals, setGoals] = useState([]);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -31,7 +34,7 @@ export default function GoalsPanel() {
   async function load() {
     setLoadError('');
     try {
-      const [goalData, userData] = await Promise.all([api.goals(), api.users('')]);
+      const [goalData, userData] = await Promise.all([api.goals(), canManage ? api.users('') : Promise.resolve({ users: [] })]);
       setGoals(goalData.goals);
       setUsers(userData.users.filter((u) => u.role === 'PRODUCER'));
       if (goalData.goals.some((g) => g.justCompleted)) {
@@ -163,32 +166,34 @@ export default function GoalsPanel() {
   return (
     <div style={s.wrap}>
       <div style={s.headerRow}>
-        <h3 style={s.h3}>GOALS ({goals.length})</h3>
-        <button style={s.smallButton} onClick={openForm}>+ SET GOAL</button>
+        <h3 style={s.h3}>{canManage ? `GOALS (${goals.length})` : `MY GOALS (${goals.length})`}</h3>
+        {canManage && <button style={s.smallButton} onClick={openForm}>+ SET GOAL</button>}
       </div>
 
       <div style={{ marginBottom: 16 }}>
         <EdSuggestionBox pageContext="goals" />
       </div>
 
-      <div style={s.aiBox}>
-        <div style={s.aiLabel}>✨ DESCRIBE A GOAL</div>
-        <div style={s.aiRow}>
-          <input
-            style={s.input}
-            placeholder='e.g. "get producers to 10 sales this month"'
-            value={aiText}
-            onChange={(e) => setAiText(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && parseWithAi()}
-          />
-          <button style={s.smallButton} disabled={aiBusy || !aiText.trim()} onClick={parseWithAi}>
-            {aiBusy ? 'PARSING…' : 'PARSE'}
-          </button>
+      {canManage && (
+        <div style={s.aiBox}>
+          <div style={s.aiLabel}>✨ DESCRIBE A GOAL</div>
+          <div style={s.aiRow}>
+            <input
+              style={s.input}
+              placeholder='e.g. "get producers to 10 sales this month"'
+              value={aiText}
+              onChange={(e) => setAiText(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && parseWithAi()}
+            />
+            <button style={s.smallButton} disabled={aiBusy || !aiText.trim()} onClick={parseWithAi}>
+              {aiBusy ? 'PARSING…' : 'PARSE'}
+            </button>
+          </div>
+          {aiNote && <div style={s.aiNote}>{aiNote}</div>}
         </div>
-        {aiNote && <div style={s.aiNote}>{aiNote}</div>}
-      </div>
+      )}
 
-      {showForm && (
+      {canManage && showForm && (
         <form onSubmit={submit} style={s.form}>
           <select style={s.input} value={form.userId} onChange={(e) => setForm({ ...form, userId: e.target.value })}>
             <option value="">Whole agency (no specific producer)</option>
@@ -223,12 +228,12 @@ export default function GoalsPanel() {
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               {g.completedAt && !g.justCompleted && <span style={s.completedBadge}>COMPLETED</span>}
-              <button style={s.editButton} onClick={() => startEdit(g)}>EDIT</button>
-              <button style={s.deleteButton} onClick={() => remove(g.id)}>DELETE</button>
+              {canManage && <button style={s.editButton} onClick={() => startEdit(g)}>EDIT</button>}
+              {canManage && <button style={s.deleteButton} onClick={() => remove(g.id)}>DELETE</button>}
             </div>
           </div>
 
-          {editingId === g.id ? (
+          {canManage && editingId === g.id ? (
             <div style={s.editRow}>
               <input style={s.input} type="number" min="1" value={editForm.targetValue} onChange={(e) => setEditForm({ ...editForm, targetValue: e.target.value })} />
               <input style={s.input} type="date" value={editForm.periodStart} onChange={(e) => setEditForm({ ...editForm, periodStart: e.target.value })} />

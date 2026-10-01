@@ -12,14 +12,14 @@ const rateLimit = require('express-rate-limit');
 const { z } = require('zod');
 const { prisma } = require('../lib/db');
 const { requireAuth } = require('../middleware/auth');
-const { requireModuleEnabled } = require('../lib/entitlements');
+const { requireSalesStudioAccess } = require('../lib/entitlements');
 const { callMultiTurn, isConfigured } = require('../lib/aiProvider');
 const { estimateCostMicros } = require('../lib/aiCost');
 const { findRelevantLessons } = require('../lib/drillRetrieval');
 
 const router = express.Router();
 router.use(requireAuth);
-router.use(requireModuleEnabled('coachingEnabled'));
+router.use(requireSalesStudioAccess);
 
 // Same shape/cadence as ed.js's askLimiter — real billed API calls.
 const roleplayLimiter = rateLimit({

@@ -8,12 +8,12 @@ const { save, storageHealth } = require('../lib/storage');
 const { validateAudioUpload } = require('../lib/fileValidation');
 const { enqueueCallProcessing, enqueueAnalysis } = require('../jobs/callProcessing');
 const { read } = require('../lib/storage');
-const { requireModuleEnabled } = require('../lib/entitlements');
+const { requireSalesStudioAccess } = require('../lib/entitlements');
 const { computeDrillScore, computeCoachingBreakdown } = require('../lib/callScoring');
 
 const router = express.Router();
 router.use(requireAuth);
-router.use(requireModuleEnabled('coachingEnabled'));
+router.use(requireSalesStudioAccess);
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } });
 

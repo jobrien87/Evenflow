@@ -2,6 +2,7 @@ const app = require('./app');
 const { checkStaleLeads } = require('./lib/staleLeadReminders');
 const { recomputeAllLeadPriorities } = require('./lib/leadPriorityRecompute');
 const { checkFirstAttemptSla } = require('./lib/firstAttemptSlaAlerts');
+const { checkAgentOfMonth } = require('./lib/agentOfMonth');
 
 const PORT = process.env.PORT || 4000;
 
@@ -28,3 +29,11 @@ setInterval(() => {
 setInterval(() => {
   checkFirstAttemptSla().catch((err) => console.error('[firstAttemptSlaAlerts] check failed', err.message));
 }, 2 * 60 * 1000);
+
+// Monthly, but checked on a much tighter interval since there's no real
+// scheduler — idempotent (UserBadge's unique constraint), so a redundant
+// check every few hours just confirms "already awarded" and no-ops. See
+// lib/agentOfMonth.js.
+setInterval(() => {
+  checkAgentOfMonth().catch((err) => console.error('[agentOfMonth] check failed', err.message));
+}, 6 * 60 * 60 * 1000);

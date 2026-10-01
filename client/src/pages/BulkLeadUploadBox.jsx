@@ -28,11 +28,14 @@ export default function BulkLeadUploadBox({ agencyId, onImported }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+  const [undoBusy, setUndoBusy] = useState(false);
+  const [undoResult, setUndoResult] = useState(null);
 
   async function handleFile(file) {
     setBusy(true);
     setError('');
     setResult(null);
+    setUndoResult(null);
     try {
       const data = await api.bulkImportLeads(file, agencyId, leadCategory);
       setResult(data);
@@ -41,6 +44,20 @@ export default function BulkLeadUploadBox({ agencyId, onImported }) {
       setError(err.data?.message || 'Could not import that file.');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function undoImport() {
+    if (!result?.batchId) return;
+    setUndoBusy(true);
+    try {
+      const data = await api.undoLeadImport(result.batchId);
+      setUndoResult(data);
+      if (onImported) onImported();
+    } catch (err) {
+      setUndoResult({ error: err.data?.message || 'Could not undo this import.' });
+    } finally {
+      setUndoBusy(false);
     }
   }
 
@@ -65,6 +82,20 @@ export default function BulkLeadUploadBox({ agencyId, onImported }) {
           Imported {result.created} of {result.totalRows} row{result.totalRows === 1 ? '' : 's'}.
           {result.skipped > 0 ? ` ${result.skipped} row${result.skipped === 1 ? '' : 's'} skipped.` : ''}
           {result.truncated ? ' This file had more rows than one upload can process — split it up and upload the rest separately.' : ''}
+          {result.created > 0 && !undoResult && (
+            <div style={{ marginTop: 8 }}>
+              <button style={s.undoButton} disabled={undoBusy} onClick={undoImport}>
+                {undoBusy ? 'UNDOING…' : 'UNDO THIS IMPORT'}
+              </button>
+            </div>
+          )}
+          {undoResult && !undoResult.error && (
+            <div style={s.undoNote}>
+              Undone — archived {undoResult.archived} lead{undoResult.archived === 1 ? '' : 's'}.
+              {undoResult.kept > 0 ? ` ${undoResult.kept} left as-is (already worked).` : ''}
+            </div>
+          )}
+          {undoResult?.error && <div style={s.error}>{undoResult.error}</div>}
         </div>
       )}
     </div>
@@ -77,4 +108,6 @@ const s = {
   select: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 13 },
   error: { color: 'var(--danger)', fontSize: 12, marginTop: 8 },
   result: { color: 'var(--text-secondary)', fontSize: 12, marginTop: 8 },
+  undoButton: { padding: '6px 12px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700 },
+  undoNote: { color: 'var(--accent)', fontSize: 12, marginTop: 6 },
 };

@@ -347,6 +347,10 @@ const entitlementsSchema = z.object({
   crmEnabled: z.boolean().optional(),
   transfersEnabled: z.boolean().optional(),
   coachingEnabled: z.boolean().optional(),
+  // The Sales Studio compliance buffer (lib/entitlements.js's
+  // requireSalesStudioAccess) — off bypasses the coachingEnabled unlock
+  // entirely for this one agency.
+  salesStudioGateEnabled: z.boolean().optional(),
 });
 
 // A direct Platform-Owner override of module access, independent of
@@ -367,7 +371,7 @@ router.patch('/:agencyId/entitlements', requireRole('PLATFORM_OWNER'), async (re
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role, agencyId: before.id,
       action: 'agency.entitlements_overridden', entityType: 'Agency', entityId: before.id,
-      before: { crmEnabled: before.crmEnabled, transfersEnabled: before.transfersEnabled, coachingEnabled: before.coachingEnabled },
+      before: { crmEnabled: before.crmEnabled, transfersEnabled: before.transfersEnabled, coachingEnabled: before.coachingEnabled, salesStudioGateEnabled: before.salesStudioGateEnabled },
       after: parsed.data, correlationId: req.correlationId,
     });
 

@@ -82,6 +82,8 @@ export const api = {
     }
     return data;
   },
+  leadImportBatches: (params = '') => request(`/leads/import-batches${params}`),
+  undoLeadImport: (batchId) => request(`/leads/import-batches/${batchId}/undo`, { method: 'POST' }),
 
   agencies: (params = '') => request(`/agencies${params}`),
   createAgency: (payload) => request('/agencies', { method: 'POST', body: payload }),
@@ -146,6 +148,15 @@ export const api = {
   createProducerNote: (userId, content) => request(`/users/${userId}/notes`, { method: 'POST', body: { content } }),
   coachingSummary: (userId, humorLevel) => request(`/ed/coaching-summary?userId=${userId}${humorLevel ? `&humorLevel=${humorLevel}` : ''}`),
 
+  rosterBadges: (params = '') => request(`/roster/badges${params}`),
+  awardBadge: (payload) => request('/roster/badges', { method: 'POST', body: payload }),
+  revokeBadge: (id) => request(`/roster/badges/${id}`, { method: 'DELETE' }),
+  rosterBirthdays: (params = '') => request(`/roster/birthdays${params}`),
+  ptoRequests: (params = '') => request(`/roster/pto${params}`),
+  createPtoRequest: (payload) => request('/roster/pto', { method: 'POST', body: payload }),
+  reviewPtoRequest: (id, payload) => request(`/roster/pto/${id}`, { method: 'PATCH', body: payload }),
+  cancelPtoRequest: (id) => request(`/roster/pto/${id}`, { method: 'DELETE' }),
+
   telemarketers: () => request('/telemarketers'),
   telemarketerAgencyRoster: (params = '') => request(`/telemarketers/agency-roster${params}`),
   telemarketerPerformance: (params = '') => request(`/telemarketers/performance${params}`),
@@ -178,6 +189,7 @@ export const api = {
   financialSummary: (params = '') => request(`/financials/summary${params}`),
   financialByVendor: (params = '') => request(`/financials/by-vendor${params}`),
   financialByAgent: (params = '') => request(`/financials/by-agent${params}`),
+  billboard: (params = '') => request(`/financials/billboard${params}`),
   financialEvents: (params = '') => request(`/financials/events${params}`),
   createRevenueEvent: (payload) => request('/financials/revenue-events', { method: 'POST', body: payload }),
   createCostEvent: (payload) => request('/financials/cost-events', { method: 'POST', body: payload }),

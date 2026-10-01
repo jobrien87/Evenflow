@@ -133,7 +133,7 @@ router.get('/', async (req, res, next) => {
       select: {
         id: true, email: true, firstName: true, lastName: true, role: true,
         status: true, agencyId: true, createdAt: true, phone: true,
-        officeId: true, office: { select: { id: true, name: true } },
+        officeId: true, office: { select: { id: true, name: true } }, birthday: true,
       },
       orderBy: { createdAt: 'desc' },
     });

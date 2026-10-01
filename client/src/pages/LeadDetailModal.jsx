@@ -266,7 +266,7 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
         <ActivityBlock lead={lead} onDone={refreshTouched} />
       </Section>
 
-      <Section title={`NOTES (${lead.notes?.length || 0})`} icon="pencil">
+      <Section title={`NOTES (${lead.notes?.length || 0})`} icon="pencil" action={<CopyAllNotesButton lead={lead} />}>
         <NotesBlock lead={lead} onDone={refreshTouched} />
       </Section>
 
@@ -457,12 +457,15 @@ function HistoryBlock({ lead }) {
   );
 }
 
-function Section({ title, icon, children }) {
+function Section({ title, icon, action, children }) {
   return (
     <div style={s.section}>
-      <div style={s.sectionTitle}>
-        {icon && <Icon name={icon} size={13} style={{ marginRight: 6, color: 'var(--accent)' }} />}
-        <span style={s.sectionTitleText}>{title}</span>
+      <div style={s.sectionTitleRow}>
+        <div style={s.sectionTitle}>
+          {icon && <Icon name={icon} size={13} style={{ marginRight: 6, color: 'var(--accent)' }} />}
+          <span style={s.sectionTitleText}>{title}</span>
+        </div>
+        {action}
       </div>
       {children}
     </div>
@@ -732,6 +735,37 @@ function ActivityBlock({ lead, onDone }) {
   );
 }
 
+// Pure client-side — concatenates every note (oldest first, matching the
+// order they were actually written in) into one plain-text block, for
+// pasting straight into eAgent or any other outside system. No backend
+// call, nothing stored; reads the exact same lead.notes already loaded.
+function CopyAllNotesButton({ lead }) {
+  const [copied, setCopied] = useState(false);
+  const notes = lead.notes || [];
+
+  async function copyAll() {
+    const text = [...notes]
+      .reverse()
+      .map((n) => `[${fmt(n.createdAt)}] ${n.author?.firstName || ''} ${n.author?.lastName || ''}: ${n.content}`.trim())
+      .join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard access can fail (permissions, insecure context) —
+      // nothing else to fall back to here, so just stay silent.
+    }
+  }
+
+  if (notes.length === 0) return null;
+  return (
+    <Button variant="ghost" size="sm" onClick={copyAll}>
+      {copied ? 'COPIED' : 'COPY ALL NOTES'}
+    </Button>
+  );
+}
+
 function NotesBlock({ lead, onDone }) {
   const [content, setContent] = useState('');
   const [busy, setBusy] = useState(false);
@@ -813,9 +847,10 @@ const s = {
     borderLeft: '3px solid rgba(198, 255, 46, 0.35)',
     borderRadius: 'var(--radius-md)', padding: 'var(--space-4)',
   },
+  sectionTitleRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 10 },
   sectionTitle: {
     display: 'flex', alignItems: 'center', fontSize: 11,
-    letterSpacing: 1.5, fontWeight: 700, marginBottom: 12, textTransform: 'uppercase',
+    letterSpacing: 1.5, fontWeight: 700, textTransform: 'uppercase',
   },
   sectionTitleText: {
     backgroundImage: 'var(--accent-gradient)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',

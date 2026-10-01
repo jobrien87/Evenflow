@@ -20,28 +20,36 @@ export const NAV_BY_ROLE = {
     { label: 'Training', to: '/producer/training', icon: 'book', primary: true, dataTour: 'nav-training' },
     { label: 'Moshpit', to: '/producer/moshpit', icon: 'flame', primary: true, dataTour: 'nav-moshpit' },
     { label: 'Winbacks & Cross-Sells', to: '/producer/opportunities', icon: 'target', dataTour: 'nav-opportunities' },
+    { label: 'Goals', to: '/producer/goals', icon: 'flag', dataTour: 'nav-goals' },
   ],
   TELEMARKETER: [
     { label: 'Home', to: '/telemarketer', icon: 'home', primary: true, dataTour: 'nav-home' },
     { label: 'Drills', to: '/telemarketer/drills', icon: 'sparkle', primary: true, dataTour: 'nav-drills' },
     { label: 'Tasks', to: '/telemarketer/tasks', icon: 'checklist', dataTour: 'nav-tasks' },
   ],
+  // Ordered per the user's specified sequence: Main Stage, Moshpit, Live
+  // Transfers, Leads, Goals, Billboard, Sales Studio, Record Store,
+  // Vendors, Roster Settings — every other existing item (Team Chat,
+  // Tasks, Winbacks & Cross-Sells, Financials, Training, Billing,
+  // Coaching, Support) is preserved, non-destructively, in a sensible
+  // position around that sequence rather than removed.
   AGENCY_OWNER: [
     { label: 'Main Stage', to: '/agency', icon: 'home', primary: true, dataTour: 'nav-home' },
-    { label: 'Drills', to: '/agency/drills', icon: 'sparkle', dataTour: 'nav-drills' },
-    { label: 'Tasks', to: '/agency/tasks', icon: 'checklist', dataTour: 'nav-tasks' },
-    { label: 'Transfers', to: '/agency/transfers', icon: 'transfer', primary: true, dataTour: 'nav-transfers' },
+    { label: 'Moshpit', to: '/agency/moshpit', icon: 'flame', primary: true, dataTour: 'nav-moshpit' },
+    { label: 'Live Transfers', to: '/agency/transfers', icon: 'transfer', primary: true, dataTour: 'nav-transfers' },
     { label: 'Team Chat', to: '/agency/team-chat', icon: 'chat', primary: true, dataTour: 'nav-team-chat' },
-    { label: 'Call Scoring', to: '/agency/call-scoring', icon: 'trophy', primary: true, dataTour: 'nav-call-scoring' },
-    { label: 'Moshpit', to: '/agency/moshpit', icon: 'flame', dataTour: 'nav-moshpit' },
-    { label: 'Winbacks & Cross-Sells', to: '/agency/opportunities', icon: 'target', dataTour: 'nav-opportunities' },
-    { label: 'Financials', to: '/agency/financials', icon: 'dollar', primary: true, dataTour: 'nav-financials' },
+    { label: 'Leads', to: '/agency/leads', icon: 'leads', primary: true, dataTour: 'nav-leads' },
+    { label: 'Tasks', to: '/agency/tasks', icon: 'checklist', dataTour: 'nav-tasks' },
     { label: 'Goals', to: '/agency/goals', icon: 'flag', primary: true, dataTour: 'nav-goals' },
-    { label: 'Vendors', to: '/agency/vendors', icon: 'vendor', dataTour: 'nav-vendors' },
-    { label: 'Training', to: '/agency/training', icon: 'book', dataTour: 'nav-training' },
-    { label: 'Hours Report', to: '/agency/hours-report', icon: 'clock', secondary: true, dataTour: 'nav-hours-report' },
-    { label: 'Billing', to: '/agency/billing', icon: 'card', secondary: true, dataTour: 'nav-billing' },
+    { label: 'Billboard', to: '/agency/billboard', icon: 'megaphone', dataTour: 'nav-billboard' },
+    { label: 'Sales Studio', to: '/agency/sales-studio', icon: 'trophy', primary: true, dataTour: 'nav-sales-studio' },
+    { label: 'Winbacks & Cross-Sells', to: '/agency/opportunities', icon: 'target', dataTour: 'nav-opportunities' },
     { label: 'Record Store', to: '/agency/record-store', icon: 'vinyl', dataTour: 'nav-record-store' },
+    { label: 'Vendors', to: '/agency/vendors', icon: 'vendor', dataTour: 'nav-vendors' },
+    { label: 'Financials', to: '/agency/financials', icon: 'dollar', dataTour: 'nav-financials', excludeRoles: ['AGENCY_MANAGER'] },
+    { label: 'Training', to: '/agency/training', icon: 'book', dataTour: 'nav-training' },
+    { label: 'Roster Settings', to: '/agency/roster-settings', icon: 'handshake', secondary: true, dataTour: 'nav-roster-settings' },
+    { label: 'Billing', to: '/agency/billing', icon: 'card', secondary: true, dataTour: 'nav-billing' },
     { label: 'Coaching', to: '/agency/coaching', icon: 'phone', secondary: true, dataTour: 'nav-coaching' },
     { label: 'Support', to: '/agency/support', icon: 'support', secondary: true, dataTour: 'nav-support' },
   ],
@@ -62,7 +70,10 @@ export const NAV_BY_ROLE = {
 NAV_BY_ROLE.AGENCY_MANAGER = NAV_BY_ROLE.AGENCY_OWNER;
 
 export function navForRole(role) {
-  return NAV_BY_ROLE[role] || [];
+  // `excludeRoles` lets a nav entry be filtered out for one role sharing
+  // an array with another (e.g. AGENCY_MANAGER reuses AGENCY_OWNER's list
+  // but shouldn't see every item on it) without duplicating the array.
+  return (NAV_BY_ROLE[role] || []).filter((item) => !(item.excludeRoles || []).includes(role));
 }
 
 export function primaryNavForRole(role) {

@@ -14,7 +14,8 @@ function statusTone(status) {
 const ENTITLEMENT_FIELDS = [
   { key: 'crmEnabled', label: 'CRM' },
   { key: 'transfersEnabled', label: 'Yield Transfers' },
-  { key: 'coachingEnabled', label: 'Sales Coaching' },
+  { key: 'coachingEnabled', label: 'Sales Studio (unlocked)' },
+  { key: 'salesStudioGateEnabled', label: 'Sales Studio gate enforced (off = always open)' },
 ];
 
 export default function AgencyDetailPage() {

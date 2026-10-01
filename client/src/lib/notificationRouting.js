@@ -33,9 +33,12 @@ export function notificationTarget(notification, role) {
         return { path: '/producer/moshpit', highlightId: id, openChat: false };
       }
       // lead.assigned -> the Producer's own dashboard queue;
-      // lead.new (vendor lead) -> the Agency Owner's Team & Leads list.
+      // lead.new (vendor lead) -> the Agency Owner/Manager's Leads tab.
       // No lead-level chat UI exists anywhere yet, so a chat.message
       // notification about a Lead only ever gets the highlight, not openChat.
+      if (role === 'AGENCY_OWNER' || role === 'AGENCY_MANAGER') {
+        return { path: '/agency/leads', highlightId: id, openChat: false };
+      }
       return { path: base, highlightId: id, openChat: false };
 
     case 'Transfer':

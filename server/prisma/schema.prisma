@@ -342,6 +342,12 @@ model User {
   announcementAcks      AnnouncementAck[]
   producerNotesReceived ProducerNote[]    @relation("ProducerNoteSubject")
   producerNotesAuthored ProducerNote[]    @relation("ProducerNoteAuthor")
+  leadImportBatchesUploaded LeadImportBatch[] @relation("LeadImportBatchUploadedBy")
+  leadImportBatchesUndone   LeadImportBatch[] @relation("LeadImportBatchUndoneBy")
+  badges            UserBadge[]      @relation("UserBadges")
+  badgesAwarded     UserBadge[]      @relation("UserBadgeAwardedBy")
+  ptoRequests       PtoRequest[]     @relation("PtoRequester")
+  ptoReviewed       PtoRequest[]     @relation("PtoReviewer")
 
   @@index([agencyId])
   @@index([role])
@@ -405,6 +411,13 @@ model Agency {
   crmEnabled     Boolean      @default(true)
   transfersEnabled Boolean    @default(false)
   coachingEnabled  Boolean    @default(false)
+  // Sales Studio (merged Drills + Call Scoring) is gated behind the same
+  // coachingEnabled unlock as everything else "Sales Coaching" already
+  // covers — this is a SEPARATE compliance-buffer switch, defaulting to
+  // enforced. Platform Owner can flip it off per-agency to fully open
+  // Sales Studio regardless of unlock status (e.g. a temporary waiver),
+  // without touching the real unlock/billing flag.
+  salesStudioGateEnabled Boolean @default(true)
   transferPaused    Boolean   @default(false)
   transferDailyCap  Int?
   transferStates    String[]  @default([])
@@ -476,6 +489,9 @@ model Agency {
   producerNotes ProducerNote[]
   offices       Office[]
   recordStoreSubscriptions RecordStoreSubscription[]
+  leadImportBatches LeadImportBatch[]
+  userBadges    UserBadge[]
+  ptoRequests   PtoRequest[]
 }
 
 enum BoberdooSyncStatus {
@@ -498,6 +514,68 @@ model Office {
 
   users User[]
 
+  @@index([agencyId])
+}
+
+// Roster Settings — recognition badges. Most types are manually awarded by
+// Agency Owner/Manager (licenses, service anniversaries); AGENT_OF_THE_MONTH
+// is additionally auto-computed once a month (lib/agentOfMonth.js) from
+// real SOLD-lead counts, never fabricated/guessed.
+enum BadgeType {
+  FIRST_YEAR
+  FIVE_YEAR
+  TEN_YEAR
+  PC_LICENSE
+  LIFE_LICENSE
+  AGENT_OF_THE_MONTH
+}
+
+model UserBadge {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation("UserBadges", fields: [userId], references: [id])
+  agencyId    String
+  agency      Agency    @relation(fields: [agencyId], references: [id])
+  type        BadgeType
+  // For AGENT_OF_THE_MONTH only — e.g. "2026-10", used to make the
+  // monthly auto-compute idempotent (never award the same month twice).
+  periodLabel String?
+  awardedAt   DateTime  @default(now())
+  awardedById String?
+  awardedBy   User?     @relation("UserBadgeAwardedBy", fields: [awardedById], references: [id])
+
+  @@index([userId])
+  @@index([agencyId])
+  @@unique([userId, type, periodLabel])
+}
+
+enum PtoStatus {
+  PENDING
+  APPROVED
+  DENIED
+  CANCELLED
+}
+
+// A producer/TM/manager's own time-off request; Agency Owner/Manager
+// approve or deny. Self-cancel is only allowed while still PENDING — once
+// reviewed, the decision is leadership's record to keep.
+model PtoRequest {
+  id           String     @id @default(uuid())
+  userId       String
+  user         User       @relation("PtoRequester", fields: [userId], references: [id])
+  agencyId     String
+  agency       Agency     @relation(fields: [agencyId], references: [id])
+  startDate    DateTime
+  endDate      DateTime
+  reason       String?
+  status       PtoStatus  @default(PENDING)
+  reviewedById String?
+  reviewedBy   User?      @relation("PtoReviewer", fields: [reviewedById], references: [id])
+  reviewedAt   DateTime?
+  reviewNote   String?
+  createdAt    DateTime   @default(now())
+
+  @@index([userId])
   @@index([agencyId])
 }
 
@@ -558,6 +636,11 @@ model Lead {
   // Agency.priorityRules and lib/priority.js.
   leadType        LeadType   @default(MANUAL)
   customFields    Json?
+  // Set only for a row created by POST /leads/bulk-import — lets the
+  // whole batch be found again for the undo action below. Null for every
+  // other creation path (manual, vendor API, telemarketer intake).
+  importBatchId   String?
+  importBatch     LeadImportBatch? @relation(fields: [importBatchId], references: [id])
   // Captured when a producer dispositions this lead as SOLD — real, entered
   // data (not a fabricated commission calculation), which is what makes it
   // legitimate to feed straight into the Financial Ledger as revenue.
@@ -622,7 +705,35 @@ model Lead {
   @@index([assignedToId])
   @@index([status])
   @@index([receivedAt])
+  @@index([importBatchId])
   @@unique([vendorId, externalLeadId])
+}
+
+// One row per bulk spreadsheet upload (POST /leads/bulk-import) — exists
+// so that upload can be undone: every Lead it created carries this row's
+// id via Lead.importBatchId, and the undo route (POST
+// /leads/import-batches/:id/undo) archives whichever of those leads are
+// still untouched (no activity/notes/tasks/disposition since import).
+// Non-destructive by design — a Lead is never hard-deleted, only
+// archived, same mechanism GET /leads's archivedAt filter already uses.
+model LeadImportBatch {
+  id           String    @id @default(uuid())
+  agencyId     String
+  agency       Agency    @relation(fields: [agencyId], references: [id])
+  uploadedById String
+  uploadedBy   User      @relation("LeadImportBatchUploadedBy", fields: [uploadedById], references: [id])
+  leadCategory String
+  totalRows    Int
+  created      Int
+  skipped      Int
+  createdAt    DateTime  @default(now())
+  undoneAt     DateTime?
+  undoneById   String?
+  undoneBy     User?     @relation("LeadImportBatchUndoneBy", fields: [undoneById], references: [id])
+
+  leads Lead[]
+
+  @@index([agencyId])
 }
 
 enum LeadProductStatus {

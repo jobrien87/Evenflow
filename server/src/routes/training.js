@@ -3,14 +3,14 @@ const { z } = require('zod');
 const { prisma } = require('../lib/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
-const { requireModuleEnabled } = require('../lib/entitlements');
+const { requireSalesStudioAccess } = require('../lib/entitlements');
 const { gradeQuiz } = require('../lib/quizGrading');
 const { recommendTrainingForProducer } = require('../lib/trainingRecommendation');
 const { notifyUser } = require('../lib/notifications');
 
 const router = express.Router();
 router.use(requireAuth);
-router.use(requireModuleEnabled('coachingEnabled'));
+router.use(requireSalesStudioAccess);
 
 router.get('/courses', async (req, res, next) => {
   try {

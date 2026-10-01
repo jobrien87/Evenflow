@@ -4,6 +4,7 @@ const { prisma } = require('../lib/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { computeProfitability, computeROI } = require('../lib/financialCalc');
+const { computeBillboard, GRANULARITIES } = require('../lib/billboard');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -169,6 +170,31 @@ router.get('/by-agent', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER'
     );
 
     return res.json({ success: true, period: { from: from.toISOString(), to: to.toISOString() }, agents: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// The Billboard — real sold-item count + premium total, broken down by
+// producer and by product line, plus a real time-series trend line at
+// whatever granularity (day/week/month/year) the caller asks for. Same
+// visibility as /by-agent (the whole team, not just Owner/Manager).
+router.get('/billboard', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const agencyId = scopedAgencyId(req);
+    // Always required, even for PLATFORM_OWNER — same unbounded-scan
+    // reasoning as /by-vendor and /by-agent above.
+    if (!agencyId) {
+      return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+    }
+    const granularity = GRANULARITIES.includes(req.query.granularity) ? req.query.granularity : 'month';
+    const result = await computeBillboard({
+      agencyId,
+      granularity,
+      from: req.query.from || undefined,
+      to: req.query.to || undefined,
+    });
+    return res.json({ success: true, ...result });
   } catch (err) {
     next(err);
   }

@@ -4,7 +4,7 @@ import { useIsMobile } from '../lib/useViewport';
 import { Card, Badge, Button, SectionHeader, EmptyState, StatTile, BarRow, MicButton } from '../ui';
 import ChatThread from './ChatThread';
 
-const PRODUCTS = ['Auto', 'Home', 'Life', 'Health'];
+const PRODUCTS = ['Auto', 'Home', 'Home and Auto Bundle', 'Life', 'Health'];
 
 const EMPTY_FORM = {
   product: 'Auto',
