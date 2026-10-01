@@ -19,7 +19,6 @@ export const NAV_BY_ROLE = {
     { label: 'Call Coaching', to: '/producer/coaching', icon: 'phone', primary: true, dataTour: 'nav-call-coaching' },
     { label: 'Training', to: '/producer/training', icon: 'book', primary: true, dataTour: 'nav-training' },
     { label: 'Moshpit', to: '/producer/moshpit', icon: 'flame', primary: true, dataTour: 'nav-moshpit' },
-    { label: 'Winbacks & Cross-Sells', to: '/producer/opportunities', icon: 'target', dataTour: 'nav-opportunities' },
     { label: 'Goals', to: '/producer/goals', icon: 'flag', dataTour: 'nav-goals' },
   ],
   TELEMARKETER: [
@@ -29,10 +28,10 @@ export const NAV_BY_ROLE = {
   ],
   // Ordered per the user's specified sequence: Main Stage, Moshpit, Live
   // Transfers, Leads, Goals, Billboard, Sales Studio, Record Store,
-  // Vendors, Roster Settings — every other existing item (Team Chat,
-  // Tasks, Winbacks & Cross-Sells, Financials, Training, Billing,
-  // Coaching, Support) is preserved, non-destructively, in a sensible
-  // position around that sequence rather than removed.
+  // Vendors, Roster Settings — every other existing item except
+  // Winbacks & Cross-Sells (removed from the sidebar — Leads replaces
+  // it) is preserved, non-destructively, in a sensible position around
+  // that sequence rather than removed.
   AGENCY_OWNER: [
     { label: 'Main Stage', to: '/agency', icon: 'home', primary: true, dataTour: 'nav-home' },
     { label: 'Moshpit', to: '/agency/moshpit', icon: 'flame', primary: true, dataTour: 'nav-moshpit' },
@@ -43,7 +42,6 @@ export const NAV_BY_ROLE = {
     { label: 'Goals', to: '/agency/goals', icon: 'flag', primary: true, dataTour: 'nav-goals' },
     { label: 'Billboard', to: '/agency/billboard', icon: 'megaphone', dataTour: 'nav-billboard' },
     { label: 'Sales Studio', to: '/agency/sales-studio', icon: 'trophy', primary: true, dataTour: 'nav-sales-studio' },
-    { label: 'Winbacks & Cross-Sells', to: '/agency/opportunities', icon: 'target', dataTour: 'nav-opportunities' },
     { label: 'Record Store', to: '/agency/record-store', icon: 'vinyl', dataTour: 'nav-record-store' },
     { label: 'Vendors', to: '/agency/vendors', icon: 'vendor', dataTour: 'nav-vendors' },
     { label: 'Financials', to: '/agency/financials', icon: 'dollar', dataTour: 'nav-financials', excludeRoles: ['AGENCY_MANAGER'] },
