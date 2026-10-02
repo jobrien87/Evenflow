@@ -68,7 +68,7 @@ export function notificationTarget(notification, role) {
 
     case 'Call':
       if (role === 'PRODUCER') return { path: '/producer/coaching', highlightId: id, openChat: false };
-      if (role === 'AGENCY_OWNER' || role === 'AGENCY_MANAGER') return { path: '/agency/coaching', highlightId: id, openChat: false };
+      if (role === 'AGENCY_OWNER' || role === 'AGENCY_MANAGER') return { path: '/agency/sales-studio?tab=diagnostics', highlightId: id, openChat: false };
       return { path: base, highlightId: null, openChat: false };
 
     case 'AGENCY':
@@ -82,4 +82,20 @@ export function notificationTarget(notification, role) {
     default:
       return { path: base, highlightId: null, openChat: false };
   }
+}
+
+// Turns a notificationTarget() result into the final URL to navigate to,
+// merging in highlight/action query params on top of whatever query
+// string `target.path` itself might already carry (e.g. the Sales Studio
+// Call Diagnostics deep link's `?tab=diagnostics`) rather than naively
+// appending a second `?`. Shared by NotificationBell and useLeadAlerts so
+// this merge logic exists in exactly one place.
+export function notificationUrl(target) {
+  if (!target.path) return null;
+  const [path, existingQs] = target.path.split('?');
+  const query = new URLSearchParams(existingQs || '');
+  if (target.highlightId) query.set('highlight', target.highlightId);
+  if (target.openChat) query.set('action', 'chat');
+  const qs = query.toString();
+  return qs ? `${path}?${qs}` : path;
 }

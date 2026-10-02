@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from './api';
 import { useAuth } from './AuthContext';
-import { notificationTarget } from './notificationRouting';
+import { notificationTarget, notificationUrl } from './notificationRouting';
 import { pushToast } from '../ui/Toast';
 import { playDrumRoll } from './drumRoll';
 
@@ -50,12 +50,8 @@ export function useLeadAlerts() {
             body: newest.body,
             icon: 'leads',
             onClick: () => {
-              if (!target.path) return;
-              const query = new URLSearchParams();
-              if (target.highlightId) query.set('highlight', target.highlightId);
-              if (target.openChat) query.set('action', 'chat');
-              const qs = query.toString();
-              navigate(qs ? `${target.path}?${qs}` : target.path);
+              const url = notificationUrl(target);
+              if (url) navigate(url);
             },
           });
         }

@@ -48,7 +48,6 @@ export const NAV_BY_ROLE = {
     { label: 'Training', to: '/agency/training', icon: 'book', dataTour: 'nav-training' },
     { label: 'Roster Settings', to: '/agency/roster-settings', icon: 'handshake', secondary: true, dataTour: 'nav-roster-settings' },
     { label: 'Billing', to: '/agency/billing', icon: 'card', secondary: true, dataTour: 'nav-billing' },
-    { label: 'Coaching', to: '/agency/coaching', icon: 'phone', secondary: true, dataTour: 'nav-coaching' },
     { label: 'Support', to: '/agency/support', icon: 'support', secondary: true, dataTour: 'nav-support' },
   ],
   PLATFORM_OWNER: [

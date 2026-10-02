@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from './lib/AuthContext';
 import { basePathForRole } from './layout/navConfig';
 import RoleGate from './layout/RoleGate';
@@ -54,6 +54,17 @@ function RoleRedirect() {
   return <Navigate to={basePathForRole(user?.role)} replace />;
 }
 
+// Call Diagnostics (formerly its own "Coaching" tab) now lives inside
+// Sales Studio — this keeps any stale bookmark/notification link to the
+// old path working, carrying the `highlight` query param (a call id)
+// straight through so the Call Diagnostics tab still opens on it.
+function RedirectToSalesStudioDiagnostics() {
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  params.set('tab', 'diagnostics');
+  return <Navigate to={`/agency/sales-studio?${params.toString()}`} replace />;
+}
+
 export default function App() {
   return (
     <Routes>
@@ -89,7 +100,7 @@ export default function App() {
           <Route path="agency/moshpit" element={<MoshpitPanel />} />
           <Route path="agency/vendors" element={<VendorsPanel />} />
           <Route path="agency/support" element={<SupportPanel />} />
-          <Route path="agency/coaching" element={<CallsPanel />} />
+          <Route path="agency/coaching" element={<RedirectToSalesStudioDiagnostics />} />
           <Route path="agency/roster-settings" element={<RosterSettingsPanel />} />
           <Route path="agency/billing" element={<AgencyBillingPanel />} />
           <Route path="agency/training" element={<CoursesAdminPanel />} />

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { notificationTarget } from '../lib/notificationRouting';
+import { notificationTarget, notificationUrl } from '../lib/notificationRouting';
 import { severityTone, TONE_COLORS } from '../ui';
 
 const severityDotColor = (severity) => TONE_COLORS[severityTone(severity)].fg;
@@ -60,13 +60,10 @@ export default function NotificationBell({ openUpward = false }) {
   function handleClick(n) {
     if (!n.readAt) markRead(n.id);
     const target = notificationTarget(n, user?.role);
-    if (!target.path) return;
+    const url = notificationUrl(target);
+    if (!url) return;
     setOpen(false);
-    const query = new URLSearchParams();
-    if (target.highlightId) query.set('highlight', target.highlightId);
-    if (target.openChat) query.set('action', 'chat');
-    const qs = query.toString();
-    navigate(qs ? `${target.path}?${qs}` : target.path);
+    navigate(url);
   }
 
   async function markAllRead() {
