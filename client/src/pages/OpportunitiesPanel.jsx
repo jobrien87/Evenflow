@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { StatTile, BarRow, SectionHeader } from '../ui';
+import BulkCrossSellUploadBox from './BulkCrossSellUploadBox';
 
 export default function OpportunitiesPanel() {
   const { user } = useAuth();
@@ -9,6 +10,7 @@ export default function OpportunitiesPanel() {
   const [tab, setTab] = useState('all');
   const [opportunities, setOpportunities] = useState([]);
   const [showWinbackForm, setShowWinbackForm] = useState(false);
+  const [showCrossSellImport, setShowCrossSellImport] = useState(false);
   const [customerQuery, setCustomerQuery] = useState('');
   const [customerResults, setCustomerResults] = useState([]);
   const [form, setForm] = useState({ customerId: '', product: '', previousProduct: '', previousPremiumCents: '', lostAt: '', lostReason: '' });
@@ -91,9 +93,22 @@ export default function OpportunitiesPanel() {
           <button style={s.tab(tab === 'CROSS_SELL')} onClick={() => setTab('CROSS_SELL')}>CROSS-SELLS</button>
         </div>
         {canCreateWinback && (
-          <button style={s.smallButton} onClick={() => setShowWinbackForm(!showWinbackForm)}>+ RECORD WINBACK</button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button style={s.smallButton} onClick={() => setShowWinbackForm(!showWinbackForm)}>+ RECORD WINBACK</button>
+            <button style={s.smallButton} onClick={() => setShowCrossSellImport(!showCrossSellImport)}>IMPORT CROSS-SELL LIST</button>
+          </div>
         )}
       </div>
+
+      {showCrossSellImport && canCreateWinback && (
+        <section style={s.section}>
+          <SectionHeader>Import Cross-Sell List</SectionHeader>
+          <div style={s.hint}>
+            Upload your agency's own cross-sell report (e.g. "Auto, no Home") — each row becomes a real customer with a cross-sell opportunity, using the exact same detection the rest of the app already runs on a real sale.
+          </div>
+          <BulkCrossSellUploadBox agencyId={user.agencyId} onImported={load} />
+        </section>
+      )}
 
       <section style={s.section}>
         <SectionHeader>

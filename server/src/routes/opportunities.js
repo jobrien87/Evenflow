@@ -1,13 +1,21 @@
 const express = require('express');
+const multer = require('multer');
 const { z } = require('zod');
 const { prisma } = require('../lib/db');
 const { requireAuth, requireRole, scopeAgencyId } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { canTransition } = require('../lib/opportunityStateMachine');
 const { recordLeadSaleRevenue } = require('../lib/financialEvents');
+const { parseCrossSellFile, importCrossSellContacts } = require('../lib/crossSellBulkImport');
 
 const router = express.Router();
 router.use(requireAuth);
+
+// Mirrors leads.js's bulk-import multer convention: memoryStorage, no
+// fileFilter (real validation happens after upload, inside
+// parseCrossSellFile), 10MB cap.
+const uploadSpreadsheet = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const CROSS_SELL_PRODUCTS = ['Auto', 'Home', 'Life'];
 
 // Opportunities/winbacks are an agency- and producer-side concept — a
 // Telemarketer has no legitimate reason to list them, and (since TMs have
@@ -31,6 +39,57 @@ router.get('/', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER', 'PLATF
       take: 100,
     });
     return res.json({ success: true, opportunities });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Agency Owner/Manager self-service: upload an externally-sourced
+// cross-sell report (e.g. an AMS "Auto, no Home" book-of-business export)
+// and turn it into real Customer + CROSS_SELL Opportunity rows, via the
+// exact same lib/opportunityEvents.js code path a SOLD disposition
+// already uses. Registered before any /:id route needs no special
+// ordering here since it's its own literal path.
+router.post('/bulk-import-cross-sell', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), uploadSpreadsheet.single('file'), async (req, res, next) => {
+  try {
+    const havesProduct = req.body.havesProduct;
+    const needsProduct = req.body.needsProduct;
+    if (!CROSS_SELL_PRODUCTS.includes(havesProduct) || !CROSS_SELL_PRODUCTS.includes(needsProduct)) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: `havesProduct/needsProduct must each be one of: ${CROSS_SELL_PRODUCTS.join(', ')}.` });
+    }
+    if (havesProduct === needsProduct) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'havesProduct and needsProduct must be different.' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'No file uploaded (expected multipart field "file").' });
+    }
+
+    const agencyId = req.user.role === 'PLATFORM_OWNER' ? req.body.agencyId : req.user.agencyId;
+    if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+
+    const parsed = parseCrossSellFile(req.file.buffer);
+    if (parsed.error) {
+      return res.status(400).json({ success: false, error: parsed.error, message: parsed.message });
+    }
+    if (parsed.contacts.length === 0) {
+      return res.status(400).json({ success: false, error: 'NO_VALID_ROWS', message: 'No usable rows found in this file.', skipped: parsed.skipped });
+    }
+
+    const result = await importCrossSellContacts({ contacts: parsed.contacts, agencyId, havesProduct, needsProduct });
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId,
+      action: 'opportunity.cross_sell_bulk_imported', entityType: 'Opportunity', entityId: null,
+      after: { havesProduct, needsProduct, ...result }, correlationId: req.correlationId,
+    });
+
+    return res.status(201).json({
+      success: true,
+      totalRows: parsed.totalRows,
+      truncated: parsed.truncated,
+      skipped: parsed.skipped.length,
+      ...result,
+    });
   } catch (err) {
     next(err);
   }

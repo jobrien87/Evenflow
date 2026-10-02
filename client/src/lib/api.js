@@ -271,6 +271,23 @@ export const api = {
   opportunities: (params = '') => request(`/opportunities${params}`),
   createWinback: (payload) => request('/opportunities/winback', { method: 'POST', body: payload }),
   dispositionOpportunity: (id, payload) => request(`/opportunities/${id}/disposition`, { method: 'POST', body: payload }),
+  // Not JSON — a multipart upload, same bypass-request() shape as bulkImportLeads.
+  bulkImportCrossSell: async (file, agencyId, havesProduct, needsProduct) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (agencyId) formData.append('agencyId', agencyId);
+    formData.append('havesProduct', havesProduct);
+    formData.append('needsProduct', needsProduct);
+    const res = await fetch(`${BASE}/opportunities/bulk-import-cross-sell`, { method: 'POST', credentials: 'include', body: formData });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(data.message || data.error || 'Upload failed');
+      err.data = data;
+      err.status = res.status;
+      throw err;
+    }
+    return data;
+  },
   searchCustomers: (q) => request(`/customers/search?q=${encodeURIComponent(q)}`),
   customerDetail: (id) => request(`/customers/${id}`),
 
