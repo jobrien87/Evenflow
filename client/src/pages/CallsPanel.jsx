@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { Card, Button, StatTile, BarRow, SectionHeader } from '../ui';
 import CoachingBreakdownResult from './CoachingBreakdownResult';
+import CoachingVideoTheater from './CoachingVideoTheater';
 
 export const STATUS_COLOR = {
   UPLOADED: 'var(--text-secondary)', QUEUED: 'var(--text-secondary)', TRANSCRIBING: 'var(--warning)', TRANSCRIBED: 'var(--warning)',
@@ -161,6 +162,8 @@ export default function CallsPanel() {
 
   return (
     <div style={s.wrap}>
+      <CoachingVideoTheater />
+
       <section style={s.section}>
         <SectionHeader>At a Glance</SectionHeader>
         <div style={s.statsRow}>

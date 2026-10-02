@@ -11,6 +11,7 @@ const { read } = require('../lib/storage');
 const { requireSalesStudioAccess } = require('../lib/entitlements');
 const { computeDrillScore, computeCoachingBreakdown } = require('../lib/callScoring');
 const bunnyStream = require('../lib/bunnyStream');
+const { listCoachingVideos } = require('../lib/coachingVideos');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -113,6 +114,17 @@ router.get('/coaching', requireRole('PRODUCER', 'AGENCY_MANAGER', 'AGENCY_OWNER'
     const breakdown = await computeCoachingBreakdown({ prisma, agencyId, userId: targetUserId, from, to });
 
     return res.json({ success: true, period: { from: from.toISOString(), to: to.toISOString() }, ...breakdown });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Registered before /:id for the same anti-shadowing reason as /coaching
+// above — "coaching-videos" would otherwise be swallowed as an id.
+router.get('/coaching-videos', async (req, res, next) => {
+  try {
+    const videos = await listCoachingVideos();
+    return res.json({ success: true, videos });
   } catch (err) {
     next(err);
   }
