@@ -755,6 +755,30 @@ router.post('/:leadId/claim', async (req, res, next) => {
   }
 });
 
+// One real server-side authorization policy for every single-lead route
+// below (list filtering above already restricts PRODUCER to assignedToId
+// — this is the single-lead equivalent, applied consistently instead of
+// each route hand-rolling its own, inconsistent check). A PRODUCER may
+// always act on a lead actually assigned to them. The only other case
+// allowed is a READ (never a write) of a still-unclaimed Moshpit-eligible
+// lead, so they can preview it before deciding to claim — claiming itself
+// still only ever happens through POST /:leadId/claim's own atomic,
+// updateMany-guarded assignment, never granted here. Every other role
+// keeps the existing agency-membership rule (PLATFORM_OWNER unrestricted).
+function authorizeLeadAccess(req, lead, { write = false } = {}) {
+  if (!lead) return { ok: false, status: 404, error: 'NOT_FOUND' };
+  if (req.user.role !== 'PLATFORM_OWNER' && lead.agencyId !== req.user.agencyId) {
+    return { ok: false, status: 403, error: 'FORBIDDEN' };
+  }
+  if (req.user.role === 'PRODUCER') {
+    if (lead.assignedToId === req.user.id) return { ok: true };
+    const moshpitEligible = lead.isLiveTransfer || lead.vendor?.distributionMode === 'MOSHPIT';
+    if (!write && lead.assignedToId === null && moshpitEligible) return { ok: true };
+    return { ok: false, status: 403, error: 'FORBIDDEN' };
+  }
+  return { ok: true };
+}
+
 router.get('/:leadId', async (req, res, next) => {
   try {
     const lead = await prisma.lead.findUnique({
@@ -763,7 +787,7 @@ router.get('/:leadId', async (req, res, next) => {
         customer: true,
         assignedTo: { select: { id: true, firstName: true, lastName: true } },
         createdBy: { select: { id: true, firstName: true, lastName: true } },
-        vendor: { select: { id: true, name: true, product: true } },
+        vendor: { select: { id: true, name: true, product: true, distributionMode: true } },
         events: { orderBy: { createdAt: 'desc' } },
         notes: { include: { author: { select: { firstName: true, lastName: true } } }, orderBy: { createdAt: 'desc' } },
         activities: { include: { createdBy: { select: { firstName: true, lastName: true } } }, orderBy: { occurredAt: 'desc' } },
@@ -771,23 +795,18 @@ router.get('/:leadId', async (req, res, next) => {
         productQuotes: { orderBy: { product: 'asc' } },
       },
     });
-    if (!lead) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
-    if (req.user.role !== 'PLATFORM_OWNER' && lead.agencyId !== req.user.agencyId) {
-      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
-    }
+    const access = authorizeLeadAccess(req, lead, { write: false });
+    if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
     return res.json({ success: true, lead });
   } catch (err) {
     next(err);
   }
 });
 
-async function loadLeadWithAccessCheck(req) {
+async function loadLeadWithAccessCheck(req, { write = true } = {}) {
   const lead = await prisma.lead.findUnique({ where: { id: req.params.leadId } });
-  if (!lead) return { lead: null, forbidden: false };
-  if (req.user.role !== 'PLATFORM_OWNER' && lead.agencyId !== req.user.agencyId) {
-    return { lead, forbidden: true };
-  }
-  return { lead, forbidden: false };
+  const access = authorizeLeadAccess(req, lead, { write });
+  return { lead, forbidden: !access.ok };
 }
 
 const activitySchema = z.object({
@@ -1033,10 +1052,8 @@ router.post('/:leadId/disposition', async (req, res, next) => {
       where: { id: req.params.leadId },
       include: { createdBy: { select: { role: true } } },
     });
-    if (!lead) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
-    if (req.user.role !== 'PLATFORM_OWNER' && lead.agencyId !== req.user.agencyId) {
-      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
-    }
+    const access = authorizeLeadAccess(req, lead, { write: true });
+    if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
 
     const fromStatus = lead.status;
     const now = new Date();
@@ -1127,3 +1144,4 @@ router.post('/:leadId/disposition', async (req, res, next) => {
 });
 
 module.exports = router;
+module.exports.authorizeLeadAccess = authorizeLeadAccess;
