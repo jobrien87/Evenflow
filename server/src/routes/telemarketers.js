@@ -152,7 +152,6 @@ router.post('/invite', requireRole('PLATFORM_OWNER'), async (req, res, next) => 
       success: true,
       telemarketer: { id: user.id, email: user.email },
       emailStatus: emailResult.status,
-      acceptUrl: emailResult.acceptUrl,
     });
   } catch (err) {
     next(err);
@@ -180,7 +179,7 @@ router.post('/:id/resend-invite', requireRole('PLATFORM_OWNER'), async (req, res
       correlationId: req.correlationId,
     });
 
-    return res.json({ success: true, emailStatus: emailResult.status, acceptUrl: emailResult.acceptUrl });
+    return res.json({ success: true, emailStatus: emailResult.status });
   } catch (err) {
     next(err);
   }

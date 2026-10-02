@@ -14,6 +14,7 @@ import AgencySettingsModal from './AgencySettingsModal';
 import PerformanceLeaderboards from './PerformanceLeaderboards';
 import TeamClockStatusBox from './TeamClockStatusBox';
 import AnnouncementComposer from './AnnouncementComposer';
+import { emailStatusMessage } from '../lib/emailStatus';
 
 export default function AgencyOwnerDashboard() {
   const { user } = useAuth();
@@ -25,7 +26,6 @@ export default function AgencyOwnerDashboard() {
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteResults, setInviteResults] = useState(null);
   const [status, setStatus] = useState('');
-  const [inviteLink, setInviteLink] = useState('');
   const [showReport, setShowReport] = useState(false);
   const [showZipReport, setShowZipReport] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -119,13 +119,9 @@ export default function AgencyOwnerDashboard() {
 
   async function resendUser(userId) {
     setStatus('Resending…');
-    setInviteLink('');
     try {
       const res = await api.resendUserInvite(userId);
-      setStatus(`Invitation resent. Email status: ${res.emailStatus}`);
-      if (res.emailStatus !== 'SENT' && res.acceptUrl) {
-        setInviteLink(res.acceptUrl);
-      }
+      setStatus(emailStatusMessage('Invitation resent.', res.emailStatus));
     } catch (err) {
       setStatus(err.data?.message || 'Failed to resend invitation.');
     }
@@ -166,19 +162,20 @@ export default function AgencyOwnerDashboard() {
 
   async function deactivate(userId) {
     if (!confirm('Deactivate this user? Their history and attribution stay intact, but they will not be able to log in.')) return;
-    await api.deactivateUser(userId);
-    await load();
+    setStatus('');
+    try {
+      await api.deactivateUser(userId);
+      await load();
+    } catch (err) {
+      setStatus(err.data?.message || 'Failed to deactivate user.');
+    }
   }
 
   async function sendReset(userId) {
     setStatus('Sending password reset…');
-    setInviteLink('');
     try {
       const res = await api.sendPasswordReset(userId);
-      setStatus(`Password reset sent. Email status: ${res.emailStatus}`);
-      if (res.emailStatus !== 'SENT' && res.resetUrl) {
-        setInviteLink(res.resetUrl);
-      }
+      setStatus(emailStatusMessage('Password reset sent.', res.emailStatus));
     } catch (err) {
       setStatus(err.data?.message || 'Failed to send password reset.');
     }
@@ -294,18 +291,11 @@ export default function AgencyOwnerDashboard() {
                 <span style={r.success ? s.inviteResultOk : s.inviteResultFail}>{r.success ? '✓' : '✗'}</span>
                 <span>{r.email}</span>
                 {!r.success && <span style={s.inviteResultMessage}>— {r.message}</span>}
-                {r.success && r.emailStatus !== 'SENT' && r.acceptUrl && (
-                  <a style={s.link} href={r.acceptUrl} target="_blank" rel="noreferrer">activation link</a>
+                {r.success && r.emailStatus !== 'SENT' && (
+                  <span style={s.inviteResultMessage}>— {emailStatusMessage('', r.emailStatus)}</span>
                 )}
               </div>
             ))}
-          </div>
-        )}
-        {inviteLink && (
-          <div style={s.linkBox}>
-            Email wasn't sent — share this activation link directly:
-            <br />
-            <a style={s.link} href={inviteLink} target="_blank" rel="noreferrer">{inviteLink}</a>
           </div>
         )}
         {users.map((u) => (

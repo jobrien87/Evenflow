@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { Card, Badge, Button, StatTile, BarRow, SectionHeader, EmptyState, ExportButton } from '../ui';
 import { downloadCsv } from '../lib/downloadCsv';
+import { emailStatusMessage } from '../lib/emailStatus';
 
 const TM_STATUS_ORDER = ['ACTIVE', 'INVITED', 'DEACTIVATED'];
 
@@ -21,7 +22,6 @@ export default function TelemarketersPanel() {
   const [assignAgency, setAssignAgency] = useState({});
   const [assignRowStatus, setAssignRowStatus] = useState({});
   const [status, setStatus] = useState('');
-  const [inviteLink, setInviteLink] = useState('');
 
   useEffect(() => {
     load();
@@ -42,13 +42,9 @@ export default function TelemarketersPanel() {
 
   async function resendTm(tmId) {
     setStatus('Resending…');
-    setInviteLink('');
     try {
       const res = await api.resendTelemarketerInvite(tmId);
-      setStatus(`Invitation resent. Email status: ${res.emailStatus}`);
-      if (res.emailStatus !== 'SENT' && res.acceptUrl) {
-        setInviteLink(res.acceptUrl);
-      }
+      setStatus(emailStatusMessage('Invitation resent.', res.emailStatus));
     } catch (err) {
       setStatus(err.data?.message || 'Failed to resend invitation.');
     }
@@ -57,13 +53,9 @@ export default function TelemarketersPanel() {
   async function invite(e) {
     e.preventDefault();
     setStatus('Inviting…');
-    setInviteLink('');
     try {
       const res = await api.inviteTelemarketer(form);
-      setStatus(`Invited. Email status: ${res.emailStatus}`);
-      if (res.emailStatus !== 'SENT' && res.acceptUrl) {
-        setInviteLink(res.acceptUrl);
-      }
+      setStatus(emailStatusMessage('Invited.', res.emailStatus));
       setForm({ email: '', firstName: '', lastName: '' });
       setShowInvite(false);
       await load();
@@ -74,13 +66,9 @@ export default function TelemarketersPanel() {
 
   async function sendReset(tmId) {
     setStatus('Sending password reset…');
-    setInviteLink('');
     try {
       const res = await api.sendPasswordReset(tmId);
-      setStatus(`Password reset sent. Email status: ${res.emailStatus}`);
-      if (res.emailStatus !== 'SENT' && res.resetUrl) {
-        setInviteLink(res.resetUrl);
-      }
+      setStatus(emailStatusMessage('Password reset sent.', res.emailStatus));
     } catch (err) {
       setStatus(err.data?.message || 'Failed to send password reset.');
     }
@@ -179,13 +167,6 @@ export default function TelemarketersPanel() {
         </Card>
       )}
       {status && <div style={s.status}>{status}</div>}
-      {inviteLink && (
-        <div style={s.linkBox}>
-          Email wasn't sent — share this activation link directly:
-          <br />
-          <a style={s.link} href={inviteLink} target="_blank" rel="noreferrer">{inviteLink}</a>
-        </div>
-      )}
 
       {tms.length === 0 ? (
         <EmptyState title="No telemarketers yet" description="Invite a telemarketer to get started." />

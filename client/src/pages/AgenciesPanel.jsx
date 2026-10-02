@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Card, Badge, Button, StatTile, SectionHeader, EmptyState, ExportButton } from '../ui';
 import { downloadCsv } from '../lib/downloadCsv';
+import { emailStatusMessage } from '../lib/emailStatus';
 import AnnouncementComposer from './AnnouncementComposer';
 
 function statusTone(status) {
@@ -23,7 +24,6 @@ export default function AgenciesPanel() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ name: '', ownerFirstName: '', ownerLastName: '', ownerEmail: '' });
   const [status, setStatus] = useState('');
-  const [inviteLink, setInviteLink] = useState('');
   const [showAnnounce, setShowAnnounce] = useState(false);
 
   useEffect(() => {
@@ -55,13 +55,9 @@ export default function AgenciesPanel() {
 
   async function resendAgency(agencyId) {
     setStatus('Resending…');
-    setInviteLink('');
     try {
       const res = await api.resendAgencyInvite(agencyId);
-      setStatus(`Invitation resent. Email status: ${res.emailStatus}`);
-      if (res.emailStatus !== 'SENT' && res.acceptUrl) {
-        setInviteLink(res.acceptUrl);
-      }
+      setStatus(emailStatusMessage('Invitation resent.', res.emailStatus));
     } catch (err) {
       setStatus(err.data?.message || 'Failed to resend invitation.');
     }
@@ -70,13 +66,9 @@ export default function AgenciesPanel() {
   async function submit(e) {
     e.preventDefault();
     setStatus('Creating…');
-    setInviteLink('');
     try {
       const res = await api.createAgency(form);
-      setStatus(`Agency created. Invitation email: ${res.invitation.emailStatus}`);
-      if (res.invitation.emailStatus !== 'SENT' && res.invitation.acceptUrl) {
-        setInviteLink(res.invitation.acceptUrl);
-      }
+      setStatus(emailStatusMessage('Agency created.', res.invitation.emailStatus));
       setForm({ name: '', ownerFirstName: '', ownerLastName: '', ownerEmail: '' });
       setShowForm(false);
       await refresh();
@@ -173,13 +165,6 @@ export default function AgenciesPanel() {
         </Card>
       )}
       {status && <div style={s.status}>{status}</div>}
-      {inviteLink && (
-        <div style={s.linkBox}>
-          Email wasn't sent — share this activation link with the agency owner directly:
-          <br />
-          <a style={s.link} href={inviteLink} target="_blank" rel="noreferrer">{inviteLink}</a>
-        </div>
-      )}
 
       {agencies.length === 0 ? (
         <EmptyState

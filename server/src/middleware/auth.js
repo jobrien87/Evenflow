@@ -85,4 +85,17 @@ function scopeAgencyId(req) {
   return req.user.agencyId;
 }
 
-module.exports = { correlationId, attachUser, requireAuth, requireRole, scopeAgencyId };
+// Seniority for one account acting ON another (password reset, deactivate,
+// role changes, etc.) — agency-membership alone (scopeAgencyId) is never
+// enough for these, since it doesn't stop an AGENCY_MANAGER from targeting
+// their own AGENCY_OWNER. Strictly senior only: a manager can act on a
+// producer/TM, an owner can act on a manager or below, but nobody can act
+// on a peer or superior — only PLATFORM_OWNER is unconditionally allowed.
+const ROLE_RANK = { PLATFORM_OWNER: 3, AGENCY_OWNER: 2, AGENCY_MANAGER: 1, PRODUCER: 0, TELEMARKETER: 0 };
+
+function canActOnUser(actorRole, targetRole) {
+  if (actorRole === 'PLATFORM_OWNER') return true;
+  return (ROLE_RANK[actorRole] ?? -1) > (ROLE_RANK[targetRole] ?? -1);
+}
+
+module.exports = { correlationId, attachUser, requireAuth, requireRole, scopeAgencyId, canActOnUser };

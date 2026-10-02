@@ -175,11 +175,10 @@ router.post('/', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
         id: invitation.id,
         expiresAt: invitation.expiresAt,
         emailStatus: emailResult.status,
-        // Surfaced so the UI can show/copy the link directly when email
-        // isn't configured (or failed) — it was being computed and then
-        // silently discarded before this, with no way for the inviter to
-        // reach it short of reading server logs.
-        acceptUrl: emailResult.acceptUrl,
+        // The raw token is never returned to the browser — only delivered
+        // to the invitee's own inbox. When email isn't configured (or
+        // fails), lib/email.js already logs the link server-side for an
+        // operator with real log access to relay manually.
       },
     });
   } catch (err) {
@@ -217,7 +216,7 @@ router.post('/:agencyId/resend-invite', requireRole('PLATFORM_OWNER'), async (re
       correlationId: req.correlationId,
     });
 
-    return res.json({ success: true, emailStatus: emailResult.status, acceptUrl: emailResult.acceptUrl });
+    return res.json({ success: true, emailStatus: emailResult.status });
   } catch (err) {
     next(err);
   }
@@ -446,7 +445,6 @@ router.post('/:agencyId/invite-owner', requireRole('PLATFORM_OWNER'), async (req
       success: true,
       user: { id: user.id, email: user.email, role: user.role, status: user.status },
       emailStatus: emailResult.status,
-      acceptUrl: emailResult.acceptUrl,
     });
   } catch (err) {
     next(err);

@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Card, Badge, Button, StatTile, SectionHeader, EmptyState, Modal, ExportButton } from '../ui';
 import { downloadCsv } from '../lib/downloadCsv';
+import { emailStatusMessage } from '../lib/emailStatus';
 import AgencySettingsModal from './AgencySettingsModal';
 
 function statusTone(status) {
@@ -29,7 +30,6 @@ export default function AgencyDetailPage() {
   const [showInvite, setShowInvite] = useState(false);
   const [showChangePlan, setShowChangePlan] = useState(false);
   const [resetStatus, setResetStatus] = useState('');
-  const [resetLink, setResetLink] = useState('');
 
   useEffect(() => {
     load();
@@ -63,13 +63,9 @@ export default function AgencyDetailPage() {
 
   async function sendReset(userId) {
     setResetStatus('Sending password reset…');
-    setResetLink('');
     try {
       const res = await api.sendPasswordReset(userId);
-      setResetStatus(`Password reset sent. Email status: ${res.emailStatus}`);
-      if (res.emailStatus !== 'SENT' && res.resetUrl) {
-        setResetLink(res.resetUrl);
-      }
+      setResetStatus(emailStatusMessage('Password reset sent.', res.emailStatus));
     } catch (err) {
       setResetStatus(err.data?.message || 'Failed to send password reset.');
     }
@@ -157,13 +153,6 @@ export default function AgencyDetailPage() {
         ROSTER
       </SectionHeader>
       {resetStatus && <div style={s.error}>{resetStatus}</div>}
-      {resetLink && (
-        <div style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 12 }}>
-          Email wasn't sent — share this reset link directly:
-          <br />
-          <a style={{ color: 'var(--accent)', wordBreak: 'break-all' }} href={resetLink} target="_blank" rel="noreferrer">{resetLink}</a>
-        </div>
-      )}
       <div style={s.rosterGrid}>
         <RosterSection title="OWNERS" users={roster.owners} onResetPassword={sendReset} />
         <RosterSection title="MANAGERS" users={roster.managers} onResetPassword={sendReset} />
@@ -261,12 +250,7 @@ function InviteOwnerModal({ agencyId, onClose, onSent }) {
         <div style={s.error}>{result.error}</div>
       ) : (
         <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
-          Invited. Email status: {result.emailStatus}
-          {result.acceptUrl && (
-            <div style={{ marginTop: 8 }}>
-              <a style={{ color: 'var(--accent)', wordBreak: 'break-all' }} href={result.acceptUrl} target="_blank" rel="noreferrer">{result.acceptUrl}</a>
-            </div>
-          )}
+          {emailStatusMessage('Invited.', result.emailStatus)}
         </div>
       )}
     </Modal>

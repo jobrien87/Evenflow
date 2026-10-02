@@ -3,7 +3,7 @@ const multer = require('multer');
 const { z } = require('zod');
 const crypto = require('crypto');
 const { prisma } = require('../lib/db');
-const { requireAuth, requireRole } = require('../middleware/auth');
+const { requireAuth, requireRole, canActOnUser } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { sendInvitationEmail } = require('../lib/email');
 const { issuePasswordResetEmail } = require('../lib/auth');
@@ -214,7 +214,6 @@ async function inviteOneUser({ actor, agencyId, agency, data, correlationId }) {
     email,
     user: { id: user.id, email: user.email, role: user.role, status: user.status },
     emailStatus: emailResult.status,
-    acceptUrl: emailResult.acceptUrl,
   };
 }
 
@@ -241,7 +240,6 @@ router.post('/invite', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_O
       success: true,
       user: result.user,
       emailStatus: result.emailStatus,
-      acceptUrl: result.acceptUrl,
     });
   } catch (err) {
     next(err);
@@ -305,6 +303,19 @@ router.post('/:userId/resend-invite', requireRole('AGENCY_OWNER', 'AGENCY_MANAGE
     if (req.user.role !== 'PLATFORM_OWNER' && target.agencyId !== req.user.agencyId) {
       return res.status(403).json({ success: false, error: 'FORBIDDEN' });
     }
+    // An already-logged-in account can't be the target of its own
+    // activation invite — this action only makes sense against someone
+    // else's still-pending account. Blocks it explicitly rather than
+    // relying on the ALREADY_ACTIVE check below to happen to catch it.
+    if (target.id === req.user.id) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'You cannot perform this action on your own account.' });
+    }
+    // Reissuing an invitation hands out a fresh activation token that sets
+    // the target's initial password — same account-takeover risk as a
+    // password reset, so the same seniority rule applies.
+    if (!canActOnUser(req.user.role, target.role)) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'You do not have permission to manage this user.' });
+    }
     if (target.status === 'ACTIVE') {
       return res.status(409).json({ success: false, error: 'ALREADY_ACTIVE', message: 'This user has already activated their account.' });
     }
@@ -323,7 +334,11 @@ router.post('/:userId/resend-invite', requireRole('AGENCY_OWNER', 'AGENCY_MANAGE
       correlationId: req.correlationId,
     });
 
-    return res.json({ success: true, emailStatus: emailResult.status, acceptUrl: emailResult.acceptUrl });
+    // The raw token is never returned to the browser — only delivered to
+    // the target's own inbox. lib/email.js logs the link server-side when
+    // email isn't configured or fails, for an operator with real log
+    // access to relay manually.
+    return res.json({ success: true, emailStatus: emailResult.status });
   } catch (err) {
     next(err);
   }
@@ -341,6 +356,17 @@ router.post('/:userId/send-password-reset', requireRole('AGENCY_OWNER', 'AGENCY_
     if (req.user.role !== 'PLATFORM_OWNER' && target.agencyId !== req.user.agencyId) {
       return res.status(403).json({ success: false, error: 'FORBIDDEN' });
     }
+    // Resetting your own password is what self-service /auth/forgot-password
+    // is for — this admin path only makes sense against someone else.
+    if (target.id === req.user.id) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'Use the self-service "forgot password" flow for your own account.' });
+    }
+    // Agency membership alone isn't enough — a manager must never be able to
+    // reset a peer or superior's password (account takeover). Strictly
+    // senior-role-only, same rule as deactivate below.
+    if (!canActOnUser(req.user.role, target.role)) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'You do not have permission to manage this user.' });
+    }
     if (target.status !== 'ACTIVE') {
       return res.status(409).json({
         success: false,
@@ -357,7 +383,9 @@ router.post('/:userId/send-password-reset', requireRole('AGENCY_OWNER', 'AGENCY_
       correlationId: req.correlationId,
     });
 
-    return res.json({ success: true, emailStatus: emailResult.status, resetUrl: emailResult.resetUrl });
+    // The raw token is never returned to the browser — only delivered to
+    // the target's own inbox, same rationale as resend-invite above.
+    return res.json({ success: true, emailStatus: emailResult.status });
   } catch (err) {
     next(err);
   }
@@ -384,6 +412,9 @@ router.patch('/:userId', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM
     if (!target) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
     if (req.user.role !== 'PLATFORM_OWNER' && target.agencyId !== req.user.agencyId) {
       return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    if (!canActOnUser(req.user.role, target.role)) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'You do not have permission to manage this user.' });
     }
     if (parsed.data.officeId) {
       // Never trust a client-supplied officeId blindly — confirm it
@@ -455,6 +486,24 @@ router.post('/:userId/notes', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLA
   }
 });
 
+// True when deactivating `target` would leave an agency with no active
+// AGENCY_OWNER, or the platform with no active PLATFORM_OWNER — either
+// one is a real lockout (nobody left who can re-activate anyone, or run
+// the agency/platform at all), so deactivation must be refused rather
+// than left to be discovered after the fact.
+async function isLastActiveOwner(target) {
+  if (target.status !== 'ACTIVE') return false;
+  if (target.role === 'AGENCY_OWNER') {
+    const count = await prisma.user.count({ where: { role: 'AGENCY_OWNER', status: 'ACTIVE', agencyId: target.agencyId } });
+    return count <= 1;
+  }
+  if (target.role === 'PLATFORM_OWNER') {
+    const count = await prisma.user.count({ where: { role: 'PLATFORM_OWNER', status: 'ACTIVE' } });
+    return count <= 1;
+  }
+  return false;
+}
+
 // Deactivate a user — preserves all historical attribution, just blocks login.
 router.post('/:userId/deactivate', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
   try {
@@ -462,6 +511,30 @@ router.post('/:userId/deactivate', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER',
     if (!target) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
     if (req.user.role !== 'PLATFORM_OWNER' && target.agencyId !== req.user.agencyId) {
       return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    // Nobody deactivates their own account through this admin action —
+    // that's an irreversible-from-the-inside lockout (a deactivated user
+    // can't log back in to undo it). Applies even to a Platform Owner,
+    // who would otherwise always pass the seniority check below.
+    if (target.id === req.user.id) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'You cannot deactivate your own account.' });
+    }
+    // Same seniority rule as send-password-reset above — a manager must
+    // never be able to lock out a peer or superior (e.g. their own owner).
+    if (!canActOnUser(req.user.role, target.role)) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'You do not have permission to manage this user.' });
+    }
+    // Never leave an agency with zero active owners, or the platform with
+    // zero active platform owners — that locks everyone out of admin
+    // recovery, not just the one account being deactivated.
+    if (await isLastActiveOwner(target)) {
+      return res.status(409).json({
+        success: false,
+        error: 'LAST_ACTIVE_OWNER',
+        message: target.role === 'PLATFORM_OWNER'
+          ? 'This is the only active Platform Owner — promote another account first.'
+          : 'This is the only active owner for this agency — promote another manager to owner first.',
+      });
     }
     const updated = await prisma.user.update({
       where: { id: target.id },
@@ -541,3 +614,4 @@ router.get('/:userId/performance', async (req, res, next) => {
 });
 
 module.exports = router;
+module.exports.isLastActiveOwner = isLastActiveOwner;
