@@ -215,6 +215,8 @@ export const api = {
   callDetail: (id) => request(`/calls/${id}`),
   retryCall: (id) => request(`/calls/${id}/retry`, { method: 'POST' }),
   submitCallTranscript: (id, transcript) => request(`/calls/${id}/transcript`, { method: 'PATCH', body: { transcript } }),
+  attachCallVideo: (id, bunnyVideoId) => request(`/calls/${id}/video`, { method: 'PATCH', body: { bunnyVideoId } }),
+  removeCallVideo: (id) => request(`/calls/${id}/video`, { method: 'DELETE' }),
   // Not a JSON call — used directly as an <audio crossOrigin="use-credentials" src=...>
   // so the session cookie rides along even when client/server are on separate origins.
   callAudioUrl: (id) => `${BASE}/calls/${id}/audio`,

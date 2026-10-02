@@ -10,12 +10,23 @@ const { enqueueCallProcessing, enqueueAnalysis } = require('../jobs/callProcessi
 const { read } = require('../lib/storage');
 const { requireSalesStudioAccess } = require('../lib/entitlements');
 const { computeDrillScore, computeCoachingBreakdown } = require('../lib/callScoring');
+const bunnyStream = require('../lib/bunnyStream');
 
 const router = express.Router();
 router.use(requireAuth);
 router.use(requireSalesStudioAccess);
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } });
+
+// bunnyEmbedUrl is only ever computed, never stored — so it always
+// reflects the current BUNNY_STREAM_LIBRARY_ID and is simply absent
+// (not a broken link) when a call has no video or Bunny isn't configured.
+function withBunnyEmbed(call) {
+  return {
+    ...call,
+    bunnyEmbedUrl: call.bunnyVideoId && bunnyStream.isConfigured() ? bunnyStream.embedUrl(call.bunnyVideoId) : null,
+  };
+}
 
 router.get('/storage-health', requireRole('PLATFORM_OWNER'), (req, res) => {
   res.json({ success: true, ...storageHealth() });
@@ -61,7 +72,7 @@ router.get('/', async (req, res, next) => {
 
     // Drill Score — computed from the AI's existing dimensionScores, not
     // a second analysis pass. See lib/callScoring.js.
-    const callsWithDrillScore = calls.map((call) => ({
+    const callsWithDrillScore = calls.map((call) => withBunnyEmbed({
       ...call,
       drillScore: call.analysis ? computeDrillScore(call.analysis.dimensionScores)?.drillScore ?? null : null,
     }));
@@ -118,7 +129,7 @@ router.get('/:id', async (req, res, next) => {
       return res.status(403).json({ success: false, error: 'FORBIDDEN' });
     }
     const drill = call.analysis ? computeDrillScore(call.analysis.dimensionScores) : null;
-    return res.json({ success: true, call: { ...call, drillScore: drill?.drillScore ?? null, drillCategoryScores: drill?.categoryScores ?? null } });
+    return res.json({ success: true, call: withBunnyEmbed({ ...call, drillScore: drill?.drillScore ?? null, drillCategoryScores: drill?.categoryScores ?? null }) });
   } catch (err) {
     next(err);
   }
@@ -178,6 +189,71 @@ router.patch('/:id/transcript', requireRole('PRODUCER', 'AGENCY_MANAGER', 'AGENC
     enqueueAnalysis(call.id);
 
     return res.json({ success: true, call: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const videoSchema = z.object({ bunnyVideoId: z.string().trim().min(1).max(200) });
+
+// Attach (or replace) this call's Bunny Stream video — the video itself is
+// uploaded directly in the Bunny.net dashboard; this only stores the GUID
+// after confirming it's real, never re-uploads/re-hosts anything.
+router.patch('/:id/video', requireRole('PRODUCER', 'AGENCY_MANAGER', 'AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const parsed = videoSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+
+    const call = await prisma.call.findUnique({ where: { id: req.params.id } });
+    if (!call) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (req.user.role !== 'PLATFORM_OWNER' && call.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+
+    if (!bunnyStream.isConfigured()) {
+      return res.status(409).json({ success: false, error: 'NOT_CONFIGURED', message: 'Bunny Stream is not configured on this server yet.' });
+    }
+
+    let exists;
+    try {
+      exists = await bunnyStream.videoExists(parsed.data.bunnyVideoId);
+    } catch (err) {
+      return res.status(502).json({ success: false, error: 'BUNNY_ERROR', message: 'Could not reach Bunny Stream to verify this video.' });
+    }
+    if (!exists) {
+      return res.status(400).json({ success: false, error: 'VIDEO_NOT_FOUND', message: 'No video with that id was found in the configured Bunny Stream library.' });
+    }
+
+    const updated = await prisma.call.update({ where: { id: call.id }, data: { bunnyVideoId: parsed.data.bunnyVideoId } });
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: call.agencyId,
+      action: 'call.video_attached', entityType: 'Call', entityId: call.id,
+      correlationId: req.correlationId,
+    });
+
+    return res.json({ success: true, call: withBunnyEmbed(updated) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/:id/video', requireRole('PRODUCER', 'AGENCY_MANAGER', 'AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const call = await prisma.call.findUnique({ where: { id: req.params.id } });
+    if (!call) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (req.user.role !== 'PLATFORM_OWNER' && call.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    const updated = await prisma.call.update({ where: { id: call.id }, data: { bunnyVideoId: null } });
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: call.agencyId,
+      action: 'call.video_removed', entityType: 'Call', entityId: call.id,
+      correlationId: req.correlationId,
+    });
+    return res.json({ success: true, call: withBunnyEmbed(updated) });
   } catch (err) {
     next(err);
   }

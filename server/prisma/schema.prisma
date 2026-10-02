@@ -1278,6 +1278,11 @@ model Call {
   failureReason  String?
   transcript     String?
   transcriptProvider String?
+  // The Bunny Stream video GUID for this call's video recording, if the
+  // uploader has one (uploaded directly in the Bunny.net dashboard — never
+  // re-uploaded or re-hosted by this app). Played via Bunny's own iframe
+  // embed in the Coaching tab's per-call detail view. See lib/bunnyStream.js.
+  bunnyVideoId   String?
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 

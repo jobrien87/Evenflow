@@ -135,6 +135,18 @@ export default function CallsPanel() {
     await load();
   }
 
+  async function attachVideo(bunnyVideoId) {
+    await api.attachCallVideo(selectedCall.id, bunnyVideoId);
+    const data = await api.callDetail(selectedCall.id);
+    setSelectedCall(data.call);
+  }
+
+  async function removeVideo() {
+    await api.removeCallVideo(selectedCall.id);
+    const data = await api.callDetail(selectedCall.id);
+    setSelectedCall(data.call);
+  }
+
   // At-a-glance summary — computed client-side from the same `calls` array
   // the list below renders, no extra fetch involved.
   const totalCalls = calls.length;
@@ -250,6 +262,8 @@ export default function CallsPanel() {
 
             <audio style={s.audioPlayer} controls crossOrigin="use-credentials" src={api.callAudioUrl(selectedCall.id)} />
 
+            <CallVideoSection call={selectedCall} onAttach={attachVideo} onRemove={removeVideo} />
+
             {selectedCall.status === 'FAILED' && (
               <div style={s.failureBox}>
                 {selectedCall.failureReason}
@@ -342,6 +356,83 @@ export function TranscriptEntry({ onSubmit }) {
             {busy ? 'Submitting…' : 'SUBMIT TRANSCRIPT & ANALYZE'}
           </button>
         </div>
+      }
+    />
+  );
+}
+
+// Per-call Bunny Stream video — the video itself lives on Bunny.net
+// (uploaded there directly, outside this app); this just attaches/plays
+// its GUID, mirroring TranscriptEntry's entry-form shape above.
+export function CallVideoSection({ call, onAttach, onRemove }) {
+  const [videoId, setVideoId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submit() {
+    if (!videoId.trim()) return;
+    setBusy(true);
+    setError('');
+    try {
+      await onAttach(videoId.trim());
+      setVideoId('');
+    } catch (err) {
+      setError(err.data?.message || 'Failed to attach video.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    setBusy(true);
+    setError('');
+    try {
+      await onRemove();
+    } catch (err) {
+      setError(err.data?.message || 'Failed to remove video.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Section
+      title="Call Video"
+      content={
+        call.bunnyEmbedUrl ? (
+          <div>
+            <iframe
+              style={s.videoEmbed}
+              src={call.bunnyEmbedUrl}
+              loading="lazy"
+              allow="accelerometer;gyroscope;autoplay;encrypted-media;picture-in-picture;"
+              allowFullScreen
+              title="Call video"
+            />
+            {error && <div style={s.error}>{error}</div>}
+            <button style={s.removeVideoButton} disabled={busy} onClick={remove}>
+              {busy ? 'Removing…' : 'REMOVE VIDEO'}
+            </button>
+          </div>
+        ) : (
+          <div>
+            <div style={s.transcriptHint}>
+              Paste this call's Bunny Stream video id (uploaded directly in your Bunny.net dashboard) to play it here.
+            </div>
+            <div style={s.videoIdRow}>
+              <input
+                style={s.videoIdInput}
+                placeholder="Bunny video id"
+                value={videoId}
+                onChange={(e) => setVideoId(e.target.value)}
+              />
+              <button style={s.submitButton} disabled={busy || !videoId.trim()} onClick={submit}>
+                {busy ? 'Attaching…' : 'ATTACH VIDEO'}
+              </button>
+            </div>
+            {error && <div style={s.error}>{error}</div>}
+          </div>
+        )
       }
     />
   );
@@ -479,6 +570,10 @@ const s = {
   transcriptHint: { color: 'var(--text-muted)', fontSize: 12, marginBottom: 8, lineHeight: 1.5 },
   transcriptInput: { width: '100%', minHeight: 160, padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, boxSizing: 'border-box', resize: 'vertical', marginBottom: 8 },
   submitButton: { padding: '10px 16px', background: 'var(--accent-gradient)', color: 'var(--accent-on)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
+  videoEmbed: { width: '100%', aspectRatio: '16 / 9', border: 'none', borderRadius: 8, marginBottom: 8 },
+  videoIdRow: { display: 'flex', gap: 8 },
+  videoIdInput: { flex: 1, padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, boxSizing: 'border-box' },
+  removeVideoButton: { padding: '8px 14px', background: 'transparent', color: 'var(--danger)', border: '1px solid rgba(255, 77, 94, 0.4)', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
   retryButtonFull: { display: 'block', marginTop: 10, padding: '8px 14px', background: 'var(--danger)', color: 'var(--accent-on)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
   progressBox: { background: 'var(--warning-soft)', border: '1px solid rgba(255, 184, 77, 0.4)', color: 'var(--warning)', padding: 14, borderRadius: 8, fontSize: 13 },
   analysisBlock: { color: 'var(--text-primary)' },

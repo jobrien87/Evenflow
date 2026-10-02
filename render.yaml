@@ -30,6 +30,10 @@ services:
         value: "claude-haiku-4-5-20251001"
       - key: RESEND_API_KEY
         sync: false
+      - key: BUNNY_STREAM_LIBRARY_ID
+        sync: false
+      - key: BUNNY_STREAM_API_KEY
+        sync: false
       - key: EMAIL_FROM
         value: "EvenFlow <no-reply@evenflow.app>"
       # Optional — leave unset until you're ready to connect a real provider.
