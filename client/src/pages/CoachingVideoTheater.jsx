@@ -44,13 +44,6 @@ export default function CoachingVideoTheater() {
     <section style={s.section}>
       <SectionHeader>Coaching Video Series</SectionHeader>
       <div style={s.theater}>
-        <div style={s.laserLayer} aria-hidden="true">
-          <div style={s.beamA} />
-          <div style={s.beamB} />
-          <div style={s.beamC} />
-          <div style={s.glow} />
-        </div>
-
         <div style={s.content}>
           {active?.available ? (
             <>
@@ -108,31 +101,6 @@ const s = {
     background: 'var(--bg)',
     border: '1px solid var(--border-hairline)',
     padding: 20,
-  },
-  laserLayer: { position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' },
-  beamA: {
-    position: 'absolute', top: '-20%', left: '-10%', width: '60%', height: '160%',
-    background: 'linear-gradient(90deg, transparent, var(--accent), transparent)',
-    filter: 'blur(18px)', mixBlendMode: 'screen',
-    animation: 'laser-sweep-a 7s ease-in-out infinite',
-  },
-  beamB: {
-    position: 'absolute', top: '-30%', right: '-10%', width: '45%', height: '170%',
-    background: 'linear-gradient(90deg, transparent, var(--accent-2), transparent)',
-    filter: 'blur(22px)', mixBlendMode: 'screen',
-    animation: 'laser-sweep-b 9s ease-in-out infinite',
-  },
-  beamC: {
-    position: 'absolute', bottom: '-20%', left: '20%', width: '50%', height: '140%',
-    background: 'linear-gradient(90deg, transparent, var(--accent), transparent)',
-    filter: 'blur(26px)', mixBlendMode: 'screen', opacity: 0.3,
-    animation: 'laser-sweep-c 11s ease-in-out infinite',
-  },
-  glow: {
-    position: 'absolute', top: '50%', left: '50%', width: '70%', height: '70%',
-    transform: 'translate(-50%, -50%)', borderRadius: '50%',
-    background: 'radial-gradient(circle, rgba(198,255,46,0.25), transparent 70%)',
-    animation: 'laser-glow-pulse 5s ease-in-out infinite',
   },
   content: { position: 'relative', zIndex: 1 },
   playerFrame: {
