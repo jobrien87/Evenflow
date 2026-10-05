@@ -29,6 +29,17 @@ export default function CallsPanel() {
   const highlightId = searchParams.get('highlight');
   const handledHighlightRef = useRef(false);
 
+  // Moved here from the retired standalone Training tab — the real same
+  // TrainingAssignment-backed numbers (Assigned/Completed/In Progress/
+  // Lesson Completion), just relocated to the top of TP Sales Process.
+  // Producer-only: course assignment is a per-producer concept with no
+  // equivalent on an Owner/Manager's own account.
+  const [courseAssignments, setCourseAssignments] = useState([]);
+  useEffect(() => {
+    if (user?.role !== 'PRODUCER') return;
+    api.myTrainingAssignments().then((data) => setCourseAssignments(data.assignments)).catch(() => {});
+  }, [user?.role]);
+
   const [coachPeriod, setCoachPeriod] = useState('month');
   const [coachResult, setCoachResult] = useState(null);
   const [coachBusy, setCoachBusy] = useState(false);
@@ -160,8 +171,37 @@ export default function CallsPanel() {
     : null;
   const flaggedForReview = calls.filter((c) => c.analysis?.reviewRecommended).length;
 
+  // Same "At a Glance" math the old standalone Training tab used, just
+  // relocated here.
+  const caTotal = courseAssignments.length;
+  const caCompleted = courseAssignments.filter((a) => a.status === 'COMPLETED').length;
+  const caInProgress = courseAssignments.filter((a) => a.status === 'IN_PROGRESS').length;
+  const caTotalLessons = courseAssignments.reduce((sum, a) => sum + (a.progress?.total || 0), 0);
+  const caCompletedLessons = courseAssignments.reduce((sum, a) => sum + (a.progress?.completed || 0), 0);
+  const caCompletionRate = caTotalLessons > 0 ? Math.round((caCompletedLessons / caTotalLessons) * 100) : null;
+
   return (
     <div style={s.wrap}>
+      {user.role === 'PRODUCER' && caTotal > 0 && (
+        <section style={s.section}>
+          <SectionHeader>Sales Courses</SectionHeader>
+          <div style={s.statsRow}>
+            <StatTile label="Assigned" value={caTotal} />
+            <StatTile
+              label="Completed"
+              value={caCompleted}
+              sub={`${Math.round((caCompleted / caTotal) * 100)}% done`}
+            />
+            <StatTile label="In Progress" value={caInProgress} />
+            <StatTile
+              label="Lesson Completion"
+              value={caCompletionRate !== null ? `${caCompletionRate}%` : '—'}
+              sub={caCompletionRate === null ? 'no lessons assigned yet' : `${caCompletedLessons}/${caTotalLessons} lessons`}
+            />
+          </div>
+        </section>
+      )}
+
       <CoachingVideoTheater />
 
       <section style={s.section}>

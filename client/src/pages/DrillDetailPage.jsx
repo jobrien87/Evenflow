@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import { useAuth } from '../lib/AuthContext';
 import { Card, Button, SectionHeader, Icon, MicButton } from '../ui';
 import { parseDrillContent, parseNumberedSteps, parseBulletList, parseDialogue } from '../lib/drillContent';
 import { useTextToSpeech } from '../lib/useTextToSpeech';
@@ -23,9 +24,15 @@ const MODULE_META = {
 export default function DrillDetailPage() {
   const { courseId, lessonId } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [course, setCourse] = useState(null);
   const [lesson, setLesson] = useState(null);
   const [error, setError] = useState('');
+  // Resolved only for Producers — completeLesson() requires a real
+  // TrainingAssignment for this exact course, so a drill that was never
+  // formally assigned shows no completion UI at all (pure read+roleplay,
+  // same as before this existed).
+  const [assignment, setAssignment] = useState(null);
 
   useEffect(() => {
     load();
@@ -41,6 +48,20 @@ export default function DrillDetailPage() {
     } catch (err) {
       setError(err.data?.message || 'Could not load this drill.');
     }
+    if (user?.role === 'PRODUCER') {
+      try {
+        const data = await api.myTrainingAssignments();
+        setAssignment(data.assignments.find((a) => a.courseId === courseId) || null);
+      } catch {
+        // No assignment surface to show if this fails — the page still
+        // works fine as a pure read+roleplay drill.
+      }
+    }
+  }
+
+  async function refreshAssignment() {
+    const data = await api.myTrainingAssignments();
+    setAssignment(data.assignments.find((a) => a.courseId === courseId) || null);
   }
 
   if (error) {
@@ -73,11 +94,83 @@ export default function DrillDetailPage() {
         ))}
       </div>
 
+      {assignment && (
+        <section style={s.section}>
+          <SectionHeader>Your Assignment</SectionHeader>
+          <CompletionBlock assignment={assignment} lesson={lesson} onCompleted={refreshAssignment} />
+        </section>
+      )}
+
       <section style={s.section}>
         <SectionHeader>Practice This Drill</SectionHeader>
         <RoleplayPanel lessonId={lesson.id} />
       </section>
     </div>
+  );
+}
+
+// This course has been formally assigned to the current Producer —
+// moved here from the retired standalone Training tab's CourseViewer,
+// so completing a quiz/lesson is still possible from the one place a
+// Producer now actually reads the drill. Calls the exact same
+// completeLesson() endpoint, so TrainingAssignment status/progress (and
+// the "Sales Courses" stat boxes on TP Sales Process) stay real and live.
+function CompletionBlock({ assignment, lesson, onCompleted }) {
+  const alreadyDone = assignment.lessonCompletions.some((c) => c.lessonId === lesson.id);
+  const [answers, setAnswers] = useState({});
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submit() {
+    setBusy(true);
+    setError('');
+    try {
+      const quizAnswers = lesson.quiz ? lesson.quiz.map((_, i) => answers[i] ?? -1) : undefined;
+      const res = await api.completeLesson(lesson.id, { assignmentId: assignment.id, answers: quizAnswers });
+      setResult(res.grading);
+      await onCompleted();
+    } catch (err) {
+      setError(err.data?.message || 'Could not mark this complete.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (alreadyDone && !result) {
+    return <Card style={s.completionCard}><div style={s.completionDone}>✓ Marked complete — part of "{assignment.course.title}"</div></Card>;
+  }
+
+  return (
+    <Card style={s.completionCard}>
+      <div style={s.completionIntro}>This drill is part of your assigned course, "{assignment.course.title}."</div>
+      {lesson.quiz && !result && (
+        <div style={s.quizBlock}>
+          {lesson.quiz.map((q, qi) => (
+            <div key={qi} style={s.quizQuestion}>
+              <div style={s.quizQuestionText}>{q.question}</div>
+              {q.options.map((opt, oi) => (
+                <label key={oi} style={s.quizOption}>
+                  <input type="radio" name={`q${qi}`} checked={answers[qi] === oi} onChange={() => setAnswers({ ...answers, [qi]: oi })} />
+                  {opt}
+                </label>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+      {error && <div style={s.error}>{error}</div>}
+      {!result && (
+        <Button variant="primary" disabled={busy} onClick={submit}>
+          {busy ? 'SUBMITTING…' : lesson.quiz ? 'SUBMIT QUIZ' : 'MARK COMPLETE'}
+        </Button>
+      )}
+      {result && (
+        <div style={s.completionDone}>
+          {result.scorePercent !== null ? <>Quiz score: <strong>{result.scorePercent}%</strong> ({result.correctCount}/{result.total} correct)</> : 'Marked complete.'}
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -303,6 +396,13 @@ const s = {
   retryButton: { padding: '6px 12px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 11 },
   backButton: { background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer', marginBottom: 16, padding: 0 },
   section: { marginBottom: 28 },
+  completionCard: {},
+  completionIntro: { color: 'var(--text-secondary)', fontSize: 13, marginBottom: 14 },
+  completionDone: { color: 'var(--accent)', fontSize: 14, fontWeight: 600 },
+  quizBlock: { background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 16, marginBottom: 14 },
+  quizQuestion: { marginBottom: 16 },
+  quizQuestionText: { color: 'var(--text-primary)', fontSize: 14, fontWeight: 600, marginBottom: 8 },
+  quizOption: { display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)', fontSize: 13, marginBottom: 6, cursor: 'pointer' },
   hero: { marginBottom: 24, paddingBottom: 20, borderBottom: '1px solid var(--border-hairline)' },
   eyebrow: { color: 'var(--text-muted)', fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 },
   title: { color: 'var(--text-primary)', fontSize: 22, margin: 0 },

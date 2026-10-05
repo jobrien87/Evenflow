@@ -3,11 +3,13 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { Card, SectionHeader, Badge, Button, EmptyState } from '../ui';
 import TimeClockReportPanel from './TimeClockReportPanel';
+import CoursesAdminPanel from './CoursesAdminPanel';
 
 const TABS = [
   { key: 'roster', label: 'ROSTER' },
   { key: 'hours', label: 'HOURS REPORT' },
   { key: 'pto', label: 'PTO' },
+  { key: 'training', label: 'TRAINING' },
 ];
 
 const BADGE_TYPES = [
@@ -211,6 +213,8 @@ export default function RosterSettingsPanel() {
       )}
 
       {tab === 'hours' && <TimeClockReportPanel />}
+
+      {tab === 'training' && <CoursesAdminPanel />}
 
       {tab === 'pto' && (
         <>

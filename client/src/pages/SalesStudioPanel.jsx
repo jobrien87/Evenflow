@@ -5,35 +5,35 @@ import { SectionHeader } from '../ui';
 import DrillLibraryPanel from './DrillLibraryPanel';
 import CallScoringPanel from './CallScoringPanel';
 import CallsPanel from './CallsPanel';
-import TrainingPanel from './TrainingPanel';
 import CoursesAdminPanel from './CoursesAdminPanel';
 
-// Sales Studio is the one home for every coaching/training surface, per
-// role:
+// Sales Studio is the one home for every coaching surface, per role, in
+// this fixed order: TP SALES PROCESS, DRILLS, CALL SCORING.
+//  - TP SALES PROCESS (Producer, Agency Owner/Manager): per-call upload/
+//    transcript/analysis — carries the Coaching Video Theater, a
+//    Producer's own self-service coaching breakdown, and (Producer only)
+//    the "Sales Courses" progress summary moved here from the retired
+//    standalone Training tab. Still the same CallsPanel component.
 //  - DRILLS (everyone): the 75-drill library + AI roleplay.
 //  - CALL SCORING (Agency Owner/Manager only): upload a producer's call
-//    on their behalf + the cross-producer Coaching Box.
-//  - CALL DIAGNOSTICS (Producer, Agency Owner/Manager): per-call upload/
-//    transcript/analysis — carries the Coaching Video Theater at its top,
-//    and a Producer's own self-service coaching breakdown.
-//  - TRAINING (everyone except Telemarketer, who has no formal
-//    assignment workflow): a Producer's own assigned courses, or course
-//    administration for Owner/Manager/Platform Owner.
-// Every tab reuses its existing component exactly as-is (same components
-// already mounted elsewhere, each with its own real MODULE_NOT_ENTITLED
-// handling) — this is purely a navigation/layout consolidation, no
-// duplicated logic.
+//    on their behalf, then drill into a per-producer Call Scoring
+//    profile page for the full depth breakdown.
+// There is no standalone Training tab anymore — course assignment admin
+// (Owner/Manager/Platform Owner) now lives on Roster Settings' TRAINING
+// tab, and a Producer marks a lesson complete from that lesson's own
+// Drill Detail page, instead of a dedicated tab/page for it. Platform
+// Owner is unaffected here (no TP Sales Process/Call Scoring tabs exist
+// for that role) and keeps its own course-authoring Training tab, since
+// nowhere else in the app lets a Platform Owner create courses/lessons.
 const TAB_DEFS = {
   PRODUCER: [
+    { key: 'diagnostics', label: 'TP SALES PROCESS', Component: CallsPanel },
     { key: 'drills', label: 'DRILLS', Component: DrillLibraryPanel },
-    { key: 'diagnostics', label: 'CALL DIAGNOSTICS', Component: CallsPanel },
-    { key: 'training', label: 'TRAINING', Component: TrainingPanel },
   ],
   AGENCY_OWNER: [
+    { key: 'diagnostics', label: 'TP SALES PROCESS', Component: CallsPanel },
     { key: 'drills', label: 'DRILLS', Component: DrillLibraryPanel },
     { key: 'scoring', label: 'CALL SCORING', Component: CallScoringPanel },
-    { key: 'diagnostics', label: 'CALL DIAGNOSTICS', Component: CallsPanel },
-    { key: 'training', label: 'TRAINING', Component: CoursesAdminPanel },
   ],
   PLATFORM_OWNER: [
     { key: 'drills', label: 'DRILLS', Component: DrillLibraryPanel },

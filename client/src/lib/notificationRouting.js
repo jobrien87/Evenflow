@@ -60,10 +60,11 @@ export function notificationTarget(notification, role) {
       return { path: base, highlightId: null, openChat: false };
 
     case 'TrainingAssignment':
-      // Sales Studio's Training tab is the course ADMIN view for Owner/
-      // Manager/Platform Owner, not an assignee's "my training" view —
-      // only Producers have a real assignee-facing training tab today.
-      if (role === 'PRODUCER') return { path: '/producer/sales-studio?tab=training', highlightId: id, openChat: false };
+      // No standalone Training tab anymore — a Producer's assignment
+      // progress now shows at the top of TP Sales Process (the renamed
+      // Call Diagnostics tab, still key 'diagnostics'), and the actual
+      // lesson is completed from its own Drill Detail page.
+      if (role === 'PRODUCER') return { path: '/producer/sales-studio?tab=diagnostics', highlightId: id, openChat: false };
       return { path: base, highlightId: null, openChat: false };
 
     case 'Call':
