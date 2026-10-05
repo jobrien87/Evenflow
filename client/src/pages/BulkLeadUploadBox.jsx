@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { FileDropzone } from '../ui';
 
@@ -22,23 +22,44 @@ const CATEGORY_OPTIONS = [
 ];
 
 // Reused by AgencyOwnerDashboard's LEADS section and AgencySettingsModal —
-// one real upload flow (parse → createLeadRecord per row), not two.
+// one real upload flow (parse → createLeadRecord per row), not two. The
+// "Recent Imports" list below is read fresh from GET /leads/import-batches
+// every time this component mounts — real, server-side history, not local
+// upload-session state — so undo is still reachable after leaving and
+// coming back to this page (or opening it on a different device), not just
+// in the few seconds right after a file finishes uploading.
 export default function BulkLeadUploadBox({ agencyId, onImported }) {
   const [leadCategory, setLeadCategory] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
-  const [undoBusy, setUndoBusy] = useState(false);
-  const [undoResult, setUndoResult] = useState(null);
+  const [batches, setBatches] = useState([]);
+  const [batchesError, setBatchesError] = useState('');
+  const [undoingId, setUndoingId] = useState(null);
+  const [undoError, setUndoError] = useState('');
+
+  const loadBatches = useCallback(async () => {
+    try {
+      const data = await api.leadImportBatches(agencyId ? `?agencyId=${agencyId}` : '');
+      setBatches(data.batches || []);
+      setBatchesError('');
+    } catch (err) {
+      setBatchesError(err.data?.message || 'Could not load recent imports.');
+    }
+  }, [agencyId]);
+
+  useEffect(() => {
+    loadBatches();
+  }, [loadBatches]);
 
   async function handleFile(file) {
     setBusy(true);
     setError('');
     setResult(null);
-    setUndoResult(null);
     try {
       const data = await api.bulkImportLeads(file, agencyId, leadCategory);
       setResult(data);
+      await loadBatches();
       if (onImported) onImported();
     } catch (err) {
       setError(err.data?.message || 'Could not import that file.');
@@ -47,17 +68,21 @@ export default function BulkLeadUploadBox({ agencyId, onImported }) {
     }
   }
 
-  async function undoImport() {
-    if (!result?.batchId) return;
-    setUndoBusy(true);
+  async function undoImport(batch) {
+    const label = batch.leadCategory ? `this ${batch.leadCategory.toLowerCase()} import` : 'this import';
+    if (!confirm(`Undo ${label} (${batch.createdAt ? new Date(batch.createdAt).toLocaleString() : ''})? ${batch.undoableCount} untouched lead${batch.undoableCount === 1 ? '' : 's'} will be archived. Any lead that's already been worked (assigned, noted, attempted, or dispositioned) is left alone.`)) {
+      return;
+    }
+    setUndoingId(batch.id);
+    setUndoError('');
     try {
-      const data = await api.undoLeadImport(result.batchId);
-      setUndoResult(data);
+      await api.undoLeadImport(batch.id);
+      await loadBatches();
       if (onImported) onImported();
     } catch (err) {
-      setUndoResult({ error: err.data?.message || 'Could not undo this import.' });
+      setUndoError(err.data?.message || 'Could not undo this import.');
     } finally {
-      setUndoBusy(false);
+      setUndoingId(null);
     }
   }
 
@@ -82,20 +107,32 @@ export default function BulkLeadUploadBox({ agencyId, onImported }) {
           Imported {result.created} of {result.totalRows} row{result.totalRows === 1 ? '' : 's'}.
           {result.skipped > 0 ? ` ${result.skipped} row${result.skipped === 1 ? '' : 's'} skipped.` : ''}
           {result.truncated ? ' This file had more rows than one upload can process — split it up and upload the rest separately.' : ''}
-          {result.created > 0 && !undoResult && (
-            <div style={{ marginTop: 8 }}>
-              <button style={s.undoButton} disabled={undoBusy} onClick={undoImport}>
-                {undoBusy ? 'UNDOING…' : 'UNDO THIS IMPORT'}
-              </button>
+        </div>
+      )}
+      {undoError && <div style={s.error}>{undoError}</div>}
+      {batchesError && <div style={s.error}>{batchesError}</div>}
+      {batches.length > 0 && (
+        <div style={s.history}>
+          <div style={s.historyLabel}>RECENT IMPORTS</div>
+          {batches.map((b) => (
+            <div key={b.id} style={s.historyRow}>
+              <div style={s.historyMeta}>
+                <span style={s.historyCategory}>{b.leadCategory}</span> — {b.created} lead{b.created === 1 ? '' : 's'} by {b.uploadedBy ? `${b.uploadedBy.firstName} ${b.uploadedBy.lastName}` : 'someone'}, {new Date(b.createdAt).toLocaleString()}
+                {b.undoneAt && <span style={s.undoneTag}> · undone</span>}
+              </div>
+              {!b.undoneAt && b.withinUndoWindow && b.undoableCount > 0 && (
+                <button style={s.undoButton} disabled={undoingId === b.id} onClick={() => undoImport(b)}>
+                  {undoingId === b.id ? 'UNDOING…' : `UNDO (${b.undoableCount})`}
+                </button>
+              )}
+              {!b.undoneAt && b.withinUndoWindow && b.undoableCount === 0 && (
+                <span style={s.undoneTag}>all leads already worked</span>
+              )}
+              {!b.undoneAt && !b.withinUndoWindow && (
+                <span style={s.undoneTag}>undo window expired</span>
+              )}
             </div>
-          )}
-          {undoResult && !undoResult.error && (
-            <div style={s.undoNote}>
-              Undone — archived {undoResult.archived} lead{undoResult.archived === 1 ? '' : 's'}.
-              {undoResult.kept > 0 ? ` ${undoResult.kept} left as-is (already worked).` : ''}
-            </div>
-          )}
-          {undoResult?.error && <div style={s.error}>{undoResult.error}</div>}
+          ))}
         </div>
       )}
     </div>
@@ -108,6 +145,11 @@ const s = {
   select: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 13 },
   error: { color: 'var(--danger)', fontSize: 12, marginTop: 8 },
   result: { color: 'var(--text-secondary)', fontSize: 12, marginTop: 8 },
-  undoButton: { padding: '6px 12px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700 },
-  undoNote: { color: 'var(--accent)', fontSize: 12, marginTop: 6 },
+  history: { marginTop: 14, borderTop: '1px solid var(--border-hairline)', paddingTop: 10 },
+  historyLabel: { fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: 8 },
+  historyRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '6px 0', fontSize: 12, color: 'var(--text-secondary)' },
+  historyMeta: { flex: 1 },
+  historyCategory: { fontWeight: 700, color: 'var(--text-primary)' },
+  undoButton: { padding: '6px 12px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' },
+  undoneTag: { fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic', whiteSpace: 'nowrap' },
 };

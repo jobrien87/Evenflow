@@ -478,6 +478,23 @@ router.get('/import-batches', async (req, res, next) => {
 // hard delete (same archivedAt mechanism DUPLICATE/ARCHIVED dispositions
 // already use), and never a lead that's since been worked (assigned,
 // attempted, noted, or dispositioned) so real work is never thrown away.
+//
+// Two real races, both closed here:
+// 1. Double-undo — two concurrent clicks (or two tabs) hitting this route
+//    for the same batch at once. Closed by an atomic claim (updateMany on
+//    LeadImportBatch gated on undoneAt: null, same idempotent-claim shape
+//    as recordStoreProvisioning.js's provisionSubscription) — only one
+//    request's claim can match, the other sees count: 0 and reports
+//    ALREADY_UNDONE rather than double-processing.
+// 2. Lost real work — the previous version read the untouched leads with
+//    one SELECT, then archived exactly those ids with a second, later
+//    statement that carried no further condition. Any real work landing
+//    in between (a producer claiming/assigning/noting/dispositioning the
+//    lead) was silently overwritten, because the archiving update() never
+//    re-checked state at write time. Fixed by folding the "untouched"
+//    predicate directly into the archiving updateMany's WHERE clause, so
+//    Postgres evaluates it against the row's current state at the moment
+//    of the write, inside the same transaction — not a stale JS snapshot.
 router.post('/import-batches/:batchId/undo', async (req, res, next) => {
   try {
     if (!['AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'].includes(req.user.role)) {
@@ -495,30 +512,59 @@ router.post('/import-batches/:batchId/undo', async (req, res, next) => {
       return res.status(409).json({ success: false, error: 'WINDOW_EXPIRED', message: 'This import is too old to undo automatically — archive the leads individually instead.' });
     }
 
-    const leads = await prisma.lead.findMany({
-      where: { importBatchId: batch.id, archivedAt: null },
-      include: { _count: { select: { notes: true, activities: true, tasks: true, calls: true, productQuotes: true } } },
+    const claim = await prisma.leadImportBatch.updateMany({
+      where: { id: batch.id, undoneAt: null },
+      data: { undoneAt: new Date(), undoneById: req.user.id },
     });
-    const toArchive = leads.filter(leadIsUntouchedSinceImport);
-    const kept = leads.length - toArchive.length;
+    if (claim.count === 0) {
+      return res.status(409).json({ success: false, error: 'ALREADY_UNDONE', message: 'This import was already undone.' });
+    }
 
-    await prisma.$transaction([
-      ...toArchive.map((lead) =>
-        prisma.lead.update({ where: { id: lead.id }, data: { archivedAt: new Date() } })
-      ),
-      ...toArchive.map((lead) =>
-        prisma.leadEvent.create({ data: { leadId: lead.id, type: 'lead.import_undone', metadata: { batchId: batch.id } } })
-      ),
-      prisma.leadImportBatch.update({ where: { id: batch.id }, data: { undoneAt: new Date(), undoneById: req.user.id } }),
-    ]);
+    const { archived, kept } = await prisma.$transaction(async (tx) => {
+      const candidates = await tx.lead.findMany({ where: { importBatchId: batch.id, archivedAt: null }, select: { id: true } });
+      const candidateIds = candidates.map((l) => l.id);
+
+      let archivedLeads = [];
+      if (candidateIds.length > 0) {
+        // The real guard: re-asserted here, not trusted from the SELECT
+        // above, so anything that touched the lead between that SELECT
+        // and this UPDATE (same transaction or not) excludes it for real.
+        await tx.lead.updateMany({
+          where: {
+            id: { in: candidateIds },
+            archivedAt: null,
+            status: 'NEW',
+            assignedToId: null,
+            firstAttemptAt: null,
+            firstContactAt: null,
+            attemptCount: 0,
+            notes: { none: {} },
+            activities: { none: {} },
+            tasks: { none: {} },
+            calls: { none: {} },
+            productQuotes: { none: {} },
+          },
+          data: { archivedAt: new Date() },
+        });
+        archivedLeads = await tx.lead.findMany({ where: { id: { in: candidateIds }, archivedAt: { not: null } }, select: { id: true } });
+        if (archivedLeads.length > 0) {
+          await tx.leadEvent.createMany({
+            data: archivedLeads.map((lead) => ({ leadId: lead.id, type: 'lead.import_undone', metadata: { batchId: batch.id } })),
+          });
+        }
+      }
+
+      const totalActive = await tx.lead.count({ where: { importBatchId: batch.id, archivedAt: null } });
+      return { archived: archivedLeads.length, kept: totalActive };
+    });
 
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role, agencyId: batch.agencyId,
       action: 'lead.import_undone', entityType: 'LeadImportBatch', entityId: batch.id,
-      after: { archived: toArchive.length, kept }, correlationId: req.correlationId,
+      after: { archived, kept }, correlationId: req.correlationId,
     });
 
-    return res.json({ success: true, archived: toArchive.length, kept });
+    return res.json({ success: true, archived, kept });
   } catch (err) {
     next(err);
   }
