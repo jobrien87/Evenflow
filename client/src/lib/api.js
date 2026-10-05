@@ -223,6 +223,7 @@ export const api = {
   callAudioUrl: (id) => `${BASE}/calls/${id}/audio`,
   reviewCall: (id, payload) => request(`/calls/${id}/review`, { method: 'POST', body: payload }),
   coachingBreakdown: (params = '') => request(`/calls/coaching${params}`),
+  callScoringProfile: (userId, params = '') => request(`/calls/producer-profile/${userId}${params}`),
   uploadCall: async (file, leadId, producerId) => {
     const formData = new FormData();
     formData.append('recording', file);

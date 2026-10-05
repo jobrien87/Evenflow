@@ -16,6 +16,7 @@ import TeamChatPanel from './pages/TeamChatPanel';
 import MoshpitPanel from './pages/MoshpitPanel';
 import MyLeadsPanel from './pages/MyLeadsPanel';
 import ProducerDetailPage from './pages/ProducerDetailPage';
+import CallScoringProfilePage from './pages/CallScoringProfilePage';
 
 import AgencyOwnerDashboard from './pages/AgencyOwnerDashboard';
 import YieldTransfersPanel from './pages/YieldTransfersPanel';
@@ -104,13 +105,14 @@ export default function App() {
           <Route path="agency/coaching" element={<RedirectToSalesStudio tab="diagnostics" />} />
           <Route path="agency/roster-settings" element={<RosterSettingsPanel />} />
           <Route path="agency/billing" element={<AgencyBillingPanel />} />
-          <Route path="agency/training" element={<RedirectToSalesStudio tab="training" />} />
+          <Route path="agency/training" element={<Navigate to="/agency/roster-settings" replace />} />
           <Route path="agency/opportunities" element={<OpportunitiesPanel />} />
           <Route path="agency/leads" element={<AgencyLeadsPanel />} />
           <Route path="agency/goals" element={<GoalsPanel />} />
           <Route path="agency/billboard" element={<BillboardPanel />} />
           <Route path="agency/record-store" element={<RecordStorePanel />} />
           <Route path="agency/producers/:userId" element={<ProducerDetailPage />} />
+          <Route path="agency/sales-studio/call-scoring/:userId" element={<CallScoringProfilePage />} />
         </Route>
 
         <Route element={<RoleGate allow={['AGENCY_OWNER']} />}>
