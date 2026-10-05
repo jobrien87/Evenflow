@@ -51,6 +51,8 @@ const PATHS = {
   pause: 'M7 4h3v16H7zM14 4h3v16h-3z',
   play: 'M6 4l14 8-14 8V4z',
   link: 'M9 15l6-6M8 16l-2 2a4 4 0 0 1-5.66-5.66l3-3A4 4 0 0 1 9 8M15 8l2-2a4 4 0 0 1 5.66 5.66l-3 3A4 4 0 0 1 15 16',
+  gamepad: 'M6 8h12a4 4 0 0 1 4 4l1 5a2.5 2.5 0 0 1-4.5 1.5L17 16H7l-1.5 2.5A2.5 2.5 0 0 1 1 17l1-5a4 4 0 0 1 4-4zM7 11v3M5.5 12.5h3M15.5 11.5h.01M18 13.5h.01',
+  lock: 'M6 11V8a6 6 0 1 1 12 0v3M5 11h14v9H5v-9zM12 15v3',
 };
 
 export default function Icon({ name, size = 18, style }) {

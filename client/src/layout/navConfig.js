@@ -18,11 +18,13 @@ export const NAV_BY_ROLE = {
     { label: 'Sales Studio', to: '/producer/sales-studio', icon: 'trophy', primary: true, dataTour: 'nav-sales-studio' },
     { label: 'Moshpit', to: '/producer/moshpit', icon: 'flame', primary: true, dataTour: 'nav-moshpit' },
     { label: 'Goals', to: '/producer/goals', icon: 'flag', dataTour: 'nav-goals' },
+    { label: 'Break Room', to: '/producer/break-room', icon: 'gamepad', dataTour: 'nav-break-room' },
   ],
   TELEMARKETER: [
     { label: 'Home', to: '/telemarketer', icon: 'home', primary: true, dataTour: 'nav-home' },
     { label: 'Drills', to: '/telemarketer/drills', icon: 'sparkle', primary: true, dataTour: 'nav-drills' },
     { label: 'Tasks', to: '/telemarketer/tasks', icon: 'checklist', dataTour: 'nav-tasks' },
+    { label: 'Break Room', to: '/telemarketer/break-room', icon: 'gamepad', dataTour: 'nav-break-room' },
   ],
   // Ordered per the user's specified sequence: Main Stage, Moshpit, Live
   // Transfers, Leads, Goals, Billboard, Sales Studio, Record Store,
@@ -56,6 +58,7 @@ export const NAV_BY_ROLE = {
     { label: 'Billing', to: '/platform/billing', icon: 'card', dataTour: 'nav-billing' },
     { label: 'Sales Studio', to: '/platform/sales-studio', icon: 'trophy', dataTour: 'nav-sales-studio' },
     { label: 'Record Store', to: '/platform/record-store', icon: 'vinyl', dataTour: 'nav-record-store' },
+    { label: 'Break Room Admin', to: '/platform/break-room-admin', icon: 'gamepad', secondary: true, dataTour: 'nav-break-room-admin' },
   ],
 };
 

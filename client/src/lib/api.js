@@ -307,6 +307,25 @@ export const api = {
   chatMessages: (conversationId) => request(`/chat/conversations/${conversationId}/messages`),
   postChatMessage: (conversationId, content) => request(`/chat/conversations/${conversationId}/messages`, { method: 'POST', body: { content } }),
 
+  // Break Room Arcade — every route here is already gated server-side by
+  // canAccessBreakRoom(); the client never decides eligibility itself, it
+  // only reflects what /access says and re-polls it during gameplay.
+  breakRoomAccess: () => request('/break-room/access'),
+  breakRoomHome: () => request('/break-room/home'),
+  startBreakRoomSession: (gameType) => request('/break-room/sessions', { method: 'POST', body: { gameType } }),
+  endBreakRoomSession: (sessionId, payload) => request(`/break-room/sessions/${sessionId}/end`, { method: 'POST', body: payload }),
+  breakRoomLeaderboard: (params = '') => request(`/break-room/leaderboard${params}`),
+  breakRoomJoke: () => request('/break-room/jokes/random'),
+  breakRoomAchievements: () => request('/break-room/achievements'),
+  breakRoomStats: () => request('/break-room/stats'),
+  updateAgencyBreakRoomSettings: (agencyId, payload) => request(`/agencies/${agencyId}/break-room-settings`, { method: 'PATCH', body: payload }),
+  // Super Admin only.
+  breakRoomAdminSessions: (params = '') => request(`/break-room/admin/sessions${params}`),
+  breakRoomAdminRemoveSession: (id, reason) => request(`/break-room/admin/sessions/${id}`, { method: 'DELETE', body: { reason } }),
+  breakRoomAdminResetLeaderboard: (payload) => request('/break-room/admin/reset-leaderboard', { method: 'POST', body: payload }),
+  breakRoomPlatformSettings: () => request('/break-room/admin/platform-settings'),
+  updateBreakRoomPlatformSettings: (payload) => request('/break-room/admin/platform-settings', { method: 'PATCH', body: payload }),
+
   impersonationStatus: () => request('/impersonation/status'),
   startImpersonation: (targetUserId) => request('/impersonation/start', { method: 'POST', body: { targetUserId } }),
   endImpersonation: () => request('/impersonation/end', { method: 'POST' }),

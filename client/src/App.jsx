@@ -39,6 +39,9 @@ import BillingPanel from './pages/BillingPanel';
 
 import TelemarketerDashboard from './pages/TelemarketerDashboard';
 import PersonalizePage from './pages/PersonalizePage';
+import BreakRoomPanel from './pages/BreakRoomPanel';
+import BreakRoomPlayPage from './pages/BreakRoomPlayPage';
+import BreakRoomAdminPanel from './pages/BreakRoomAdminPanel';
 
 function RequireAuth() {
   const { user, loading } = useAuth();
@@ -90,6 +93,8 @@ export default function App() {
           <Route path="producer/moshpit" element={<MoshpitPanel />} />
           <Route path="producer/my-leads" element={<MyLeadsPanel />} />
           <Route path="producer/goals" element={<GoalsPanel />} />
+          <Route path="producer/break-room" element={<BreakRoomPanel />} />
+          <Route path="producer/break-room/play/:gameType" element={<BreakRoomPlayPage />} />
         </Route>
 
         <Route element={<RoleGate allow={['AGENCY_OWNER', 'AGENCY_MANAGER']} />}>
@@ -132,6 +137,7 @@ export default function App() {
           <Route path="platform/billing" element={<BillingPanel />} />
           <Route path="platform/training" element={<RedirectToSalesStudio tab="training" />} />
           <Route path="platform/record-store" element={<RecordStoreAdminPanel />} />
+          <Route path="platform/break-room-admin" element={<BreakRoomAdminPanel />} />
         </Route>
 
         <Route element={<RoleGate allow={['TELEMARKETER']} />}>
@@ -139,6 +145,8 @@ export default function App() {
           <Route path="telemarketer/drills" element={<DrillLibraryPanel />} />
           <Route path="telemarketer/drills/:courseId/:lessonId" element={<DrillDetailPage />} />
           <Route path="telemarketer/tasks" element={<TasksPanel />} />
+          <Route path="telemarketer/break-room" element={<BreakRoomPanel />} />
+          <Route path="telemarketer/break-room/play/:gameType" element={<BreakRoomPlayPage />} />
         </Route>
       </Route>
     </Routes>

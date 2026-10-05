@@ -10,6 +10,14 @@ const TABS = [
   { key: 'hours', label: 'HOURS REPORT' },
   { key: 'pto', label: 'PTO' },
   { key: 'training', label: 'TRAINING' },
+  { key: 'breakroom', label: 'BREAK ROOM' },
+];
+
+const BREAK_ROOM_GAMES = [
+  { key: 'CONGO_LINE', label: 'Congo Line' },
+  { key: 'BUCKETS', label: 'Buckets' },
+  { key: 'FULL_SEND', label: 'Full Send' },
+  { key: 'PILL_POP', label: 'Pill Pop' },
 ];
 
 const BADGE_TYPES = [
@@ -46,10 +54,45 @@ export default function RosterSettingsPanel() {
   const [inviteStatus, setInviteStatus] = useState('');
   const [ptoForm, setPtoForm] = useState({ startDate: '', endDate: '', reason: '' });
   const [ptoStatus, setPtoStatus] = useState('');
+  const [breakRoomEnabled, setBreakRoomEnabled] = useState(true);
+  const [breakRoomSettings, setBreakRoomSettings] = useState(null);
+  const [breakRoomStatus, setBreakRoomStatus] = useState('');
+  const [breakRoomBusy, setBreakRoomBusy] = useState(false);
 
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    if (tab === 'breakroom' && user?.agencyId && !breakRoomSettings) loadBreakRoomSettings();
+  }, [tab, user?.agencyId]);
+
+  async function loadBreakRoomSettings() {
+    try {
+      const data = await api.agencyDetail(user.agencyId);
+      setBreakRoomEnabled(data.agency.breakRoomEnabled);
+      setBreakRoomSettings(data.agency.breakRoomSettings || {
+        games: { CONGO_LINE: true, BUCKETS: true, FULL_SEND: true, PILL_POP: true },
+        pickMeUpEnabled: true, lunchEligible: false, soundsEnabled: true, achievementsEnabled: true,
+        leaderboardScope: { office: true, agency: true },
+      });
+    } catch (err) {
+      setBreakRoomStatus(err.data?.message || 'Could not load Break Room settings.');
+    }
+  }
+
+  async function saveBreakRoomSettings() {
+    setBreakRoomBusy(true);
+    setBreakRoomStatus('');
+    try {
+      await api.updateAgencyBreakRoomSettings(user.agencyId, breakRoomSettings);
+      setBreakRoomStatus('Saved.');
+    } catch (err) {
+      setBreakRoomStatus(err.data?.message || 'Could not save Break Room settings.');
+    } finally {
+      setBreakRoomBusy(false);
+    }
+  }
 
   async function load() {
     setError('');
@@ -258,6 +301,75 @@ export default function RosterSettingsPanel() {
           </Card>
         </>
       )}
+
+      {tab === 'breakroom' && (
+        <Card style={s.card}>
+          <div style={s.cardTitle}>BREAK ROOM ARCADE</div>
+          <div style={s.rowSub}>
+            Module status: <b style={{ color: breakRoomEnabled ? 'var(--accent)' : 'var(--text-muted)' }}>{breakRoomEnabled ? 'ON' : 'OFF'}</b>
+            {!breakRoomEnabled && ' — ask your Platform Owner to turn the module on.'}
+          </div>
+
+          {!breakRoomSettings ? (
+            <div style={{ ...s.empty, marginTop: 12 }}>Loading…</div>
+          ) : (
+            <>
+              <div style={s.breakRoomSection}>
+                <div style={s.breakRoomSectionLabel}>GAMES</div>
+                {BREAK_ROOM_GAMES.map((g) => (
+                  <label key={g.key} style={s.checkboxRow}>
+                    <input
+                      type="checkbox"
+                      checked={!!breakRoomSettings.games[g.key]}
+                      onChange={(e) => setBreakRoomSettings({ ...breakRoomSettings, games: { ...breakRoomSettings.games, [g.key]: e.target.checked } })}
+                    />
+                    {g.label}
+                  </label>
+                ))}
+              </div>
+
+              <div style={s.breakRoomSection}>
+                <div style={s.breakRoomSectionLabel}>ACCESS & LEADERBOARDS</div>
+                <label style={s.checkboxRow}>
+                  <input type="checkbox" checked={breakRoomSettings.lunchEligible} onChange={(e) => setBreakRoomSettings({ ...breakRoomSettings, lunchEligible: e.target.checked })} />
+                  Allow play during lunch (not just Break)
+                </label>
+                <label style={s.checkboxRow}>
+                  <input type="checkbox" checked={breakRoomSettings.pickMeUpEnabled} onChange={(e) => setBreakRoomSettings({ ...breakRoomSettings, pickMeUpEnabled: e.target.checked })} />
+                  Pick Me Up (joke button)
+                </label>
+                <label style={s.checkboxRow}>
+                  <input type="checkbox" checked={breakRoomSettings.soundsEnabled} onChange={(e) => setBreakRoomSettings({ ...breakRoomSettings, soundsEnabled: e.target.checked })} />
+                  Sounds
+                </label>
+                <label style={s.checkboxRow}>
+                  <input type="checkbox" checked={breakRoomSettings.achievementsEnabled} onChange={(e) => setBreakRoomSettings({ ...breakRoomSettings, achievementsEnabled: e.target.checked })} />
+                  Achievements
+                </label>
+                <label style={s.checkboxRow}>
+                  <input
+                    type="checkbox"
+                    checked={breakRoomSettings.leaderboardScope.office}
+                    onChange={(e) => setBreakRoomSettings({ ...breakRoomSettings, leaderboardScope: { ...breakRoomSettings.leaderboardScope, office: e.target.checked } })}
+                  />
+                  Office leaderboard
+                </label>
+                <label style={s.checkboxRow}>
+                  <input
+                    type="checkbox"
+                    checked={breakRoomSettings.leaderboardScope.agency}
+                    onChange={(e) => setBreakRoomSettings({ ...breakRoomSettings, leaderboardScope: { ...breakRoomSettings.leaderboardScope, agency: e.target.checked } })}
+                  />
+                  Agency leaderboard
+                </label>
+              </div>
+
+              <Button variant="primary" size="sm" disabled={breakRoomBusy} onClick={saveBreakRoomSettings}>{breakRoomBusy ? 'SAVING…' : 'SAVE'}</Button>
+              {breakRoomStatus && <div style={s.status}>{breakRoomStatus}</div>}
+            </>
+          )}
+        </Card>
+      )}
     </div>
   );
 }
@@ -285,4 +397,7 @@ const s = {
   linkButton: { fontSize: 11, color: 'var(--text-secondary)', border: '1px solid var(--border-strong)', background: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer' },
   deactivateButton: { fontSize: 11, color: 'var(--danger)', border: '1px solid rgba(255, 77, 94, 0.4)', background: 'none', padding: '4px 8px', borderRadius: 4, cursor: 'pointer' },
   empty: { color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 13 },
+  breakRoomSection: { marginTop: 16, marginBottom: 8 },
+  breakRoomSectionLabel: { fontSize: 10, letterSpacing: 1.5, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase' },
+  checkboxRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-secondary)', padding: '6px 0', cursor: 'pointer' },
 };

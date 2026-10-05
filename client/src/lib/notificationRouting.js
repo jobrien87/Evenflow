@@ -72,6 +72,11 @@ export function notificationTarget(notification, role) {
       if (role === 'AGENCY_OWNER' || role === 'AGENCY_MANAGER') return { path: '/agency/sales-studio?tab=diagnostics', highlightId: id, openChat: false };
       return { path: base, highlightId: null, openChat: false };
 
+    case 'BreakRoomHighScore':
+      // breakroom.score_beaten — relatedEntityId is the gameType, not a
+      // row id; there's no per-game "row" to highlight, just the arcade.
+      return { path: `${base}/break-room`, highlightId: null, openChat: false };
+
     case 'AGENCY':
       // The persistent agency-wide team room — always a chat.message
       // notification, always opens straight into the room rather than

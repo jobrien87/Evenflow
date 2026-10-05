@@ -24,6 +24,7 @@ const ENTITLEMENT_FIELDS = [
   { key: 'transfersEnabled', label: 'Yield Transfers' },
   { key: 'coachingEnabled', label: 'Sales Studio (unlocked)' },
   { key: 'salesStudioGateEnabled', label: 'Sales Studio gate enforced (off = always open)' },
+  { key: 'breakRoomEnabled', label: 'Break Room Arcade' },
 ];
 
 export default function AgencyDetailPage() {
