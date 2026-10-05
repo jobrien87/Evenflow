@@ -21,6 +21,18 @@ const CATEGORY_OPTIONS = [
   { value: 'UNKNOWN', label: 'Unknown' },
 ];
 
+// Same vocabulary/engine a Vendor's real-time leads already route through
+// (server/src/lib/leadDistribution.js) — a bulk upload picks one mode for
+// the whole batch instead of leaving every row in the unassigned,
+// un-claimable dead zone a bulk import used to land in.
+const DISTRIBUTION_OPTIONS = [
+  { value: 'MOSHPIT', label: 'Moshpit — first to claim it gets it' },
+  { value: 'ROUND_ROBIN', label: 'Round robin — split evenly across every active producer' },
+  { value: 'OFFICE_SPLIT', label: 'Office split — split by office, then round robin within it' },
+  { value: 'ALPHA_SPLIT', label: 'Alpha split — by the lead’s last name' },
+  { value: 'SELECTED_AGENTS', label: 'Specific producer(s)' },
+];
+
 // Reused by AgencyOwnerDashboard's LEADS section and AgencySettingsModal —
 // one real upload flow (parse → createLeadRecord per row), not two. The
 // "Recent Imports" list below is read fresh from GET /leads/import-batches
@@ -30,6 +42,9 @@ const CATEGORY_OPTIONS = [
 // in the few seconds right after a file finishes uploading.
 export default function BulkLeadUploadBox({ agencyId, onImported }) {
   const [leadCategory, setLeadCategory] = useState('');
+  const [distributionMode, setDistributionMode] = useState('MOSHPIT');
+  const [selectedAgentIds, setSelectedAgentIds] = useState([]);
+  const [producers, setProducers] = useState([]);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
@@ -52,12 +67,25 @@ export default function BulkLeadUploadBox({ agencyId, onImported }) {
     loadBatches();
   }, [loadBatches]);
 
+  useEffect(() => {
+    api.users(agencyId ? `?agencyId=${agencyId}` : '')
+      .then((data) => setProducers((data.users || []).filter((u) => u.role === 'PRODUCER' && u.status === 'ACTIVE')))
+      .catch(() => setProducers([]));
+  }, [agencyId]);
+
+  function toggleAgent(id) {
+    setSelectedAgentIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
   async function handleFile(file) {
     setBusy(true);
     setError('');
     setResult(null);
     try {
-      const data = await api.bulkImportLeads(file, agencyId, leadCategory);
+      const data = await api.bulkImportLeads(file, agencyId, leadCategory, {
+        mode: distributionMode,
+        selectedAgentIds: distributionMode === 'SELECTED_AGENTS' ? selectedAgentIds : undefined,
+      });
       setResult(data);
       await loadBatches();
       if (onImported) onImported();
@@ -95,6 +123,29 @@ export default function BulkLeadUploadBox({ agencyId, onImported }) {
           {CATEGORY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </label>
+      <label style={s.fieldLabel}>
+        How should this batch be assigned?
+        <select style={s.select} value={distributionMode} onChange={(e) => setDistributionMode(e.target.value)}>
+          {DISTRIBUTION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      </label>
+      {distributionMode === 'SELECTED_AGENTS' && (
+        <div style={s.fieldLabel}>
+          Pick producer(s)
+          {producers.length === 0 ? (
+            <div style={s.result}>No active producers found.</div>
+          ) : (
+            <div style={s.agentList}>
+              {producers.map((p) => (
+                <label key={p.id} style={s.agentRow}>
+                  <input type="checkbox" checked={selectedAgentIds.includes(p.id)} onChange={() => toggleAgent(p.id)} />
+                  {p.firstName} {p.lastName}
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <FileDropzone
         onFile={handleFile}
         disabled={busy || !leadCategory}
@@ -107,6 +158,8 @@ export default function BulkLeadUploadBox({ agencyId, onImported }) {
           Imported {result.created} of {result.totalRows} row{result.totalRows === 1 ? '' : 's'}.
           {result.skipped > 0 ? ` ${result.skipped} row${result.skipped === 1 ? '' : 's'} skipped.` : ''}
           {result.truncated ? ' This file had more rows than one upload can process — split it up and upload the rest separately.' : ''}
+          {result.assigned > 0 ? ` ${result.assigned} assigned directly.` : ''}
+          {result.sentToMoshpit > 0 ? ` ${result.sentToMoshpit} sent to the Moshpit.` : ''}
         </div>
       )}
       {undoError && <div style={s.error}>{undoError}</div>}
@@ -143,6 +196,8 @@ const s = {
   wrap: { marginTop: 12, marginBottom: 12 },
   fieldLabel: { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 },
   select: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 13 },
+  agentList: { display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 10px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, maxHeight: 160, overflowY: 'auto' },
+  agentRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-primary)', fontWeight: 400 },
   error: { color: 'var(--danger)', fontSize: 12, marginTop: 8 },
   result: { color: 'var(--text-secondary)', fontSize: 12, marginTop: 8 },
   history: { marginTop: 14, borderTop: '1px solid var(--border-hairline)', paddingTop: 10 },

@@ -685,6 +685,15 @@ model Lead {
   // from a non-Telemarketer caller.
   isLiveTransfer Boolean @default(false)
 
+  // True when this lead was explicitly routed to the Moshpit at creation —
+  // a bulk CSV/XLS import whose chosen distribution mode resolved to
+  // MOSHPIT (by choice, or as a real fallback when no eligible producer
+  // existed for the mode actually picked). Vendor-sourced Moshpit leads
+  // don't need this (their eligibility already comes from the vendor's
+  // own distributionMode at read time); this flag exists because a
+  // bulk-imported lead has no vendor relation at all to check.
+  moshpitEligible Boolean @default(false)
+
   // Rich intake fields captured at the moment a Telemarketer submits a
   // lead (source: 'telemarketer') — denormalized onto the Lead itself
   // rather than Customer, since this is an intake-time snapshot (the same

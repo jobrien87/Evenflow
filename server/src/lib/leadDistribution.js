@@ -30,6 +30,40 @@ function alphaSplitIndex(lastName, candidateCount) {
   return Math.min(candidateCount - 1, Math.floor(position / bucketSize));
 }
 
+// Offices that currently have at least one ACTIVE producer — shared by
+// every OFFICE_SPLIT caller (vendor-sourced and manual/bulk-import alike),
+// in the same sorted-id candidate order every other mode uses.
+async function fetchOfficesWithActiveAgents(tx, agencyId) {
+  const offices = await tx.office.findMany({
+    where: { agencyId },
+    include: { users: { where: { role: 'PRODUCER', status: 'ACTIVE' }, select: { id: true }, orderBy: { id: 'asc' } } },
+    orderBy: { id: 'asc' },
+  });
+  return offices.filter((o) => o.users.length > 0);
+}
+
+// The eligible-producer candidate pool for SELECTED_AGENTS (restricted to
+// a hand-picked subset) or ROUND_ROBIN/ALPHA_SPLIT (every active producer
+// in the agency) — shared by every mode that round-robins/splits across a
+// flat candidate list rather than an office hierarchy.
+async function fetchCandidateIds(tx, { agencyId, mode, selectedAgentIds }) {
+  if (mode === 'SELECTED_AGENTS') {
+    if (!selectedAgentIds || selectedAgentIds.length === 0) return [];
+    const activeSelected = await tx.user.findMany({
+      where: { id: { in: selectedAgentIds }, role: 'PRODUCER', status: 'ACTIVE', agencyId },
+      select: { id: true },
+      orderBy: { id: 'asc' },
+    });
+    return activeSelected.map((u) => u.id);
+  }
+  const activeProducers = await tx.user.findMany({
+    where: { agencyId, role: 'PRODUCER', status: 'ACTIVE' },
+    select: { id: true },
+    orderBy: { id: 'asc' },
+  });
+  return activeProducers.map((u) => u.id);
+}
+
 // Resolves who a vendor's newly-created lead should be assigned to, per
 // that vendor's configured distributionMode. Must run inside the same
 // $transaction as the Lead create so the cursor increment and the lead
@@ -45,15 +79,14 @@ async function resolveVendorAssignment(tx, vendor, context = {}) {
   }
 
   if (vendor.distributionMode === 'OFFICE_SPLIT') {
-    const offices = await tx.office.findMany({
-      where: { agencyId: vendor.agencyId },
-      include: { users: { where: { role: 'PRODUCER', status: 'ACTIVE' }, select: { id: true }, orderBy: { id: 'asc' } } },
-      orderBy: { id: 'asc' },
-    });
-    const officesWithAgents = offices.filter((o) => o.users.length > 0);
+    const officesWithAgents = await fetchOfficesWithActiveAgents(tx, vendor.agencyId);
     if (officesWithAgents.length === 0) {
       return { assignedToId: null, mode: 'MOSHPIT', reason: 'No offices with active producers — sent to the Moshpit' };
     }
+    // A single atomic UPDATE ... SET cursor = cursor + 1 RETURNING cursor —
+    // under concurrent vendor webhook POSTs this is what keeps two
+    // simultaneous requests from both computing the same "next" agent
+    // (a naive read-then-write of the cursor would race here).
     const updatedVendor = await tx.vendor.update({
       where: { id: vendor.id },
       data: { roundRobinCursor: { increment: 1 } },
@@ -66,33 +99,12 @@ async function resolveVendorAssignment(tx, vendor, context = {}) {
     return { assignedToId: office.users[agentIndex].id, mode: 'OFFICE_SPLIT', reason: null };
   }
 
-  let candidateIds;
-  if (vendor.distributionMode === 'SELECTED_AGENTS') {
-    if (!vendor.selectedAgentIds || vendor.selectedAgentIds.length === 0) {
-      return { assignedToId: null, mode: 'MOSHPIT', reason: 'No agents selected for this vendor — sent to the Moshpit' };
-    }
-    const activeSelected = await tx.user.findMany({
-      where: {
-        id: { in: vendor.selectedAgentIds },
-        role: 'PRODUCER',
-        status: 'ACTIVE',
-        agencyId: vendor.agencyId,
-      },
-      select: { id: true },
-      orderBy: { id: 'asc' },
-    });
-    candidateIds = activeSelected.map((u) => u.id);
-  } else {
-    const activeProducers = await tx.user.findMany({
-      where: { agencyId: vendor.agencyId, role: 'PRODUCER', status: 'ACTIVE' },
-      select: { id: true },
-      orderBy: { id: 'asc' },
-    });
-    candidateIds = activeProducers.map((u) => u.id);
-  }
-
+  const candidateIds = await fetchCandidateIds(tx, { agencyId: vendor.agencyId, mode: vendor.distributionMode, selectedAgentIds: vendor.selectedAgentIds });
   if (candidateIds.length === 0) {
-    return { assignedToId: null, mode: 'MOSHPIT', reason: 'No eligible producers available — sent to the Moshpit' };
+    const reason = vendor.distributionMode === 'SELECTED_AGENTS'
+      ? 'No agents selected for this vendor — sent to the Moshpit'
+      : 'No eligible producers available — sent to the Moshpit';
+    return { assignedToId: null, mode: 'MOSHPIT', reason };
   }
 
   if (vendor.distributionMode === 'ALPHA_SPLIT') {
@@ -100,18 +112,59 @@ async function resolveVendorAssignment(tx, vendor, context = {}) {
     return { assignedToId: candidateIds[index], mode: 'ALPHA_SPLIT', reason: null };
   }
 
-  // A single atomic UPDATE ... SET cursor = cursor + 1 RETURNING cursor —
-  // under concurrent vendor webhook POSTs this is what keeps two
-  // simultaneous requests from both computing the same "next" agent
-  // (a naive read-then-write of the cursor would race here).
   const updatedVendor = await tx.vendor.update({
     where: { id: vendor.id },
     data: { roundRobinCursor: { increment: 1 } },
     select: { roundRobinCursor: true },
   });
-
   const index = pickAgentIndex(updatedVendor.roundRobinCursor, candidateIds.length);
   return { assignedToId: candidateIds[index], mode: vendor.distributionMode, reason: null };
 }
 
-module.exports = { pickAgentIndex, alphaSplitIndex, resolveVendorAssignment };
+// Same modes/vocabulary as resolveVendorAssignment, for a context with no
+// Vendor row to hold a persisted cursor — a bulk CSV/XLS import, where an
+// Agency Owner/Manager picks one distributionMode for the whole batch at
+// upload time. Safe to use a plain in-memory cursor (not an atomic DB
+// increment) because one bulk-import request processes its rows
+// sequentially, in a single process — unlike vendor webhook POSTs, which
+// can race each other, nothing else is concurrently advancing this same
+// cursor. The caller owns the cursor's lifetime (pass 0 for the first row
+// of a batch, then feed each result's nextCursor into the next call) —
+// nothing here persists it.
+async function resolveManualAssignment(tx, { agencyId, mode, selectedAgentIds, cursor = 0, lastName } = {}) {
+  if (mode === 'MOSHPIT') {
+    return { assignedToId: null, mode: 'MOSHPIT', reason: null, nextCursor: cursor };
+  }
+
+  if (mode === 'OFFICE_SPLIT') {
+    const officesWithAgents = await fetchOfficesWithActiveAgents(tx, agencyId);
+    if (officesWithAgents.length === 0) {
+      return { assignedToId: null, mode: 'MOSHPIT', reason: 'No offices with active producers — sent to the Moshpit', nextCursor: cursor };
+    }
+    const nextCursor = cursor + 1;
+    const officeIndex = pickAgentIndex(nextCursor, officesWithAgents.length);
+    const office = officesWithAgents[officeIndex];
+    const agentCursor = Math.floor(nextCursor / officesWithAgents.length);
+    const agentIndex = pickAgentIndex(agentCursor, office.users.length);
+    return { assignedToId: office.users[agentIndex].id, mode: 'OFFICE_SPLIT', reason: null, nextCursor };
+  }
+
+  const candidateIds = await fetchCandidateIds(tx, { agencyId, mode, selectedAgentIds });
+  if (candidateIds.length === 0) {
+    const reason = mode === 'SELECTED_AGENTS'
+      ? 'No producers selected for this import — sent to the Moshpit'
+      : 'No eligible producers available — sent to the Moshpit';
+    return { assignedToId: null, mode: 'MOSHPIT', reason, nextCursor: cursor };
+  }
+
+  if (mode === 'ALPHA_SPLIT') {
+    const index = alphaSplitIndex(lastName, candidateIds.length);
+    return { assignedToId: candidateIds[index], mode: 'ALPHA_SPLIT', reason: null, nextCursor: cursor };
+  }
+
+  const nextCursor = cursor + 1;
+  const index = pickAgentIndex(nextCursor, candidateIds.length);
+  return { assignedToId: candidateIds[index], mode, reason: null, nextCursor };
+}
+
+module.exports = { pickAgentIndex, alphaSplitIndex, resolveVendorAssignment, resolveManualAssignment };

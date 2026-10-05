@@ -67,11 +67,13 @@ export const api = {
   ackAnnouncement: (id) => request(`/announcements/${id}/ack`, { method: 'POST' }),
   createAnnouncement: (payload) => request('/announcements', { method: 'POST', body: payload }),
   // Not JSON — a multipart upload, same bypass-request() shape as uploadCall.
-  bulkImportLeads: async (file, agencyId, leadCategory) => {
+  bulkImportLeads: async (file, agencyId, leadCategory, distribution = {}) => {
     const formData = new FormData();
     formData.append('file', file);
     if (agencyId) formData.append('agencyId', agencyId);
     formData.append('leadCategory', leadCategory);
+    if (distribution.mode) formData.append('distributionMode', distribution.mode);
+    if (distribution.selectedAgentIds) formData.append('selectedAgentIds', JSON.stringify(distribution.selectedAgentIds));
     const res = await fetch(`${BASE}/leads/bulk-import`, { method: 'POST', credentials: 'include', body: formData });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {

@@ -15,6 +15,7 @@ const { updateCustomerProductsAndDetectCrossSells } = require('../lib/opportunit
 const { computeProducerScore, computeAgencyScore, computeTelemarketerScore } = require('../lib/flowScore');
 const { computeFunnel } = require('../lib/funnelMetrics');
 const { parseLeadFile } = require('../lib/leadBulkImport');
+const { resolveManualAssignment } = require('../lib/leadDistribution');
 const { computeZipBreakdown } = require('../lib/zipBreakdown');
 const { sendZipReportEmail } = require('../lib/email');
 
@@ -25,6 +26,11 @@ router.use(requireAuth);
 // mirrors calls.js's memoryStorage()-with-no-fileFilter convention (real
 // validation happens after upload, inside parseLeadFile).
 const uploadSpreadsheet = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+// Same enum Vendor.distributionMode already uses (lib/leadDistribution.js) —
+// a bulk upload picks one of these for the whole batch rather than a
+// second, parallel vocabulary.
+const DISTRIBUTION_MODES = ['ROUND_ROBIN', 'SELECTED_AGENTS', 'MOSHPIT', 'ALPHA_SPLIT', 'OFFICE_SPLIT'];
 
 // List leads — always server-side scoped to the caller's agency (never trust client agencyId).
 router.get('/', async (req, res, next) => {
@@ -182,6 +188,7 @@ async function createLeadRecord({ agencyId, source, createdById, data, importBat
         customFields: data.customFields || {},
         dob: data.dob ? new Date(data.dob) : null,
         isLiveTransfer: !!data.isLiveTransfer,
+        moshpitEligible: !!data.moshpitEligible,
         leadType: data.leadTypeOverride || deriveLeadType({ isLiveTransfer: !!data.isLiveTransfer }),
         importBatchId: importBatchId || null,
         ...intakeFields,
@@ -340,6 +347,25 @@ router.post('/bulk-import', uploadSpreadsheet.single('file'), async (req, res, n
     }
     const categoryFields = applyBulkUploadCategory(leadCategory);
 
+    // How this batch gets routed — same vocabulary/engine a vendor's
+    // real-time leads already use (lib/leadDistribution.js), just applied
+    // once per batch instead of once per vendor. Defaults to MOSHPIT
+    // (visible and claimable) rather than silently leaving every lead
+    // unassigned AND un-claimable, which is what every bulk upload did
+    // before this field existed.
+    const distributionMode = DISTRIBUTION_MODES.includes(req.body.distributionMode) ? req.body.distributionMode : 'MOSHPIT';
+    let selectedAgentIds = [];
+    if (distributionMode === 'SELECTED_AGENTS') {
+      try {
+        selectedAgentIds = JSON.parse(req.body.selectedAgentIds || '[]');
+      } catch {
+        return res.status(400).json({ success: false, error: 'VALIDATION', message: 'selectedAgentIds must be a JSON array of user ids.' });
+      }
+      if (!Array.isArray(selectedAgentIds) || selectedAgentIds.length === 0) {
+        return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Pick at least one producer for "Specific producers."' });
+      }
+    }
+
     let agencyId;
     if (req.user.role === 'PLATFORM_OWNER') {
       agencyId = req.body.agencyId;
@@ -371,11 +397,32 @@ router.post('/bulk-import', uploadSpreadsheet.single('file'), async (req, res, n
 
     let created = 0;
     const failures = parsedFile.skipped.map((s) => ({ row: s.row, reason: s.reason }));
+    // A plain in-memory counter, not a persisted/atomic cursor — safe here
+    // because this one request processes every row sequentially in a
+    // single process (see resolveManualAssignment's own doc comment for
+    // why that's the real distinction from the vendor webhook path).
+    let cursor = 0;
+    const assignedCounts = new Map(); // producerId -> count, for ONE aggregate notification each, not one per lead.
+    let moshpitCount = 0;
 
     for (const row of parsedFile.leads) {
       try {
-        const result = await createLeadRecord({ agencyId, source: categoryFields.sourceOverride || 'bulk_upload', createdById: req.user.id, data: { ...row, ...categoryFields }, importBatchId: batch.id });
+        const assignment = await resolveManualAssignment(prisma, { agencyId, mode: distributionMode, selectedAgentIds, cursor, lastName: row.lastName });
+        cursor = assignment.nextCursor;
+
+        const result = await createLeadRecord({
+          agencyId,
+          source: categoryFields.sourceOverride || 'bulk_upload',
+          createdById: req.user.id,
+          data: { ...row, ...categoryFields, assignedToId: assignment.assignedToId, moshpitEligible: assignment.mode === 'MOSHPIT' },
+          importBatchId: batch.id,
+        });
         created += 1;
+        if (assignment.assignedToId) {
+          assignedCounts.set(assignment.assignedToId, (assignedCounts.get(assignment.assignedToId) || 0) + 1);
+        } else {
+          moshpitCount += 1;
+        }
         await recordAudit({
           actorId: req.user.id,
           actorRole: req.user.role,
@@ -393,6 +440,41 @@ router.post('/bulk-import', uploadSpreadsheet.single('file'), async (req, res, n
 
     await prisma.leadImportBatch.update({ where: { id: batch.id }, data: { created, skipped: failures.length } });
 
+    // One notification per affected producer/agency for the whole batch —
+    // never one per lead, which would flood a producer's notification feed
+    // on a large import (mirrors vendorApi.js's per-lead version, scaled up
+    // to per-batch since this route creates many leads in one request).
+    const categoryLabel = leadCategory.replace(/_/g, ' ').toLowerCase();
+    await Promise.all(
+      [...assignedCounts.entries()].map(([producerId, count]) =>
+        notifyUser({
+          userId: producerId,
+          agencyId,
+          type: 'lead.assigned',
+          severity: 'INFO',
+          title: count === 1 ? 'New lead assigned to you' : `${count} new leads assigned to you`,
+          body: `From a ${categoryLabel} list upload.`,
+          relatedEntityType: 'LeadImportBatch',
+          relatedEntityId: batch.id,
+        })
+      )
+    );
+    if (moshpitCount > 0) {
+      const eligibleProducers = await prisma.user.findMany({
+        where: { agencyId, role: 'PRODUCER', status: 'ACTIVE' },
+        select: { id: true },
+      });
+      await notifyUsers(eligibleProducers.map((u) => u.id), {
+        agencyId,
+        type: 'lead.moshpit_available',
+        severity: 'INFO',
+        title: moshpitCount === 1 ? 'New Moshpit lead available' : `${moshpitCount} new Moshpit leads available`,
+        body: `From a ${categoryLabel} list upload. First to claim it gets it.`,
+        relatedEntityType: 'LeadImportBatch',
+        relatedEntityId: batch.id,
+      });
+    }
+
     return res.json({
       success: true,
       batchId: batch.id,
@@ -401,6 +483,9 @@ router.post('/bulk-import', uploadSpreadsheet.single('file'), async (req, res, n
       created,
       skipped: failures.length,
       failures: failures.slice(0, 50),
+      distributionMode,
+      assigned: created - moshpitCount,
+      sentToMoshpit: moshpitCount,
     });
   } catch (err) {
     next(err);
@@ -615,7 +700,7 @@ router.get('/moshpit', async (req, res, next) => {
       where: {
         assignedToId: null,
         archivedAt: null,
-        OR: [{ vendor: { distributionMode: 'MOSHPIT' } }, { isLiveTransfer: true }],
+        OR: [{ vendor: { distributionMode: 'MOSHPIT' } }, { isLiveTransfer: true }, { moshpitEligible: true }],
         ...(agencyId ? { agencyId } : {}),
       },
       include: {
@@ -654,7 +739,7 @@ router.get('/snapshot', async (req, res, next) => {
       prisma.lead.count({ where: { ...baseWhere, firstAttemptAt: null } }),
       prisma.lead.count({ where: { ...baseWhere, status: { in: ['QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'] } } }),
       prisma.lead.count({ where: { ...baseWhere, status: 'SOLD' } }),
-      prisma.lead.count({ where: { ...baseWhere, assignedToId: null, OR: [{ vendor: { distributionMode: 'MOSHPIT' } }, { isLiveTransfer: true }] } }),
+      prisma.lead.count({ where: { ...baseWhere, assignedToId: null, OR: [{ vendor: { distributionMode: 'MOSHPIT' } }, { isLiveTransfer: true }, { moshpitEligible: true }] } }),
     ]);
 
     return res.json({
@@ -752,7 +837,7 @@ router.post('/:leadId/claim', async (req, res, next) => {
     if (lead.agencyId !== req.user.agencyId) {
       return res.status(403).json({ success: false, error: 'FORBIDDEN' });
     }
-    if (!lead.isLiveTransfer && (!lead.vendor || lead.vendor.distributionMode !== 'MOSHPIT')) {
+    if (!lead.isLiveTransfer && !lead.moshpitEligible && (!lead.vendor || lead.vendor.distributionMode !== 'MOSHPIT')) {
       return res.status(400).json({ success: false, error: 'NOT_CLAIMABLE', message: 'This lead is not in the Moshpit.' });
     }
 
@@ -818,8 +903,8 @@ function authorizeLeadAccess(req, lead, { write = false } = {}) {
   }
   if (req.user.role === 'PRODUCER') {
     if (lead.assignedToId === req.user.id) return { ok: true };
-    const moshpitEligible = lead.isLiveTransfer || lead.vendor?.distributionMode === 'MOSHPIT';
-    if (!write && lead.assignedToId === null && moshpitEligible) return { ok: true };
+    const isMoshpitEligible = lead.isLiveTransfer || lead.moshpitEligible || lead.vendor?.distributionMode === 'MOSHPIT';
+    if (!write && lead.assignedToId === null && isMoshpitEligible) return { ok: true };
     return { ok: false, status: 403, error: 'FORBIDDEN' };
   }
   return { ok: true };
