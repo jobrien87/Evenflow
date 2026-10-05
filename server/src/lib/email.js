@@ -32,10 +32,21 @@ function getTransporter() {
       // problem), Node can pick the unreachable IPv6 address first. Forcing
       // IPv4 avoids that entirely.
       family: 4,
-      // Nodemailer's defaults (2min connect / 10min socket) would leave an
-      // API request hanging far too long if SMTP egress is ever blocked or
-      // Gmail is slow to respond — fail fast into the honest FAILED status
-      // instead.
+      // Reuse a small pool of authenticated SMTP connections instead of a
+      // fresh handshake per email — fewer handshakes means fewer chances
+      // for an unfamiliar-IP greeting delay or transient connect failure
+      // to hit any single send, and bulk invites (invite-bulk loops one
+      // send per row) stop paying a full connect+auth round trip each time.
+      pool: true,
+      maxConnections: 3,
+      maxMessages: 100,
+      // Unchanged from the already-proven-working baseline — confirmed
+      // production failures here were a silently-dropped port (fixed by
+      // switching to 587) and an unroutable IPv6 address (fixed by
+      // family: 4), not a slow-but-eventually-successful handshake, so
+      // there's no evidence a longer timeout helps. Left short and
+      // deliberately so a genuinely stuck connection fails fast into a
+      // retry (below) rather than holding the invite request open.
       connectionTimeout: 8000,
       greetingTimeout: 8000,
       socketTimeout: 8000,
@@ -48,13 +59,38 @@ function isConfigured() {
   return !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD);
 }
 
+// Errors nodemailer/SMTP tag as permanent — retrying them wastes the
+// retry budget on something that will never succeed (bad credentials,
+// a rejected envelope/recipient). Everything else (timeouts, transient
+// connection resets, a slow/unfamiliar-IP greeting) is worth one retry.
+// Every invite/reset route awaits this synchronously before responding
+// to the HTTP request, so this is deliberately ONE retry, not several —
+// worst case (both attempts time out) is ~17s, not a request left
+// hanging for the better part of a minute.
+const NON_RETRYABLE_CODES = new Set(['EAUTH', 'EENVELOPE']);
+const MAX_SEND_ATTEMPTS = 2;
+const RETRY_DELAY_MS = [1200];
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function sendEmail({ to, subject, html }) {
-  await getTransporter().sendMail({
-    from: `"${EMAIL_FROM_NAME}" <${process.env.GMAIL_USER}>`,
-    to,
-    subject,
-    html,
-  });
+  const mail = { from: `"${EMAIL_FROM_NAME}" <${process.env.GMAIL_USER}>`, to, subject, html };
+  let lastErr;
+  for (let attempt = 1; attempt <= MAX_SEND_ATTEMPTS; attempt++) {
+    try {
+      await getTransporter().sendMail(mail);
+      return;
+    } catch (err) {
+      lastErr = err;
+      const retryable = !NON_RETRYABLE_CODES.has(err.code);
+      if (!retryable || attempt === MAX_SEND_ATTEMPTS) break;
+      console.warn(`[email:RETRY] attempt ${attempt} failed (${err.code || err.message}), retrying…`);
+      await sleep(RETRY_DELAY_MS[attempt - 1]);
+    }
+  }
+  throw lastErr;
 }
 
 async function sendInvitationEmail({ to, role, agencyName, token }) {
