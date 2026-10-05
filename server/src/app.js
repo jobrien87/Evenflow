@@ -40,6 +40,7 @@ const officeRoutes = require('./routes/offices');
 const recordStoreRoutes = require('./routes/recordStore');
 const breakRoomRoutes = require('./routes/breakRoom');
 const rosterRoutes = require('./routes/roster');
+const adminWipeRoutes = require('./routes/adminWipe');
 
 const app = express();
 
@@ -96,6 +97,8 @@ app.use('/api/roleplay', roleplayRoutes);
 app.use('/api/record-store', recordStoreRoutes);
 app.use('/api/roster', rosterRoutes);
 app.use('/api/break-room', breakRoomRoutes);
+// Temporary, secret-gated — see routes/adminWipe.js's own header comment.
+app.use('/api/admin', adminWipeRoutes);
 // Public, vendor-authenticated Direct POST API — versioned per spec.
 app.use('/api/v1', vendorApiRoutes);
 
