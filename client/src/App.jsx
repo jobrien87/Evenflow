@@ -24,6 +24,7 @@ import SalesStudioPanel from './pages/SalesStudioPanel';
 import BillboardPanel from './pages/BillboardPanel';
 import AgencyLeadsPanel from './pages/AgencyLeadsPanel';
 import VendorsPanel from './pages/VendorsPanel';
+import BackCatalogPanel from './pages/BackCatalogPanel';
 import FinancialsPanel from './pages/FinancialsPanel';
 import SupportPanel from './pages/SupportPanel';
 import AgencyBillingPanel from './pages/AgencyBillingPanel';
@@ -106,6 +107,7 @@ export default function App() {
           <Route path="agency/team-chat" element={<TeamChatPanel />} />
           <Route path="agency/moshpit" element={<MoshpitPanel />} />
           <Route path="agency/vendors" element={<VendorsPanel />} />
+          <Route path="agency/back-catalog" element={<BackCatalogPanel />} />
           <Route path="agency/support" element={<SupportPanel />} />
           <Route path="agency/coaching" element={<RedirectToSalesStudio tab="diagnostics" />} />
           <Route path="agency/roster-settings" element={<RosterSettingsPanel />} />

@@ -1,25 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../lib/api';
 import { FileDropzone } from '../ui';
-
-// Keep in sync with server/src/lib/leadType.js's BULK_UPLOAD_CATEGORIES —
-// what kind of list this is. Winback/Cross-Sell set the real leadType;
-// the product options set Lead.product for the whole batch (taking
-// precedence over whatever a CSV's own "product" column said, since the
-// person uploading is explicitly declaring what this list is).
-const CATEGORY_OPTIONS = [
-  { value: 'WINBACK', label: 'Winbacks' },
-  { value: 'CROSS_SELL', label: 'Cross-Sell' },
-  { value: 'REFERRAL', label: 'Referral' },
-  { value: 'INTERNET', label: 'Internet' },
-  { value: 'WALK_IN', label: 'Walk In' },
-  { value: 'AUTO', label: 'Auto' },
-  { value: 'HOME', label: 'Home' },
-  { value: 'COMMERCIAL', label: 'Commercial' },
-  { value: 'LIFE', label: 'Life' },
-  { value: 'HEALTH', label: 'Health' },
-  { value: 'UNKNOWN', label: 'Unknown' },
-];
+import { CATEGORY_OPTIONS } from '../lib/bulkUploadCategories';
 
 // Same vocabulary/engine a Vendor's real-time leads already route through
 // (server/src/lib/leadDistribution.js) — a bulk upload picks one mode for

@@ -207,7 +207,16 @@ async function createLeadRecord({ agencyId, source, createdById, data, importBat
         leadId: lead.id,
         type: duplicateOf ? 'lead.created.possible_duplicate' : 'lead.created',
         toStatus: updatedLead.status,
-        metadata: { source, priorityBand },
+        metadata: {
+          source,
+          priorityBand,
+          // Carries a ported-in historical row's own status/disposition
+          // text, if any (see leadBulkImport.js's externalStatus column) —
+          // provenance only, logged here rather than as a LeadNote so it
+          // never counts as "real work" against bulk-import undo's
+          // untouched-since-import check.
+          ...(data.externalStatus ? { externalStatus: data.externalStatus } : {}),
+        },
       },
     });
 
@@ -329,6 +338,80 @@ router.post('/', async (req, res, next) => {
 // agency, or Platform Owner on behalf of a given agency. Each parsed row
 // goes through the exact same createLeadRecord() transaction a manual
 // single-lead submission does — no second/thinner creation path.
+// Shared by POST /bulk-import (live, distribution-aware) and POST
+// /back-catalog-import (historical, always-unassigned) — parse once,
+// create one Lead per row via the same createLeadRecord transaction every
+// other intake path uses, track the batch so undo/history work the exact
+// same way regardless of which route created it. The two routes differ
+// only in how `assignRow` resolves each row's assignedToId/moshpitEligible
+// and in whether/how they notify afterward — never in the create path
+// itself.
+async function importLeadsFromFile({ fileBuffer, agencyId, uploaderId, actorRole, leadCategory, categoryFields, sourceOverride, sourceSystem, assignRow, correlationId }) {
+  const parsedFile = parseLeadFile(fileBuffer);
+  if (parsedFile.error) {
+    return { error: parsedFile.error, message: parsedFile.message };
+  }
+  if (parsedFile.leads.length === 0) {
+    return { error: 'NO_VALID_ROWS', message: 'No rows had a usable name column.', skipped: parsedFile.skipped };
+  }
+
+  // Created up front (before the per-row loop) so every Lead this upload
+  // creates can carry its id — that's what POST /import-batches/:id/undo
+  // later uses to find and reverse exactly this batch, and only this one.
+  const batch = await prisma.leadImportBatch.create({
+    data: { agencyId, uploadedById: uploaderId, leadCategory, totalRows: parsedFile.totalRows, created: 0, skipped: 0, sourceSystem: sourceSystem || null },
+  });
+
+  let created = 0;
+  const failures = parsedFile.skipped.map((s) => ({ row: s.row, reason: s.reason }));
+  // A plain in-memory counter, not a persisted/atomic cursor — safe here
+  // because this one request processes every row sequentially in a
+  // single process (see resolveManualAssignment's own doc comment for
+  // why that's the real distinction from the vendor webhook path).
+  let cursor = 0;
+  const assignedCounts = new Map(); // producerId -> count, for ONE aggregate notification each, not one per lead.
+  let moshpitCount = 0;
+  const createdLeads = [];
+
+  for (const row of parsedFile.leads) {
+    try {
+      const assignment = await assignRow(row, cursor);
+      cursor = assignment.nextCursor;
+
+      const result = await createLeadRecord({
+        agencyId,
+        source: sourceOverride,
+        createdById: uploaderId,
+        data: { ...row, ...categoryFields, assignedToId: assignment.assignedToId, moshpitEligible: assignment.moshpitEligible },
+        importBatchId: batch.id,
+      });
+      created += 1;
+      createdLeads.push({ lead: result.lead, row });
+      if (assignment.assignedToId) {
+        assignedCounts.set(assignment.assignedToId, (assignedCounts.get(assignment.assignedToId) || 0) + 1);
+      } else if (assignment.moshpitEligible) {
+        moshpitCount += 1;
+      }
+      await recordAudit({
+        actorId: uploaderId,
+        actorRole,
+        agencyId,
+        action: 'lead.created',
+        entityType: 'Lead',
+        entityId: result.lead.id,
+        after: result.lead,
+        correlationId,
+      });
+    } catch (err) {
+      failures.push({ row: row._sourceRow, reason: err.message || 'Failed to create this row.' });
+    }
+  }
+
+  await prisma.leadImportBatch.update({ where: { id: batch.id }, data: { created, skipped: failures.length } });
+
+  return { batch, parsedFile, created, failures, assignedCounts, moshpitCount, createdLeads };
+}
+
 router.post('/bulk-import', uploadSpreadsheet.single('file'), async (req, res, next) => {
   try {
     if (!['AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'].includes(req.user.role)) {
@@ -375,70 +458,24 @@ router.post('/bulk-import', uploadSpreadsheet.single('file'), async (req, res, n
     }
     if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
 
-    const parsedFile = parseLeadFile(req.file.buffer);
-    if (parsedFile.error) {
-      return res.status(400).json({ success: false, error: parsedFile.error, message: parsedFile.message });
-    }
-    if (parsedFile.leads.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'NO_VALID_ROWS',
-        message: 'No rows had a usable name column.',
-        skipped: parsedFile.skipped,
-      });
-    }
-
-    // Created up front (before the per-row loop) so every Lead this upload
-    // creates can carry its id — that's what POST /import-batches/:id/undo
-    // later uses to find and reverse exactly this batch, and only this one.
-    const batch = await prisma.leadImportBatch.create({
-      data: { agencyId, uploadedById: req.user.id, leadCategory, totalRows: parsedFile.totalRows, created: 0, skipped: 0 },
-    });
-
-    let created = 0;
-    const failures = parsedFile.skipped.map((s) => ({ row: s.row, reason: s.reason }));
-    // A plain in-memory counter, not a persisted/atomic cursor — safe here
-    // because this one request processes every row sequentially in a
-    // single process (see resolveManualAssignment's own doc comment for
-    // why that's the real distinction from the vendor webhook path).
-    let cursor = 0;
-    const assignedCounts = new Map(); // producerId -> count, for ONE aggregate notification each, not one per lead.
-    let moshpitCount = 0;
-
-    for (const row of parsedFile.leads) {
-      try {
+    const outcome = await importLeadsFromFile({
+      fileBuffer: req.file.buffer,
+      agencyId,
+      uploaderId: req.user.id,
+      actorRole: req.user.role,
+      leadCategory,
+      categoryFields,
+      sourceOverride: categoryFields.sourceOverride || 'bulk_upload',
+      correlationId: req.correlationId,
+      assignRow: async (row, cursor) => {
         const assignment = await resolveManualAssignment(prisma, { agencyId, mode: distributionMode, selectedAgentIds, cursor, lastName: row.lastName });
-        cursor = assignment.nextCursor;
-
-        const result = await createLeadRecord({
-          agencyId,
-          source: categoryFields.sourceOverride || 'bulk_upload',
-          createdById: req.user.id,
-          data: { ...row, ...categoryFields, assignedToId: assignment.assignedToId, moshpitEligible: assignment.mode === 'MOSHPIT' },
-          importBatchId: batch.id,
-        });
-        created += 1;
-        if (assignment.assignedToId) {
-          assignedCounts.set(assignment.assignedToId, (assignedCounts.get(assignment.assignedToId) || 0) + 1);
-        } else {
-          moshpitCount += 1;
-        }
-        await recordAudit({
-          actorId: req.user.id,
-          actorRole: req.user.role,
-          agencyId,
-          action: 'lead.created',
-          entityType: 'Lead',
-          entityId: result.lead.id,
-          after: result.lead,
-          correlationId: req.correlationId,
-        });
-      } catch (err) {
-        failures.push({ row: row._sourceRow, reason: err.message || 'Failed to create this row.' });
-      }
+        return { assignedToId: assignment.assignedToId, moshpitEligible: assignment.mode === 'MOSHPIT', nextCursor: assignment.nextCursor };
+      },
+    });
+    if (outcome.error) {
+      return res.status(outcome.error === 'NO_VALID_ROWS' ? 400 : 400).json({ success: false, error: outcome.error, message: outcome.message, skipped: outcome.skipped });
     }
-
-    await prisma.leadImportBatch.update({ where: { id: batch.id }, data: { created, skipped: failures.length } });
+    const { batch, parsedFile, created, failures, assignedCounts, moshpitCount } = outcome;
 
     // One notification per affected producer/agency for the whole batch —
     // never one per lead, which would flood a producer's notification feed
@@ -492,6 +529,79 @@ router.post('/bulk-import', uploadSpreadsheet.single('file'), async (req, res, n
   }
 });
 
+// External systems a "Back Catalog" historical import can be labeled as
+// having come from — purely a tag on the LeadImportBatch for the history
+// list; the parsing/creation path is identical regardless of which one is
+// picked (see leadBulkImport.js's own fuzzy column matching).
+const BACK_CATALOG_SYSTEMS = ['PERFORMOLOGY', 'AGENCYZOOM', 'RICOCHET', 'OTHER'];
+
+// Historical data port-in — Performology/AgencyZoom/Ricochet/other legacy
+// system exports. Deliberately simpler than /bulk-import: always lands
+// unassigned and NOT Moshpit-eligible (this is backfill, not a live lead
+// that should ping a producer or show up in the claim pool), and never
+// sends a notification. A source file's own status/disposition column (if
+// any) is folded into a LeadNote rather than trusted as Lead.status —
+// "SOLD" has real revenue side effects elsewhere that must never be
+// fabricated from an unverified historical import.
+router.post('/back-catalog-import', uploadSpreadsheet.single('file'), async (req, res, next) => {
+  try {
+    if (!['AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'].includes(req.user.role)) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Expected a multipart field named "file".' });
+    }
+    const sourceSystem = req.body.sourceSystem;
+    if (!BACK_CATALOG_SYSTEMS.includes(sourceSystem)) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Choose which system this data is coming from.' });
+    }
+    const leadCategory = req.body.leadCategory;
+    if (!leadCategory || !Object.keys(BULK_UPLOAD_CATEGORIES).includes(leadCategory)) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Choose what kind of leads this list is before uploading.' });
+    }
+    const categoryFields = applyBulkUploadCategory(leadCategory);
+
+    let agencyId;
+    if (req.user.role === 'PLATFORM_OWNER') {
+      agencyId = req.body.agencyId;
+      if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+    } else {
+      agencyId = req.user.agencyId;
+    }
+    if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+
+    const outcome = await importLeadsFromFile({
+      fileBuffer: req.file.buffer,
+      agencyId,
+      uploaderId: req.user.id,
+      actorRole: req.user.role,
+      leadCategory,
+      categoryFields,
+      sourceOverride: `backcatalog_${sourceSystem.toLowerCase()}`,
+      sourceSystem,
+      correlationId: req.correlationId,
+      assignRow: async (_row, cursor) => ({ assignedToId: null, moshpitEligible: false, nextCursor: cursor }),
+    });
+    if (outcome.error) {
+      return res.status(400).json({ success: false, error: outcome.error, message: outcome.message, skipped: outcome.skipped });
+    }
+    const { batch, parsedFile, created, failures } = outcome;
+
+    return res.json({
+      success: true,
+      batchId: batch.id,
+      sourceSystem,
+      totalRows: parsedFile.totalRows,
+      truncated: parsedFile.truncated,
+      created,
+      skipped: failures.length,
+      failures: failures.slice(0, 50),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Undo window — a batch older than this can no longer be undone in one
 // click (matches staleLeadReminders.js's own "a few business hours" scale
 // for what counts as still-fresh activity on a lead).
@@ -526,8 +636,14 @@ router.get('/import-batches', async (req, res, next) => {
     const agencyId = req.user.role === 'PLATFORM_OWNER' ? req.query.agencyId : req.user.agencyId;
     if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
 
+    // Two separate history lists share this one route: the ordinary live
+    // bulk-upload flow (sourceSystem null) and the Back Catalog tab's
+    // historical-system imports (sourceSystem set) — kept apart so neither
+    // list's UI has to explain the other's rows.
+    const sourceSystemFilter = req.query.kind === 'back_catalog' ? { not: null } : null;
+
     const batches = await prisma.leadImportBatch.findMany({
-      where: { agencyId },
+      where: { agencyId, sourceSystem: sourceSystemFilter },
       include: {
         uploadedBy: { select: { id: true, firstName: true, lastName: true } },
         leads: {
@@ -547,7 +663,7 @@ router.get('/import-batches', async (req, res, next) => {
         const activeLeads = b.leads.filter((l) => !l.archivedAt);
         const undoable = activeLeads.filter(leadIsUntouchedSinceImport).length;
         return {
-          id: b.id, leadCategory: b.leadCategory, totalRows: b.totalRows, created: b.created, skipped: b.skipped,
+          id: b.id, leadCategory: b.leadCategory, sourceSystem: b.sourceSystem, totalRows: b.totalRows, created: b.created, skipped: b.skipped,
           createdAt: b.createdAt, uploadedBy: b.uploadedBy, undoneAt: b.undoneAt,
           withinUndoWindow: Date.now() - new Date(b.createdAt).getTime() < IMPORT_UNDO_WINDOW_MS,
           undoableCount: undoable, totalActive: activeLeads.length,

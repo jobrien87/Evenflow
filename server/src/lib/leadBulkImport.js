@@ -38,6 +38,15 @@ const HEADER_SYNONYMS = {
   yearsWithCarrier: ['yearswithcarrier', 'yearswithcurrentcarrier', 'tenure'],
   callbackTime: ['callbacktime', 'besttimetocall', 'preferredcalltime'],
   tmNotes: ['notes', 'comments', 'note'],
+  // Captured for context only — never written to Lead.status (named
+  // distinctly to avoid any confusion with that field). A ported-in
+  // historical export's own status/disposition text (e.g. "Active",
+  // "Lapsed", "Sold") has real business meaning in its SOURCE system but
+  // isn't verified against this app's own LeadStatus enum or side effects
+  // (a stray "Sold" here must never fabricate a RevenueEvent), so callers
+  // that care record it as creation-event metadata instead of trusting it
+  // as live status.
+  externalStatus: ['status', 'disposition', 'policystatus', 'leadstatus', 'stage'],
 };
 
 const MAX_ROWS = 5000;
@@ -143,6 +152,7 @@ function parseLeadFile(buffer) {
       yearsWithCarrier: get('yearsWithCarrier'),
       callbackTime: get('callbackTime'),
       tmNotes: get('tmNotes'),
+      externalStatus: get('externalStatus'),
     });
   });
 

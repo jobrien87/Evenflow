@@ -75,7 +75,11 @@ function csvFile(rows) {
   const body = rows
     .map((r) => {
       const i = rowSeq++;
-      return `${r.firstName},${r.lastName},555000${1000 + i},test${suffix}${i}@example.com`;
+      // suffix must be in the phone too (not just the email) — a phone
+      // that's only unique within one process run collides on a repeat run
+      // with a leftover Customer row from an earlier run, silently tripping
+      // createLeadRecord's global duplicate-customer detection.
+      return `${r.firstName},${r.lastName},555${suffix}${i},test${suffix}${i}@example.com`;
     })
     .join('\n');
   return new Blob([header + body], { type: 'text/csv' });

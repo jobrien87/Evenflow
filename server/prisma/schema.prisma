@@ -757,6 +757,13 @@ model LeadImportBatch {
   undoneById   String?
   undoneBy     User?     @relation("LeadImportBatchUndoneBy", fields: [undoneById], references: [id])
 
+  // Set only for a batch created via POST /leads/back-catalog-import —
+  // which external system this historical data was ported from. Null for
+  // every ordinary live bulk-upload batch, so the Back Catalog tab's own
+  // history list can filter to just its own imports (sourceSystem not
+  // null) without mixing with the unrelated lead-list upload flow.
+  sourceSystem String?
+
   leads Lead[]
 
   @@index([agencyId])

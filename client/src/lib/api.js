@@ -87,6 +87,26 @@ export const api = {
   leadImportBatches: (params = '') => request(`/leads/import-batches${params}`),
   undoLeadImport: (batchId) => request(`/leads/import-batches/${batchId}/undo`, { method: 'POST' }),
 
+  // Back Catalog — historical data port-in from an external system
+  // (Performology/AgencyZoom/Ricochet/other). Same bypass-request() shape
+  // as bulkImportLeads, just a different endpoint/field set.
+  backCatalogImport: async (file, agencyId, sourceSystem, leadCategory) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (agencyId) formData.append('agencyId', agencyId);
+    formData.append('sourceSystem', sourceSystem);
+    formData.append('leadCategory', leadCategory);
+    const res = await fetch(`${BASE}/leads/back-catalog-import`, { method: 'POST', credentials: 'include', body: formData });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(data.message || data.error || 'Upload failed');
+      err.data = data;
+      err.status = res.status;
+      throw err;
+    }
+    return data;
+  },
+
   agencies: (params = '') => request(`/agencies${params}`),
   createAgency: (payload) => request('/agencies', { method: 'POST', body: payload }),
   resendAgencyInvite: (agencyId) => request(`/agencies/${agencyId}/resend-invite`, { method: 'POST' }),

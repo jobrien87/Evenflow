@@ -45,6 +45,7 @@ export const NAV_BY_ROLE = {
     { label: 'Record Store', to: '/agency/record-store', icon: 'vinyl', dataTour: 'nav-record-store' },
     { label: 'Vendors', to: '/agency/vendors', icon: 'vendor', dataTour: 'nav-vendors' },
     { label: 'Financials', to: '/agency/financials', icon: 'dollar', dataTour: 'nav-financials', excludeRoles: ['AGENCY_MANAGER'] },
+    { label: 'Back Catalog', to: '/agency/back-catalog', icon: 'archive', secondary: true, dataTour: 'nav-back-catalog' },
     { label: 'Roster Settings', to: '/agency/roster-settings', icon: 'handshake', secondary: true, dataTour: 'nav-roster-settings' },
     { label: 'Billing', to: '/agency/billing', icon: 'card', secondary: true, dataTour: 'nav-billing' },
     { label: 'Support', to: '/agency/support', icon: 'support', secondary: true, dataTour: 'nav-support' },
