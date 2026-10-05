@@ -29,6 +29,7 @@ export default function BreakRoomPanel() {
   const [startingBreak, setStartingBreak] = useState(false);
   const [jokeOpen, setJokeOpen] = useState(false);
   const [leaderboardGame, setLeaderboardGame] = useState(null);
+  const [achievementsOpen, setAchievementsOpen] = useState(false);
 
   useEffect(() => {
     load();
@@ -122,6 +123,12 @@ export default function BreakRoomPanel() {
             <div style={s.cabinetBlurb}>See who's dominating the arcade this week.</div>
             <Button variant="secondary" style={{ marginTop: 10, width: '100%' }}>VIEW</Button>
           </Card>
+
+          <Card variant="interactive" style={s.cabinet} onClick={() => setAchievementsOpen(true)}>
+            <div style={s.cabinetTitle}>ACHIEVEMENTS</div>
+            <div style={s.cabinetBlurb}>Trophies waiting to be unlocked across every game.</div>
+            <Button variant="secondary" style={{ marginTop: 10, width: '100%' }}>VIEW</Button>
+          </Card>
         </div>
       </div>
 
@@ -131,6 +138,7 @@ export default function BreakRoomPanel() {
 
       {jokeOpen && <JokeModal onClose={() => setJokeOpen(false)} />}
       {leaderboardGame && <LeaderboardModal gameType={leaderboardGame} onChangeGame={setLeaderboardGame} onClose={() => setLeaderboardGame(null)} />}
+      {achievementsOpen && <AchievementsModal onClose={() => setAchievementsOpen(false)} />}
     </div>
   );
 }
@@ -170,6 +178,46 @@ function JokeModal({ onClose }) {
         {loading ? 'Thinking of one…' : error ? error : joke?.text}
       </div>
       <Button variant="primary" style={{ marginTop: 16, width: '100%' }} disabled={loading} onClick={fetchJoke}>ANOTHER ONE</Button>
+    </Modal>
+  );
+}
+
+function AchievementsModal({ onClose }) {
+  const [achievements, setAchievements] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    api.breakRoomAchievements()
+      .then((data) => setAchievements(data.achievements))
+      .catch((err) => setError(err.data?.message || 'Could not load achievements.'));
+  }, []);
+
+  const byGame = {};
+  for (const a of achievements || []) {
+    (byGame[a.gameType] = byGame[a.gameType] || []).push(a);
+  }
+
+  return (
+    <Modal title="ACHIEVEMENTS" onClose={onClose} maxWidth={520}>
+      {error && <div style={s.errorBox}>{error}</div>}
+      {!achievements ? (
+        <div style={s.muted}>Loading…</div>
+      ) : (
+        Object.entries(byGame).map(([gameType, defs]) => (
+          <div key={gameType} style={{ marginBottom: 18 }}>
+            <div style={s.achGameLabel}>{GAME_LABELS[gameType]}</div>
+            {defs.map((d) => (
+              <div key={d.key} style={s.achRow(d.unlocked)}>
+                <span style={s.achIcon}>{d.unlocked ? '🏆' : '🔒'}</span>
+                <div>
+                  <div style={s.achTitle(d.unlocked)}>{d.label}</div>
+                  <div style={s.achDesc}>{d.description}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ))
+      )}
     </Modal>
   );
 }
@@ -283,4 +331,9 @@ const s = {
   lbName: { flex: 1, color: 'var(--text-primary)', fontSize: 13, fontWeight: 600 },
   lbScore: { color: 'var(--accent)', fontWeight: 800, fontSize: 13 },
   myBestLine: { marginTop: 14, textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 },
+  achGameLabel: { fontSize: 11, fontWeight: 800, letterSpacing: 1, color: 'var(--text-secondary)', marginBottom: 8, textTransform: 'uppercase' },
+  achRow: (unlocked) => ({ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '8px 0', opacity: unlocked ? 1 : 0.55 }),
+  achIcon: { fontSize: 18, width: 24, textAlign: 'center', flexShrink: 0 },
+  achTitle: (unlocked) => ({ fontSize: 13, fontWeight: 700, color: unlocked ? 'var(--text-primary)' : 'var(--text-muted)' }),
+  achDesc: { fontSize: 11, color: 'var(--text-muted)', marginTop: 1 },
 };
