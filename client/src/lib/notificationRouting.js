@@ -60,14 +60,14 @@ export function notificationTarget(notification, role) {
       return { path: base, highlightId: null, openChat: false };
 
     case 'TrainingAssignment':
-      // /agency/training and /platform/training are the course ADMIN view,
-      // not an assignee's "my training" view — only Producers have a real
-      // assignee-facing training route today.
-      if (role === 'PRODUCER') return { path: '/producer/training', highlightId: id, openChat: false };
+      // Sales Studio's Training tab is the course ADMIN view for Owner/
+      // Manager/Platform Owner, not an assignee's "my training" view —
+      // only Producers have a real assignee-facing training tab today.
+      if (role === 'PRODUCER') return { path: '/producer/sales-studio?tab=training', highlightId: id, openChat: false };
       return { path: base, highlightId: null, openChat: false };
 
     case 'Call':
-      if (role === 'PRODUCER') return { path: '/producer/coaching', highlightId: id, openChat: false };
+      if (role === 'PRODUCER') return { path: '/producer/sales-studio?tab=diagnostics', highlightId: id, openChat: false };
       if (role === 'AGENCY_OWNER' || role === 'AGENCY_MANAGER') return { path: '/agency/sales-studio?tab=diagnostics', highlightId: id, openChat: false };
       return { path: base, highlightId: null, openChat: false };
 

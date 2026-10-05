@@ -8,8 +8,6 @@ import AcceptInvitation from './pages/AcceptInvitation';
 import ResetPassword from './pages/ResetPassword';
 
 import ProducerDashboard from './pages/ProducerDashboard';
-import CallsPanel from './pages/CallsPanel';
-import TrainingPanel from './pages/TrainingPanel';
 import DrillLibraryPanel from './pages/DrillLibraryPanel';
 import DrillDetailPage from './pages/DrillDetailPage';
 import TasksPanel from './pages/TasksPanel';
@@ -28,7 +26,6 @@ import VendorsPanel from './pages/VendorsPanel';
 import FinancialsPanel from './pages/FinancialsPanel';
 import SupportPanel from './pages/SupportPanel';
 import AgencyBillingPanel from './pages/AgencyBillingPanel';
-import CoursesAdminPanel from './pages/CoursesAdminPanel';
 import GoalsPanel from './pages/GoalsPanel';
 import RosterSettingsPanel from './pages/RosterSettingsPanel';
 import RecordStorePanel from './pages/RecordStorePanel';
@@ -54,15 +51,18 @@ function RoleRedirect() {
   return <Navigate to={basePathForRole(user?.role)} replace />;
 }
 
-// Call Diagnostics (formerly its own "Coaching" tab) now lives inside
-// Sales Studio — this keeps any stale bookmark/notification link to the
-// old path working, carrying the `highlight` query param (a call id)
-// straight through so the Call Diagnostics tab still opens on it.
-function RedirectToSalesStudioDiagnostics() {
+// Drills, Call Coaching, and Training all live inside Sales Studio now,
+// per role — this keeps any stale bookmark/notification link to one of
+// their old standalone paths working, carrying the `highlight` query
+// param (a call id or training assignment id) straight through so the
+// right Sales Studio tab opens on the right item.
+function RedirectToSalesStudio({ tab }) {
+  const { user } = useAuth();
   const location = useLocation();
+  const base = basePathForRole(user?.role);
   const params = new URLSearchParams(location.search);
-  params.set('tab', 'diagnostics');
-  return <Navigate to={`/agency/sales-studio?${params.toString()}`} replace />;
+  params.set('tab', tab);
+  return <Navigate to={`${base}/sales-studio?${params.toString()}`} replace />;
 }
 
 export default function App() {
@@ -78,12 +78,13 @@ export default function App() {
 
         <Route element={<RoleGate allow={['PRODUCER']} />}>
           <Route path="producer" element={<ProducerDashboard />} />
-          <Route path="producer/drills" element={<DrillLibraryPanel />} />
+          <Route path="producer/sales-studio" element={<SalesStudioPanel />} />
+          <Route path="producer/drills" element={<RedirectToSalesStudio tab="drills" />} />
           <Route path="producer/drills/:courseId/:lessonId" element={<DrillDetailPage />} />
           <Route path="producer/tasks" element={<TasksPanel />} />
           <Route path="producer/team-chat" element={<TeamChatPanel />} />
-          <Route path="producer/coaching" element={<CallsPanel />} />
-          <Route path="producer/training" element={<TrainingPanel />} />
+          <Route path="producer/coaching" element={<RedirectToSalesStudio tab="diagnostics" />} />
+          <Route path="producer/training" element={<RedirectToSalesStudio tab="training" />} />
           <Route path="producer/opportunities" element={<OpportunitiesPanel />} />
           <Route path="producer/moshpit" element={<MoshpitPanel />} />
           <Route path="producer/my-leads" element={<MyLeadsPanel />} />
@@ -100,10 +101,10 @@ export default function App() {
           <Route path="agency/moshpit" element={<MoshpitPanel />} />
           <Route path="agency/vendors" element={<VendorsPanel />} />
           <Route path="agency/support" element={<SupportPanel />} />
-          <Route path="agency/coaching" element={<RedirectToSalesStudioDiagnostics />} />
+          <Route path="agency/coaching" element={<RedirectToSalesStudio tab="diagnostics" />} />
           <Route path="agency/roster-settings" element={<RosterSettingsPanel />} />
           <Route path="agency/billing" element={<AgencyBillingPanel />} />
-          <Route path="agency/training" element={<CoursesAdminPanel />} />
+          <Route path="agency/training" element={<RedirectToSalesStudio tab="training" />} />
           <Route path="agency/opportunities" element={<OpportunitiesPanel />} />
           <Route path="agency/leads" element={<AgencyLeadsPanel />} />
           <Route path="agency/goals" element={<GoalsPanel />} />
@@ -118,7 +119,8 @@ export default function App() {
 
         <Route element={<RoleGate allow={['PLATFORM_OWNER']} />}>
           <Route path="platform" element={<AgenciesPanel />} />
-          <Route path="platform/drills" element={<DrillLibraryPanel />} />
+          <Route path="platform/sales-studio" element={<SalesStudioPanel />} />
+          <Route path="platform/drills" element={<RedirectToSalesStudio tab="drills" />} />
           <Route path="platform/drills/:courseId/:lessonId" element={<DrillDetailPage />} />
           <Route path="platform/tasks" element={<TasksPanel />} />
           <Route path="platform/agencies/:agencyId" element={<AgencyDetailPage />} />
@@ -126,7 +128,7 @@ export default function App() {
           <Route path="platform/financials" element={<FinancialsPanel />} />
           <Route path="platform/support" element={<SupportPanel />} />
           <Route path="platform/billing" element={<BillingPanel />} />
-          <Route path="platform/training" element={<CoursesAdminPanel />} />
+          <Route path="platform/training" element={<RedirectToSalesStudio tab="training" />} />
           <Route path="platform/record-store" element={<RecordStoreAdminPanel />} />
         </Route>
 
