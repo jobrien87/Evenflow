@@ -2,6 +2,7 @@ const express = require('express');
 const { z } = require('zod');
 const { prisma } = require('../lib/db');
 const { requireAuth, requireRole, scopeAgencyId } = require('../middleware/auth');
+const { openEntryWhere, stateOf } = require('../lib/timeClockState');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -20,17 +21,6 @@ async function resolveAgencyId(req, requestedAgencyId) {
     return { agencyId: requestedAgencyId };
   }
   return { agencyId: req.user.agencyId };
-}
-
-function openEntryWhere(userId) {
-  return { userId, clockOutAt: null };
-}
-
-function stateOf(entry) {
-  if (!entry || entry.clockOutAt) return 'CLOCKED_OUT';
-  if (entry.lunchStartAt && !entry.lunchEndAt) return 'ON_LUNCH';
-  if (entry.breakStartAt && !entry.breakEndAt) return 'ON_BREAK';
-  return 'CLOCKED_IN';
 }
 
 // The one place a clock action's automatic presence-bubble side effect is

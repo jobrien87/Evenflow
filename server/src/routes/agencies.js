@@ -6,6 +6,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { sendInvitationEmail } = require('../lib/email');
 const { reissueInvitation } = require('../lib/invitations');
+const { resolveSettings } = require('../lib/breakRoom');
 
 const router = express.Router();
 
@@ -358,6 +359,9 @@ const entitlementsSchema = z.object({
   // requireSalesStudioAccess) — off bypasses the coachingEnabled unlock
   // entirely for this one agency.
   salesStudioGateEnabled: z.boolean().optional(),
+  // Break Room master on/off — reuses requireModuleEnabled('breakRoomEnabled')
+  // directly, zero new gating code needed.
+  breakRoomEnabled: z.boolean().optional(),
 });
 
 // A direct Platform-Owner override of module access, independent of
@@ -378,8 +382,62 @@ router.patch('/:agencyId/entitlements', requireRole('PLATFORM_OWNER'), async (re
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role, agencyId: before.id,
       action: 'agency.entitlements_overridden', entityType: 'Agency', entityId: before.id,
-      before: { crmEnabled: before.crmEnabled, transfersEnabled: before.transfersEnabled, coachingEnabled: before.coachingEnabled, salesStudioGateEnabled: before.salesStudioGateEnabled },
+      before: { crmEnabled: before.crmEnabled, transfersEnabled: before.transfersEnabled, coachingEnabled: before.coachingEnabled, salesStudioGateEnabled: before.salesStudioGateEnabled, breakRoomEnabled: before.breakRoomEnabled },
       after: parsed.data, correlationId: req.correlationId,
+    });
+
+    return res.json({ success: true, agency: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const breakRoomSettingsSchema = z.object({
+  games: z.object({
+    CONGO_LINE: z.boolean().optional(),
+    BUCKETS: z.boolean().optional(),
+    FULL_SEND: z.boolean().optional(),
+    PILL_POP: z.boolean().optional(),
+  }).optional(),
+  pickMeUpEnabled: z.boolean().optional(),
+  lunchEligible: z.boolean().optional(),
+  soundsEnabled: z.boolean().optional(),
+  achievementsEnabled: z.boolean().optional(),
+  leaderboardScope: z.object({
+    office: z.boolean().optional(),
+    agency: z.boolean().optional(),
+  }).optional(),
+}).nullable();
+
+// Owner/Manager can edit their own agency's Break Room config; Platform
+// Owner can edit any agency's — same authorization shape as the general
+// PATCH /:agencyId settings route above, just a narrower, Break-Room-only
+// body so this can't accidentally touch name/timezone/products.
+router.patch('/:agencyId/break-room-settings', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    if (req.user.role !== 'PLATFORM_OWNER' && req.user.agencyId !== req.params.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    const parsed = breakRoomSettingsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Please check the form and try again.', fieldErrors: parsed.error.flatten() });
+    }
+    const before = await prisma.agency.findUnique({ where: { id: req.params.agencyId } });
+    if (!before) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+
+    const current = resolveSettings(before.breakRoomSettings);
+    const merged = {
+      ...current,
+      ...parsed.data,
+      games: { ...current.games, ...(parsed.data.games || {}) },
+      leaderboardScope: { ...current.leaderboardScope, ...(parsed.data.leaderboardScope || {}) },
+    };
+    const updated = await prisma.agency.update({ where: { id: before.id }, data: { breakRoomSettings: merged } });
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: before.id,
+      action: 'agency.break_room_settings_updated', entityType: 'Agency', entityId: before.id,
+      before: before.breakRoomSettings, after: merged, correlationId: req.correlationId,
     });
 
     return res.json({ success: true, agency: updated });

@@ -38,6 +38,7 @@ const healthRoutes = require('./routes/health');
 const roleplayRoutes = require('./routes/roleplay');
 const officeRoutes = require('./routes/offices');
 const recordStoreRoutes = require('./routes/recordStore');
+const breakRoomRoutes = require('./routes/breakRoom');
 const rosterRoutes = require('./routes/roster');
 
 const app = express();
@@ -94,6 +95,7 @@ app.use('/api/running-report', runningReportRoutes);
 app.use('/api/roleplay', roleplayRoutes);
 app.use('/api/record-store', recordStoreRoutes);
 app.use('/api/roster', rosterRoutes);
+app.use('/api/break-room', breakRoomRoutes);
 // Public, vendor-authenticated Direct POST API — versioned per spec.
 app.use('/api/v1', vendorApiRoutes);
 

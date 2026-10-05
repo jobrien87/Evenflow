@@ -271,83 +271,87 @@ enum SubscriptionStatus {
 }
 
 model User {
-  id            String       @id @default(uuid())
-  email         String       @unique
-  passwordHash  String?
-  firstName     String
-  lastName      String
-  phone         String?
-  role          Role
-  status        UserStatus   @default(INVITED)
+  id                        String         @id @default(uuid())
+  email                     String         @unique
+  passwordHash              String?
+  firstName                 String
+  lastName                  String
+  phone                     String?
+  role                      Role
+  status                    UserStatus     @default(INVITED)
   // Live status bubble shown next to the time clock — see PresenceStatus.
-  presenceStatus PresenceStatus @default(AWAY)
-  agencyId      String?
-  agency        Agency?      @relation(fields: [agencyId], references: [id])
-  invitedById   String?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  deactivatedAt DateTime?
+  presenceStatus            PresenceStatus @default(AWAY)
+  agencyId                  String?
+  agency                    Agency?        @relation(fields: [agencyId], references: [id])
+  invitedById               String?
+  createdAt                 DateTime       @default(now())
+  updatedAt                 DateTime       @updatedAt
+  deactivatedAt             DateTime?
   // Set each time this user's Ed daily briefing is generated — computes the
   // next briefing's "what changed" deltas against this timestamp, and gates
   // showing it as the opening message to once per day.
-  lastBriefingAt DateTime?
+  lastBriefingAt            DateTime?
   // Set once the first-login product tour is dismissed (finished or
   // skipped) — null means "show it next time this user logs in."
-  tourCompletedAt DateTime?
+  tourCompletedAt           DateTime?
   // Per-account cosmetic personalization (Personalize page). The image
   // itself lives in lib/storage.js like a Call recording does — this
   // stores the storage key, never a public URL, and is served back only
   // through an authenticated GET route.
   backgroundImageStorageKey String?
   backgroundImageMimeType   String?
-  fallingEffect             FallingEffect @default(NONE)
+  fallingEffect             FallingEffect  @default(NONE)
   // Which physical office/branch this producer belongs to, for agencies
   // with more than one location — drives OFFICE_SPLIT lead distribution
   // and the roster's office grouping. Optional: an agency with one office
   // (or one that hasn't set any up) just leaves every producer unassigned.
-  officeId      String?
-  office        Office?      @relation(fields: [officeId], references: [id])
+  officeId                  String?
+  office                    Office?        @relation(fields: [officeId], references: [id])
   // Month/day used for a birthday celebration popup — the year is stored
   // but ignored everywhere it's read (isBirthdayToday only compares month
   // and day). Never required, never shown to anyone but the account owner
   // and their agency leadership.
-  birthday      DateTime?
+  birthday                  DateTime?
   // Set the first time this user's post-signup "welcome" celebration
   // (confetti) has been shown — mirrors tourCompletedAt's exact pattern,
   // just for a one-time celebratory moment instead of the product tour.
-  firstLoginCelebratedAt DateTime?
+  firstLoginCelebratedAt    DateTime?
 
-  invitations       Invitation[]     @relation("InvitationsSent")
-  ownInvitation     Invitation?      @relation("InvitationForUser")
-  assignedLeads     Lead[]           @relation("AssignedProducer")
-  createdLeads      Lead[]           @relation("LeadCreatedBy")
-  tasksAssigned     Task[]           @relation("TaskAssignee")
-  tasksCreated      Task[]           @relation("TaskCreatedBy")
-  leadNotes         LeadNote[]
-  leadActivities    LeadActivity[]
-  leadProductQuotes LeadProductQuote[]
-  auditEvents       AuditEvent[]
-  sessions          Session[]
-  telemarketerAssignments TelemarketerAssignment[] @relation("TMAssignments")
-  transfersCreated  Transfer[]       @relation("TransferCreatedByTM")
-  transfersAccepted Transfer[]       @relation("TransferAcceptedBy")
-  callsUploaded     Call[]           @relation("CallUploadedBy")
-  trainingAssignments TrainingAssignment[]
-  conversationParticipants ConversationParticipant[]
-  messagesAuthored   Message[]
-  passwordResetTokens PasswordResetToken[]
-  timeClockEntries   TimeClockEntry[]
-  announcementsCreated  Announcement[]    @relation("AnnouncementCreatedBy")
-  announcementsTargeted Announcement[]    @relation("AnnouncementTargetUser")
-  announcementAcks      AnnouncementAck[]
-  producerNotesReceived ProducerNote[]    @relation("ProducerNoteSubject")
-  producerNotesAuthored ProducerNote[]    @relation("ProducerNoteAuthor")
-  leadImportBatchesUploaded LeadImportBatch[] @relation("LeadImportBatchUploadedBy")
-  leadImportBatchesUndone   LeadImportBatch[] @relation("LeadImportBatchUndoneBy")
-  badges            UserBadge[]      @relation("UserBadges")
-  badgesAwarded     UserBadge[]      @relation("UserBadgeAwardedBy")
-  ptoRequests       PtoRequest[]     @relation("PtoRequester")
-  ptoReviewed       PtoRequest[]     @relation("PtoReviewer")
+  invitations               Invitation[]              @relation("InvitationsSent")
+  ownInvitation             Invitation?               @relation("InvitationForUser")
+  assignedLeads             Lead[]                    @relation("AssignedProducer")
+  createdLeads              Lead[]                    @relation("LeadCreatedBy")
+  tasksAssigned             Task[]                    @relation("TaskAssignee")
+  tasksCreated              Task[]                    @relation("TaskCreatedBy")
+  leadNotes                 LeadNote[]
+  leadActivities            LeadActivity[]
+  leadProductQuotes         LeadProductQuote[]
+  auditEvents               AuditEvent[]
+  sessions                  Session[]
+  telemarketerAssignments   TelemarketerAssignment[]  @relation("TMAssignments")
+  transfersCreated          Transfer[]                @relation("TransferCreatedByTM")
+  transfersAccepted         Transfer[]                @relation("TransferAcceptedBy")
+  callsUploaded             Call[]                    @relation("CallUploadedBy")
+  trainingAssignments       TrainingAssignment[]
+  conversationParticipants  ConversationParticipant[]
+  messagesAuthored          Message[]
+  passwordResetTokens       PasswordResetToken[]
+  timeClockEntries          TimeClockEntry[]
+  announcementsCreated      Announcement[]            @relation("AnnouncementCreatedBy")
+  announcementsTargeted     Announcement[]            @relation("AnnouncementTargetUser")
+  announcementAcks          AnnouncementAck[]
+  producerNotesReceived     ProducerNote[]            @relation("ProducerNoteSubject")
+  producerNotesAuthored     ProducerNote[]            @relation("ProducerNoteAuthor")
+  leadImportBatchesUploaded LeadImportBatch[]         @relation("LeadImportBatchUploadedBy")
+  leadImportBatchesUndone   LeadImportBatch[]         @relation("LeadImportBatchUndoneBy")
+  badges                    UserBadge[]               @relation("UserBadges")
+  badgesAwarded             UserBadge[]               @relation("UserBadgeAwardedBy")
+  ptoRequests               PtoRequest[]              @relation("PtoRequester")
+  ptoReviewed               PtoRequest[]              @relation("PtoReviewer")
+  breakRoomGameSessions     BreakRoomGameSession[]
+  breakRoomHighScores       BreakRoomHighScore[]
+  breakRoomAchievements     BreakRoomAchievement[]
+  breakRoomJokeHistory      BreakRoomJokeHistory[]
 
   @@index([agencyId])
   @@index([role])
@@ -366,68 +370,78 @@ model PasswordResetToken {
 }
 
 model Invitation {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   email       String
   role        Role
-  token       String   @unique
+  token       String    @unique
   agencyId    String?
-  agency      Agency?  @relation(fields: [agencyId], references: [id])
+  agency      Agency?   @relation(fields: [agencyId], references: [id])
   invitedById String
-  invitedBy   User     @relation("InvitationsSent", fields: [invitedById], references: [id])
-  userId      String?  @unique
-  user        User?    @relation("InvitationForUser", fields: [userId], references: [id])
+  invitedBy   User      @relation("InvitationsSent", fields: [invitedById], references: [id])
+  userId      String?   @unique
+  user        User?     @relation("InvitationForUser", fields: [userId], references: [id])
   expiresAt   DateTime
   acceptedAt  DateTime?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
 
   @@index([email])
 }
 
 model Session {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  tokenHash String   @unique
+  user      User      @relation(fields: [userId], references: [id])
+  tokenHash String    @unique
   userAgent String?
   ipAddress String?
   expiresAt DateTime
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
   revokedAt DateTime?
 
   @@index([userId])
 }
 
 model Agency {
-  id             String       @id @default(uuid())
-  name           String
-  status         AgencyStatus @default(CREATED)
-  timezone       String       @default("America/New_York")
-  officeHours    Json?
-  products       String[]     @default([])
+  id                     String       @id @default(uuid())
+  name                   String
+  status                 AgencyStatus @default(CREATED)
+  timezone               String       @default("America/New_York")
+  officeHours            Json?
+  products               String[]     @default([])
   // Configurable lead-queue ordering: { typeRank: LeadType[], statusRules:
   // { [LeadStatus]: { afterDays: number, action: 'BUMP_UP' | 'BUMP_DOWN' |
   // 'DROP_OFF' } } }. Null = lib/priority.js's seeded default applies.
-  priorityRules  Json?
-  crmEnabled     Boolean      @default(true)
-  transfersEnabled Boolean    @default(false)
-  coachingEnabled  Boolean    @default(false)
+  priorityRules          Json?
+  crmEnabled             Boolean      @default(true)
+  transfersEnabled       Boolean      @default(false)
+  coachingEnabled        Boolean      @default(false)
   // Sales Studio (merged Drills + Call Scoring) is gated behind the same
   // coachingEnabled unlock as everything else "Sales Coaching" already
   // covers — this is a SEPARATE compliance-buffer switch, defaulting to
   // enforced. Platform Owner can flip it off per-agency to fully open
   // Sales Studio regardless of unlock status (e.g. a temporary waiver),
   // without touching the real unlock/billing flag.
-  salesStudioGateEnabled Boolean @default(true)
-  transferPaused    Boolean   @default(false)
-  transferDailyCap  Int?
-  transferStates    String[]  @default([])
+  salesStudioGateEnabled Boolean      @default(true)
+  // Break Room — the employee arcade. On by default (a built-in perk, not
+  // an upsell), with the same requireModuleEnabled() gate every other
+  // module flag already uses — zero new gating code needed for the
+  // on/off switch itself.
+  breakRoomEnabled       Boolean      @default(true)
+  // { games: {CONGO_LINE,BUCKETS,FULL_SEND,PILL_POP: bool}, pickMeUpEnabled,
+  // lunchEligible, soundsEnabled, achievementsEnabled,
+  // leaderboardScope: {office, agency} } — null = lib/breakRoom.js's
+  // seeded default applies, same null-fallback precedent as priorityRules.
+  breakRoomSettings      Json?
+  transferPaused         Boolean      @default(false)
+  transferDailyCap       Int?
+  transferStates         String[]     @default([])
   // Fee EvenFlow/Yield charges this agency per accepted transfer, in integer cents.
   // Null = not configured; no revenue event is fabricated if unset.
-  transferFeeCents  Int?
+  transferFeeCents       Int?
   // The one Stripe Customer object for this agency's self-serve seat
   // subscription (routes/billing.js's self-serve section). Null until the
   // agency's owner starts a checkout — never fabricated.
-  stripeCustomerId String?
+  stripeCustomerId       String?
 
   // ======================================================================
   // RECORD STORE — Boberdoo/LeadPortal wholesale lead marketplace
@@ -436,25 +450,25 @@ model Agency {
   // (Address/City/State/Zip) — collected once, during Record Store setup
   // if missing, and reused for every subsequent Record Store action. Never
   // required for agencies that never touch Record Store.
-  address        String?
-  city           String?
-  state          String?
-  zip            String?
+  address                       String?
+  city                          String?
+  state                         String?
+  zip                           String?
   // One Boberdoo Partner per EvenFlow Agency (never one per product/order —
   // see lib/recordStoreProvisioning.js's idempotent provisionPartner()).
   // Null until the agency's first Record Store order provisions one, or a
   // Platform Owner links an existing Boberdoo account via the admin
   // "LINK EXISTING BOBERDOO PARTNER" flow.
-  boberdooPartnerId     String?
+  boberdooPartnerId             String?
   // Local mirror of Boberdoo's own Partner status (0 Not Active / 1
   // Temporarily Stopped / 2 Active) — EvenFlow is authoritative for DESIRED
   // state (what the owner wants), Boberdoo is authoritative for EFFECTIVE
   // state; this field tracks the last status we told Boberdoo to set, not
   // a guess, and is only ever written right after a confirmed Boberdoo call.
-  boberdooPartnerStatus Int?
-  boberdooSyncStatus    BoberdooSyncStatus @default(SYNCED)
-  boberdooSyncError     String?
-  boberdooLastSyncAt    DateTime?
+  boberdooPartnerStatus         Int?
+  boberdooSyncStatus            BoberdooSyncStatus @default(SYNCED)
+  boberdooSyncError             String?
+  boberdooLastSyncAt            DateTime?
   // Set once Boberdoo's own getPartnerCreditandBalance confirms the
   // initial deposit has landed — never set merely because the owner was
   // redirected to the payment page (see lib/recordStoreProvisioning.js's
@@ -462,36 +476,39 @@ model Agency {
   recordStoreDepositConfirmedAt DateTime?
   // Cached balance snapshot — Boberdoo remains the authoritative source;
   // this is just what the UI shows between refreshes.
-  recordStoreBalanceCents      Int?
-  recordStoreBalanceCheckedAt  DateTime?
+  recordStoreBalanceCents       Int?
+  recordStoreBalanceCheckedAt   DateTime?
 
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-  archivedAt     DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  archivedAt DateTime?
 
-  users        User[]
-  leads        Lead[]
-  tasks        Task[]
-  invitations  Invitation[]
-  auditEvents  AuditEvent[]
-  goals        Goal[]
-  telemarketerAssignments TelemarketerAssignment[]
-  transfers    Transfer[]
-  vendors      Vendor[]
-  revenueEvents RevenueEvent[]
-  costEvents    CostEvent[]
-  calls         Call[]
-  subscriptions AgencySubscription[]
-  opportunities Opportunity[]
-  conversations Conversation[]
-  timeClockEntries TimeClockEntry[]
-  announcements Announcement[]
-  producerNotes ProducerNote[]
-  offices       Office[]
+  users                    User[]
+  leads                    Lead[]
+  tasks                    Task[]
+  invitations              Invitation[]
+  auditEvents              AuditEvent[]
+  goals                    Goal[]
+  telemarketerAssignments  TelemarketerAssignment[]
+  transfers                Transfer[]
+  vendors                  Vendor[]
+  revenueEvents            RevenueEvent[]
+  costEvents               CostEvent[]
+  calls                    Call[]
+  subscriptions            AgencySubscription[]
+  opportunities            Opportunity[]
+  conversations            Conversation[]
+  timeClockEntries         TimeClockEntry[]
+  announcements            Announcement[]
+  producerNotes            ProducerNote[]
+  offices                  Office[]
   recordStoreSubscriptions RecordStoreSubscription[]
-  leadImportBatches LeadImportBatch[]
-  userBadges    UserBadge[]
-  ptoRequests   PtoRequest[]
+  leadImportBatches        LeadImportBatch[]
+  userBadges               UserBadge[]
+  ptoRequests              PtoRequest[]
+  breakRoomGameSessions    BreakRoomGameSession[]
+  breakRoomHighScores      BreakRoomHighScore[]
+  breakRoomAchievements    BreakRoomAchievement[]
 }
 
 enum BoberdooSyncStatus {
@@ -544,9 +561,9 @@ model UserBadge {
   awardedById String?
   awardedBy   User?     @relation("UserBadgeAwardedBy", fields: [awardedById], references: [id])
 
+  @@unique([userId, type, periodLabel])
   @@index([userId])
   @@index([agencyId])
-  @@unique([userId, type, periodLabel])
 }
 
 enum PtoStatus {
@@ -560,44 +577,44 @@ enum PtoStatus {
 // approve or deny. Self-cancel is only allowed while still PENDING — once
 // reviewed, the decision is leadership's record to keep.
 model PtoRequest {
-  id           String     @id @default(uuid())
+  id           String    @id @default(uuid())
   userId       String
-  user         User       @relation("PtoRequester", fields: [userId], references: [id])
+  user         User      @relation("PtoRequester", fields: [userId], references: [id])
   agencyId     String
-  agency       Agency     @relation(fields: [agencyId], references: [id])
+  agency       Agency    @relation(fields: [agencyId], references: [id])
   startDate    DateTime
   endDate      DateTime
   reason       String?
-  status       PtoStatus  @default(PENDING)
+  status       PtoStatus @default(PENDING)
   reviewedById String?
-  reviewedBy   User?      @relation("PtoReviewer", fields: [reviewedById], references: [id])
+  reviewedBy   User?     @relation("PtoReviewer", fields: [reviewedById], references: [id])
   reviewedAt   DateTime?
   reviewNote   String?
-  createdAt    DateTime   @default(now())
+  createdAt    DateTime  @default(now())
 
   @@index([userId])
   @@index([agencyId])
 }
 
 model Customer {
-  id            String   @id @default(uuid())
-  firstName     String
-  lastName      String
+  id              String   @id @default(uuid())
+  firstName       String
+  lastName        String
   phoneNormalized String?
-  email         String?
-  address       String?
-  city          String?
-  state         String?
-  zip           String?
+  email           String?
+  address         String?
+  city            String?
+  state           String?
+  zip             String?
   // Products this customer currently holds — populated only from real SOLD
   // dispositions (lead or transfer), never inferred or guessed. This is
   // what the cross-sell detector actually reads.
-  products      String[] @default([])
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  products        String[] @default([])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  leads Lead[]
-  transfers Transfer[]
+  leads         Lead[]
+  transfers     Transfer[]
   opportunities Opportunity[]
 
   @@index([phoneNormalized])
@@ -605,50 +622,50 @@ model Customer {
 }
 
 model Lead {
-  id              String     @id @default(uuid())
-  agencyId        String
-  agency          Agency     @relation(fields: [agencyId], references: [id])
-  customerId      String?
-  customer        Customer?  @relation(fields: [customerId], references: [id])
-  source          String     @default("manual")
-  vendorId        String?
-  vendor          Vendor?    @relation(fields: [vendorId], references: [id])
-  externalLeadId  String?
-  rawPayload      Json?
-  product         String?
-  status          LeadStatus @default(NEW)
-  priorityScore   Int        @default(0)
-  priorityReason  String?
-  assignedToId    String?
-  assignedTo      User?      @relation("AssignedProducer", fields: [assignedToId], references: [id])
-  createdById     String?
-  createdBy       User?      @relation("LeadCreatedBy", fields: [createdById], references: [id])
-  receivedAt      DateTime   @default(now())
-  assignedAt      DateTime?
-  firstAttemptAt  DateTime?
-  firstContactAt  DateTime?
+  id               String           @id @default(uuid())
+  agencyId         String
+  agency           Agency           @relation(fields: [agencyId], references: [id])
+  customerId       String?
+  customer         Customer?        @relation(fields: [customerId], references: [id])
+  source           String           @default("manual")
+  vendorId         String?
+  vendor           Vendor?          @relation(fields: [vendorId], references: [id])
+  externalLeadId   String?
+  rawPayload       Json?
+  product          String?
+  status           LeadStatus       @default(NEW)
+  priorityScore    Int              @default(0)
+  priorityReason   String?
+  assignedToId     String?
+  assignedTo       User?            @relation("AssignedProducer", fields: [assignedToId], references: [id])
+  createdById      String?
+  createdBy        User?            @relation("LeadCreatedBy", fields: [createdById], references: [id])
+  receivedAt       DateTime         @default(now())
+  assignedAt       DateTime?
+  firstAttemptAt   DateTime?
+  firstContactAt   DateTime?
   // Real outbound dials logged via POST /:leadId/activities — a count, not
   // a status change, so it stays accurate no matter how status is set.
-  attemptCount    Int        @default(0)
+  attemptCount     Int              @default(0)
   // Derived automatically at creation (isLiveTransfer -> TRANSFER;
   // vendor-sourced -> the vendor's category; else MANUAL) — drives the
   // configurable priority engine's type-rank component. See
   // Agency.priorityRules and lib/priority.js.
-  leadType        LeadType   @default(MANUAL)
-  customFields    Json?
+  leadType         LeadType         @default(MANUAL)
+  customFields     Json?
   // Set only for a row created by POST /leads/bulk-import — lets the
   // whole batch be found again for the undo action below. Null for every
   // other creation path (manual, vendor API, telemarketer intake).
-  importBatchId   String?
-  importBatch     LeadImportBatch? @relation(fields: [importBatchId], references: [id])
+  importBatchId    String?
+  importBatch      LeadImportBatch? @relation(fields: [importBatchId], references: [id])
   // Captured when a producer dispositions this lead as SOLD — real, entered
   // data (not a fabricated commission calculation), which is what makes it
   // legitimate to feed straight into the Financial Ledger as revenue.
-  saleProduct     String?
+  saleProduct      String?
   salePremiumCents Int?
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
-  archivedAt      DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  archivedAt       DateTime?
 
   // Set the moment a stale-lead reminder notification is sent (Part 4);
   // read back on the next check so the same lead isn't re-notified until
@@ -666,7 +683,7 @@ model Lead {
   // Moshpit pool the same way a vendor-Moshpit lead is, regardless of the
   // agency's normal distribution mode. Server-set only, never trusted
   // from a non-Telemarketer caller.
-  isLiveTransfer  Boolean    @default(false)
+  isLiveTransfer Boolean @default(false)
 
   // Rich intake fields captured at the moment a Telemarketer submits a
   // lead (source: 'telemarketer') — denormalized onto the Lead itself
@@ -701,12 +718,12 @@ model Lead {
   activities    LeadActivity[]
   productQuotes LeadProductQuote[]
 
+  @@unique([vendorId, externalLeadId])
   @@index([agencyId])
   @@index([assignedToId])
   @@index([status])
   @@index([receivedAt])
   @@index([importBatchId])
-  @@unique([vendorId, externalLeadId])
 }
 
 // One row per bulk spreadsheet upload (POST /leads/bulk-import) — exists
@@ -768,14 +785,14 @@ model LeadProductQuote {
 }
 
 model LeadEvent {
-  id        String   @id @default(uuid())
-  leadId    String
-  lead      Lead     @relation(fields: [leadId], references: [id])
-  type      String
+  id         String   @id @default(uuid())
+  leadId     String
+  lead       Lead     @relation(fields: [leadId], references: [id])
+  type       String
   fromStatus String?
-  toStatus  String?
-  metadata  Json?
-  createdAt DateTime @default(now())
+  toStatus   String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
 
   @@index([leadId])
 }
@@ -868,6 +885,8 @@ model TimeClockEntry {
   breakEndAt   DateTime?
   createdAt    DateTime  @default(now())
 
+  breakRoomGameSessions BreakRoomGameSession[]
+
   @@index([userId, createdAt])
   @@index([agencyId])
 }
@@ -913,30 +932,30 @@ model AnnouncementAck {
 // Freeform coaching notes an Agency Owner/Manager keeps on one producer —
 // distinct from LeadNote (a note about a Lead, not a person).
 model ProducerNote {
-  id          String   @id @default(uuid())
-  producerId  String
-  producer    User     @relation("ProducerNoteSubject", fields: [producerId], references: [id])
-  agencyId    String
-  agency      Agency   @relation(fields: [agencyId], references: [id])
-  authorId    String
-  author      User     @relation("ProducerNoteAuthor", fields: [authorId], references: [id])
-  content     String
-  createdAt   DateTime @default(now())
+  id         String   @id @default(uuid())
+  producerId String
+  producer   User     @relation("ProducerNoteSubject", fields: [producerId], references: [id])
+  agencyId   String
+  agency     Agency   @relation(fields: [agencyId], references: [id])
+  authorId   String
+  author     User     @relation("ProducerNoteAuthor", fields: [authorId], references: [id])
+  content    String
+  createdAt  DateTime @default(now())
 
   @@index([producerId, createdAt])
 }
 
 model Goal {
-  id         String   @id @default(uuid())
-  agencyId   String
-  agency     Agency   @relation(fields: [agencyId], references: [id])
-  userId     String?
-  metric     String
+  id          String    @id @default(uuid())
+  agencyId    String
+  agency      Agency    @relation(fields: [agencyId], references: [id])
+  userId      String?
+  metric      String
   targetValue Int
-  periodType String
+  periodType  String
   periodStart DateTime
   periodEnd   DateTime
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
   // Set the first time live progress reaches 100% — gates the one-time
   // celebration moment in the UI so it never fires twice for the same goal.
   completedAt DateTime?
@@ -974,74 +993,74 @@ model AuditEvent {
 // (TelemarketerAssignment) so history is never destroyed when reassigned.
 
 model TelemarketerProfile {
-  userId    String   @id
+  userId    String             @id
   phone     String?
-  timezone  String   @default("America/New_York")
-  skills    String[] @default([])
-  products  String[] @default([])
+  timezone  String             @default("America/New_York")
+  skills    String[]           @default([])
+  products  String[]           @default([])
   notes     String?
   status    TelemarketerStatus @default(INVITED)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
 }
 
 model TelemarketerAssignment {
-  id            String    @id @default(uuid())
+  id             String    @id @default(uuid())
   telemarketerId String
-  telemarketer  User      @relation("TMAssignments", fields: [telemarketerId], references: [id])
-  agencyId      String
-  agency        Agency    @relation(fields: [agencyId], references: [id])
-  effectiveFrom DateTime  @default(now())
-  effectiveTo   DateTime?
-  status        String    @default("ACTIVE") // ACTIVE | ENDED
-  assignedById  String?
-  notes         String?
-  createdAt     DateTime  @default(now())
+  telemarketer   User      @relation("TMAssignments", fields: [telemarketerId], references: [id])
+  agencyId       String
+  agency         Agency    @relation(fields: [agencyId], references: [id])
+  effectiveFrom  DateTime  @default(now())
+  effectiveTo    DateTime?
+  status         String    @default("ACTIVE") // ACTIVE | ENDED
+  assignedById   String?
+  notes          String?
+  createdAt      DateTime  @default(now())
 
   @@index([telemarketerId])
   @@index([agencyId])
 }
 
 model Transfer {
-  id                String   @id @default(uuid())
-  agencyId          String?
-  agency            Agency?  @relation(fields: [agencyId], references: [id])
-  customerId        String?
-  customer          Customer? @relation(fields: [customerId], references: [id])
-  createdByTMId     String
-  createdByTM       User     @relation("TransferCreatedByTM", fields: [createdByTMId], references: [id])
-  acceptedById      String?
-  acceptedBy        User?    @relation("TransferAcceptedBy", fields: [acceptedById], references: [id])
+  id            String    @id @default(uuid())
+  agencyId      String?
+  agency        Agency?   @relation(fields: [agencyId], references: [id])
+  customerId    String?
+  customer      Customer? @relation(fields: [customerId], references: [id])
+  createdByTMId String
+  createdByTM   User      @relation("TransferCreatedByTM", fields: [createdByTMId], references: [id])
+  acceptedById  String?
+  acceptedBy    User?     @relation("TransferAcceptedBy", fields: [acceptedById], references: [id])
 
-  status            TransferStatus @default(LEAD_CAPTURED)
-  product           String
-  state             String?
-  firstName         String
-  lastName          String
-  phone             String?
-  email             String?
-  currentInsurance  String?
-  notes             String?
-  qualification     Json?
+  status           TransferStatus @default(LEAD_CAPTURED)
+  product          String
+  state            String?
+  firstName        String
+  lastName         String
+  phone            String?
+  email            String?
+  currentInsurance String?
+  notes            String?
+  qualification    Json?
 
-  routingReason     String?
-  offeredAt         DateTime?
-  respondedAt       DateTime?
-  connectedAt       DateTime?
-  completedAt       DateTime?
-  rejectReason      String?
+  routingReason String?
+  offeredAt     DateTime?
+  respondedAt   DateTime?
+  connectedAt   DateTime?
+  completedAt   DateTime?
+  rejectReason  String?
 
-  disposition       TransferDisposition?
-  dispositionAt     DateTime?
-  saleProduct       String?
-  salePremiumCents  Int?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  disposition      TransferDisposition?
+  dispositionAt    DateTime?
+  saleProduct      String?
+  salePremiumCents Int?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
 
-  events            TransferEvent[]
-  creditRequests    CreditRequest[]
-  revenueEvents     RevenueEvent[]
-  costEvents        CostEvent[]
+  events         TransferEvent[]
+  creditRequests CreditRequest[]
+  revenueEvents  RevenueEvent[]
+  costEvents     CostEvent[]
 
   @@index([agencyId])
   @@index([status])
@@ -1063,17 +1082,17 @@ model TransferEvent {
 }
 
 model CreditRequest {
-  id          String   @id @default(uuid())
-  transferId  String
-  transfer    Transfer @relation(fields: [transferId], references: [id])
+  id            String              @id @default(uuid())
+  transferId    String
+  transfer      Transfer            @relation(fields: [transferId], references: [id])
   requestedById String
-  reason      String
-  notes       String?
-  status      CreditRequestStatus @default(REQUESTED)
-  decidedById String?
-  decidedAt   DateTime?
+  reason        String
+  notes         String?
+  status        CreditRequestStatus @default(REQUESTED)
+  decidedById   String?
+  decidedAt     DateTime?
   decisionNotes String?
-  createdAt   DateTime @default(now())
+  createdAt     DateTime            @default(now())
 
   @@index([transferId])
 }
@@ -1083,19 +1102,19 @@ model CreditRequest {
 // ======================================================================
 
 model Vendor {
-  id           String       @id @default(uuid())
-  name         String
-  email        String
-  agencyId     String
-  agency       Agency       @relation(fields: [agencyId], references: [id])
-  product      String
-  status       VendorStatus @default(PENDING)
+  id               String       @id @default(uuid())
+  name             String
+  email            String
+  agencyId         String
+  agency           Agency       @relation(fields: [agencyId], references: [id])
+  product          String
+  status           VendorStatus @default(PENDING)
   // What this vendor charges per lead, in integer cents. Null = not configured;
   // no cost event is fabricated if unset — the UI will show INSUFFICIENT_DATA instead.
   costPerLeadCents Int?
-  createdById  String?
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  createdById      String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
 
   // Per-vendor lead distribution control (agency owner configurable).
   // roundRobinCursor advances via an atomic increment on every assignment
@@ -1107,7 +1126,7 @@ model Vendor {
 
   // What kind of leads this vendor supplies — every lead sourced from this
   // vendor inherits this as its Lead.leadType (see createLeadRecord).
-  category         VendorCategory       @default(OTHER)
+  category VendorCategory @default(OTHER)
 
   credentials     VendorCredential[]
   leads           Lead[]
@@ -1118,14 +1137,14 @@ model Vendor {
 }
 
 model VendorCredential {
-  id         String            @id @default(uuid())
+  id         String           @id @default(uuid())
   vendorId   String
-  vendor     Vendor            @relation(fields: [vendorId], references: [id])
-  keyPrefix  String            @unique
+  vendor     Vendor           @relation(fields: [vendorId], references: [id])
+  keyPrefix  String           @unique
   secretHash String
-  status     CredentialStatus  @default(ACTIVE)
+  status     CredentialStatus @default(ACTIVE)
   lastUsedAt DateTime?
-  createdAt  DateTime          @default(now())
+  createdAt  DateTime         @default(now())
   revokedAt  DateTime?
 
   @@index([vendorId])
@@ -1180,20 +1199,20 @@ model RevenueEvent {
 }
 
 model CostEvent {
-  id             String       @id @default(uuid())
-  agencyId       String?
-  agency         Agency?      @relation(fields: [agencyId], references: [id])
-  vendorId       String?
-  vendor         Vendor?      @relation(fields: [vendorId], references: [id])
-  transferId     String?
-  transfer       Transfer?    @relation(fields: [transferId], references: [id])
-  category       CostCategory
-  amountCents    Int
-  currency       String       @default("USD")
-  occurredAt     DateTime     @default(now())
-  notes          String?
-  createdById    String?
-  createdAt      DateTime     @default(now())
+  id          String       @id @default(uuid())
+  agencyId    String?
+  agency      Agency?      @relation(fields: [agencyId], references: [id])
+  vendorId    String?
+  vendor      Vendor?      @relation(fields: [vendorId], references: [id])
+  transferId  String?
+  transfer    Transfer?    @relation(fields: [transferId], references: [id])
+  category    CostCategory
+  amountCents Int
+  currency    String       @default("USD")
+  occurredAt  DateTime     @default(now())
+  notes       String?
+  createdById String?
+  createdAt   DateTime     @default(now())
 
   @@index([agencyId])
   @@index([vendorId])
@@ -1210,18 +1229,18 @@ model CostEvent {
 // themselves.
 
 model AiUsageLog {
-  id               String   @id @default(uuid())
-  feature          String   // e.g. "ed_chat"
-  agencyId         String?
-  userId           String?
-  model            String
-  inputTokens      Int
-  outputTokens     Int
+  id                  String   @id @default(uuid())
+  feature             String // e.g. "ed_chat"
+  agencyId            String?
+  userId              String?
+  model               String
+  inputTokens         Int
+  outputTokens        Int
   // Stored in USD micros (1 micro = 1/1,000,000 of a dollar) rather than
   // cents — a single chat call often costs a fraction of a cent, and cents
   // would round nearly every row down to zero.
   estimatedCostMicros Int
-  createdAt        DateTime @default(now())
+  createdAt           DateTime @default(now())
 
   @@index([agencyId])
   @@index([createdAt])
@@ -1230,7 +1249,7 @@ model AiUsageLog {
 model EdMessage {
   id        String   @id @default(uuid())
   userId    String
-  role      String   // "user" | "assistant"
+  role      String // "user" | "assistant"
   content   String
   createdAt DateTime @default(now())
 
@@ -1261,30 +1280,30 @@ model SupportTicket {
 // later, without changing anything downstream of "we have an audio file."
 
 model Call {
-  id             String     @id @default(uuid())
-  agencyId       String
-  agency         Agency     @relation(fields: [agencyId], references: [id])
-  uploadedById   String
-  uploadedBy     User       @relation("CallUploadedBy", fields: [uploadedById], references: [id])
-  leadId         String?
-  lead           Lead?      @relation(fields: [leadId], references: [id])
-  source         CallSource @default(MANUAL_UPLOAD)
-  filename       String
-  storageKey     String
-  mimeType       String?
-  fileSizeBytes  Int?
-  durationSeconds Int?
-  status         CallStatus @default(UPLOADED)
-  failureReason  String?
-  transcript     String?
+  id                 String     @id @default(uuid())
+  agencyId           String
+  agency             Agency     @relation(fields: [agencyId], references: [id])
+  uploadedById       String
+  uploadedBy         User       @relation("CallUploadedBy", fields: [uploadedById], references: [id])
+  leadId             String?
+  lead               Lead?      @relation(fields: [leadId], references: [id])
+  source             CallSource @default(MANUAL_UPLOAD)
+  filename           String
+  storageKey         String
+  mimeType           String?
+  fileSizeBytes      Int?
+  durationSeconds    Int?
+  status             CallStatus @default(UPLOADED)
+  failureReason      String?
+  transcript         String?
   transcriptProvider String?
   // The Bunny Stream video GUID for this call's video recording, if the
   // uploader has one (uploaded directly in the Bunny.net dashboard — never
   // re-uploaded or re-hosted by this app). Played via Bunny's own iframe
   // embed in the Coaching tab's per-call detail view. See lib/bunnyStream.js.
-  bunnyVideoId   String?
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  bunnyVideoId       String?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
 
   analysis CallAnalysis?
 
@@ -1354,19 +1373,19 @@ model Plan {
 }
 
 model AgencySubscription {
-  id                 String             @id @default(uuid())
-  agencyId           String
-  agency             Agency             @relation(fields: [agencyId], references: [id])
-  planId             String
-  plan               Plan               @relation(fields: [planId], references: [id])
-  status             SubscriptionStatus @default(TRIALING)
-  trialEndsAt        DateTime?
-  currentPeriodStart DateTime           @default(now())
-  currentPeriodEnd   DateTime?
-  canceledAt         DateTime?
+  id                   String             @id @default(uuid())
+  agencyId             String
+  agency               Agency             @relation(fields: [agencyId], references: [id])
+  planId               String
+  plan                 Plan               @relation(fields: [planId], references: [id])
+  status               SubscriptionStatus @default(TRIALING)
+  trialEndsAt          DateTime?
+  currentPeriodStart   DateTime           @default(now())
+  currentPeriodEnd     DateTime?
+  canceledAt           DateTime?
   // Placeholder for a real payment processor's customer/subscription ID.
   // Null in this build since no processor is configured — never fabricated.
-  externalCustomerId String?
+  externalCustomerId   String?
   // Set only for a self-serve Stripe subscription (see routes/billing.js's
   // self-serve section) — distinguishes it from a Platform-Owner-assigned
   // flat plan sharing this same table. Null for the latter.
@@ -1374,10 +1393,10 @@ model AgencySubscription {
   // Snapshot of the seat count Stripe was last told to bill for — kept in
   // sync inline (no job queue in this app) whenever a User's status flips
   // to/from ACTIVE on this agency. See lib/seatBilling.js.
-  seatCount          Int?
-  assignedById       String?
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+  seatCount            Int?
+  assignedById         String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
 
   @@index([agencyId])
   @@index([status])
@@ -1414,16 +1433,16 @@ model TrainingCourse {
 }
 
 model TrainingLesson {
-  id         String   @id @default(uuid())
+  id         String         @id @default(uuid())
   courseId   String
   course     TrainingCourse @relation(fields: [courseId], references: [id])
   title      String
   content    String
   videoUrl   String?
-  orderIndex Int      @default(0)
+  orderIndex Int            @default(0)
   // Optional quiz: [{ question, options: string[], correctIndex: number }]
   quiz       Json?
-  createdAt  DateTime @default(now())
+  createdAt  DateTime       @default(now())
 
   completions LessonCompletion[]
 
@@ -1444,20 +1463,20 @@ model TrainingAssignment {
 
   lessonCompletions LessonCompletion[]
 
+  @@unique([courseId, userId])
   @@index([userId])
   @@index([courseId])
-  @@unique([courseId, userId])
 }
 
 model LessonCompletion {
-  id           String              @id @default(uuid())
-  assignmentId String
-  assignment   TrainingAssignment  @relation(fields: [assignmentId], references: [id])
-  lessonId     String
-  lesson       TrainingLesson      @relation(fields: [lessonId], references: [id])
-  completedAt  DateTime            @default(now())
+  id               String             @id @default(uuid())
+  assignmentId     String
+  assignment       TrainingAssignment @relation(fields: [assignmentId], references: [id])
+  lessonId         String
+  lesson           TrainingLesson     @relation(fields: [lessonId], references: [id])
+  completedAt      DateTime           @default(now())
   quizScorePercent Int?
-  quizAnswers  Json?
+  quizAnswers      Json?
 
   @@unique([assignmentId, lessonId])
 }
@@ -1538,27 +1557,27 @@ enum OpportunityStatus {
 }
 
 model Opportunity {
-  id               String            @id @default(uuid())
-  agencyId         String
-  agency           Agency            @relation(fields: [agencyId], references: [id])
-  customerId       String
-  customer         Customer          @relation(fields: [customerId], references: [id])
-  type             OpportunityType
-  status           OpportunityStatus @default(OPEN)
-  product          String
+  id                   String            @id @default(uuid())
+  agencyId             String
+  agency               Agency            @relation(fields: [agencyId], references: [id])
+  customerId           String
+  customer             Customer          @relation(fields: [customerId], references: [id])
+  type                 OpportunityType
+  status               OpportunityStatus @default(OPEN)
+  product              String
   // Winback-specific fields — null for CROSS_SELL opportunities.
-  previousProduct     String?
+  previousProduct      String?
   previousPremiumCents Int?
-  lostAt              DateTime?
-  lostReason          String?
-  reason           String
-  priorityScore    Int               @default(0)
-  assignedToId     String?
-  wonPremiumCents  Int?
-  snoozeUntil      DateTime?
-  createdById      String?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  lostAt               DateTime?
+  lostReason           String?
+  reason               String
+  priorityScore        Int               @default(0)
+  assignedToId         String?
+  wonPremiumCents      Int?
+  snoozeUntil          DateTime?
+  createdById          String?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
 
   events OpportunityEvent[]
 
@@ -1600,11 +1619,11 @@ model OpportunityEvent {
 // exactly the spec's "sensitive operations require exiting impersonation."
 
 model ImpersonationLog {
-  id             String    @id @default(uuid())
+  id              String    @id @default(uuid())
   platformOwnerId String
-  targetUserId   String
-  startedAt      DateTime  @default(now())
-  endedAt        DateTime?
+  targetUserId    String
+  startedAt       DateTime  @default(now())
+  endedAt         DateTime?
 
   @@index([platformOwnerId])
   @@index([targetUserId])
@@ -1646,7 +1665,7 @@ model FlowScoreWeightConfig {
 }
 
 model FlowScoreSnapshot {
-  id                 String               @id @default(uuid())
+  id                 String                @id @default(uuid())
   subjectType        FlowScoreSubjectType
   subjectId          String
   score              Int
@@ -1655,7 +1674,7 @@ model FlowScoreSnapshot {
   excludedComponents Json
   weightConfigId     String
   weightConfig       FlowScoreWeightConfig @relation(fields: [weightConfigId], references: [id])
-  computedAt         DateTime             @default(now())
+  computedAt         DateTime              @default(now())
 
   @@index([subjectType, subjectId, computedAt])
 }
@@ -1690,8 +1709,8 @@ model Conversation {
   participants ConversationParticipant[]
   messages     Message[]
 
-  @@index([agencyId])
   @@unique([relatedEntityType, relatedEntityId])
+  @@index([agencyId])
 }
 
 model ConversationParticipant {
@@ -1737,16 +1756,16 @@ model Message {
 // row, never a code change (see routes/recordStore.js — no
 // if/else-by-product-name branching anywhere).
 model RecordStoreTemplate {
-  id          String   @id @default(uuid())
-  slug        String   @unique
-  displayName String
-  description String?
+  id                        String   @id @default(uuid())
+  slug                      String   @unique
+  displayName               String
+  description               String?
   // Free-text, Super-Admin-defined — "HOME" / "AUTO" / future categories.
   // Not an enum on purpose: adding a new category must never need a schema
   // migration (see master spec's "future-proof product architecture").
-  productCategory String
+  productCategory           String
   // Free-text — "INTERNET" / "LIVE_CALL" / future lead-delivery shapes.
-  leadType        String
+  leadType                  String
   // The real Boberdoo TYPE id (Lead_Type) once a Super Admin has looked it
   // up against a live account — getFilterSetsAll/getPartnerSettings is the
   // only reliable source (see docs/lead-portal-api-reference.md §4).
@@ -1756,18 +1775,18 @@ model RecordStoreTemplate {
   // template maps to (e.g. a saved filter-set name/ID a Super Admin set up
   // once in the Boberdoo portal) — purely descriptive, read by admins only.
   boberdooTemplateReference String?
-  filterSetType  String  @default("STANDARD") // "STANDARD" | "IPR"
-  isIpr          Boolean @default(false)
+  filterSetType             String   @default("STANDARD") // "STANDARD" | "IPR"
+  isIpr                     Boolean  @default(false)
   // Null = not priced yet; the storefront must never show a fabricated
   // price (see ui — StatTile/product cards read this straight from here).
-  wholesalePriceCents  Int?
-  minimumDailyVolume   Int     @default(1)
-  maximumDailyVolume   Int     @default(200)
-  defaultDailyVolume   Int     @default(10)
-  minimumDepositCents  Int     @default(150000) // $1,500 — overridable per template
-  active               Boolean @default(true)
-  sortOrder            Int     @default(0)
-  customerVisible      Boolean @default(true)
+  wholesalePriceCents       Int?
+  minimumDailyVolume        Int      @default(1)
+  maximumDailyVolume        Int      @default(200)
+  defaultDailyVolume        Int      @default(10)
+  minimumDepositCents       Int      @default(150000) // $1,500 — overridable per template
+  active                    Boolean  @default(true)
+  sortOrder                 Int      @default(0)
+  customerVisible           Boolean  @default(true)
   // Boberdoo-specific config that shouldn't clutter the main schema — e.g.
   // the exact insertUpdateFilterSet/iprInsertFilterSet field values this
   // template should submit (Boberdoo's own standard filter-set field list
@@ -1776,9 +1795,9 @@ model RecordStoreTemplate {
   // than guessed at in code), plus IPR defaults (Ring_Timeout,
   // Successful_Minutes, Record_Phone_Call, etc.) the Agency Owner never
   // sees or controls directly.
-  configurationJson Json?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  configurationJson         Json?
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
 
   subscriptions RecordStoreSubscription[]
 }
@@ -1828,9 +1847,9 @@ enum RecordStoreDesiredStatus {
 }
 
 model RecordStoreSubscription {
-  id                    String   @id @default(uuid())
+  id                    String              @id @default(uuid())
   agencyId              String
-  agency                Agency   @relation(fields: [agencyId], references: [id])
+  agency                Agency              @relation(fields: [agencyId], references: [id])
   recordStoreTemplateId String
   template              RecordStoreTemplate @relation(fields: [recordStoreTemplateId], references: [id])
 
@@ -1850,22 +1869,22 @@ model RecordStoreSubscription {
   isIpr               Boolean @default(false)
   priceSnapshotCents  Int
 
-  dailyVolume    Int
+  dailyVolume        Int
   // Live Call (IPR) only — the one real, business-level delivery field an
   // Agency Owner sets themselves (master spec §7); every other IPR field
   // (Ring_Timeout, Successful_Minutes, Record_Phone_Call, ...) comes from
   // the template's own configurationJson, never from the customer.
   ringToPhone        String?
   maxConcurrentCalls Int?
-  desiredStatus  RecordStoreDesiredStatus @default(ACTIVE)
-  status         RecordStoreSubscriptionStatus @default(DRAFT)
+  desiredStatus      RecordStoreDesiredStatus      @default(ACTIVE)
+  status             RecordStoreSubscriptionStatus @default(DRAFT)
   provisioningStatus RecordStoreProvisioningStatus @default(EVENFLOW_ORDER_CREATED)
-  fundingStatus  RecordStoreFundingStatus @default(PENDING)
+  fundingStatus      RecordStoreFundingStatus      @default(PENDING)
 
-  failedStep    String?
-  errorCode     String?
-  errorMessage  String?
-  retryCount    Int      @default(0)
+  failedStep         String?
+  errorCode          String?
+  errorMessage       String?
+  retryCount         Int       @default(0)
   boberdooSyncError  String?
   lastBoberdooSyncAt DateTime?
 
@@ -1879,4 +1898,144 @@ model RecordStoreSubscription {
 
   @@index([agencyId])
   @@index([status])
+}
+
+// ============================================================
+// BREAK ROOM — the employee arcade. Every game session ties back to
+// the real TimeClockEntry that was open and ON_BREAK when it started
+// (see lib/timeClockState.js's stateOf()) — there is no second, parallel
+// "break session" concept invented here. Server-side gating
+// (lib/breakRoom.js's canAccessBreakRoom) is the only thing that can
+// start or keep a session alive; the client is never trusted alone.
+// ============================================================
+
+enum GameType {
+  CONGO_LINE
+  BUCKETS
+  FULL_SEND
+  PILL_POP
+}
+
+enum BreakRoomSessionStatus {
+  ACTIVE
+  COMPLETED
+  ABANDONED
+}
+
+model BreakRoomGameSession {
+  id                      String                 @id @default(uuid())
+  userId                  String
+  user                    User                   @relation(fields: [userId], references: [id])
+  agencyId                String
+  agency                  Agency                 @relation(fields: [agencyId], references: [id])
+  // Denormalized from User.officeId at session start — a cheap filter
+  // for office-scoped leaderboards, never a live join. Same
+  // "denormalized snapshot" precedent as RecordStoreSubscription's
+  // boberdooPartnerId copy above.
+  officeId                String?
+  timeClockEntryId        String
+  timeClockEntry          TimeClockEntry         @relation(fields: [timeClockEntryId], references: [id])
+  gameType                GameType
+  status                  BreakRoomSessionStatus @default(ACTIVE)
+  startedAt               DateTime               @default(now())
+  endedAt                 DateTime?
+  durationMs              Int?
+  score                   Int                    @default(0)
+  // Per-game secondary stats (dancers collected, shots made/attempted,
+  // tricks landed, bugs cleared, best streak, ...) — shape varies by
+  // gameType, never queried structurally, only stored/displayed.
+  metrics                 Json?
+  clientToken             String                 @unique
+  // Set by lib/breakRoomAntiCheat.js's plausibility check, or by an
+  // admin review action — excluded sessions still exist (for audit) but
+  // never count toward a high score or leaderboard rank.
+  excludedFromLeaderboard Boolean                @default(false)
+  flagReason              String?
+  // Always true in practice (a session cannot even be created unless
+  // canAccessBreakRoom passed) — kept as an explicit, honest field
+  // rather than merely assumed, matching the real leaderboard-row shape.
+  verifiedBreakSession    Boolean                @default(true)
+  createdAt               DateTime               @default(now())
+
+  achievements BreakRoomAchievement[]
+
+  @@index([userId, gameType])
+  @@index([agencyId, gameType])
+  @@index([gameType, score])
+  @@index([timeClockEntryId])
+}
+
+// Denormalized personal-best cache per (user, game) — O(1) lookup for
+// the Break Room landing page instead of aggregating every session on
+// every page load. Recomputed whenever a new session could beat it, and
+// whenever an admin excludes/restores a session.
+model BreakRoomHighScore {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  agencyId    String
+  agency      Agency   @relation(fields: [agencyId], references: [id])
+  officeId    String?
+  gameType    GameType
+  bestScore   Int      @default(0)
+  bestMetrics Json?
+  sessionId   String?
+  achievedAt  DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, gameType])
+  @@index([agencyId, gameType, bestScore])
+}
+
+// A parallel, new concept from UserBadge/BadgeType (career recognition,
+// mostly manually awarded) — this is purely for-fun arcade unlocks, never
+// shown to a manager as a performance signal. Same @@unique idempotency-
+// key shape as UserBadge, since "has this exact achievement already been
+// unlocked" is the same real question.
+model BreakRoomAchievement {
+  id         String                @id @default(uuid())
+  userId     String
+  user       User                  @relation(fields: [userId], references: [id])
+  agencyId   String
+  agency     Agency                @relation(fields: [agencyId], references: [id])
+  gameType   GameType
+  key        String
+  sessionId  String?
+  session    BreakRoomGameSession? @relation(fields: [sessionId], references: [id])
+  unlockedAt DateTime              @default(now())
+
+  @@unique([userId, gameType, key])
+  @@index([agencyId])
+}
+
+model BreakRoomJoke {
+  id        String   @id @default(uuid())
+  text      String
+  tags      String[] @default([])
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  history BreakRoomJokeHistory[]
+}
+
+model BreakRoomJokeHistory {
+  id      String        @id @default(uuid())
+  userId  String
+  user    User          @relation(fields: [userId], references: [id])
+  jokeId  String
+  joke    BreakRoomJoke @relation(fields: [jokeId], references: [id])
+  shownAt DateTime      @default(now())
+
+  @@index([userId, shownAt])
+}
+
+// The one genuinely platform-wide Break Room switch (a cross-agency
+// global leaderboard) — a Super Admin opt-in, singleton row. Everything
+// else (per-game enable, lunch eligibility, sounds, achievements,
+// office/agency leaderboard scope) lives on Agency.breakRoomSettings,
+// mirroring Agency.priorityRules' existing Json-config precedent.
+model BreakRoomPlatformSettings {
+  id                       String   @id @default("singleton")
+  globalLeaderboardEnabled Boolean  @default(false)
+  updatedAt                DateTime @updatedAt
 }
