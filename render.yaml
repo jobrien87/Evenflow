@@ -28,14 +28,20 @@ services:
         sync: false
       - key: AI_MODEL
         value: "claude-haiku-4-5-20251001"
-      - key: RESEND_API_KEY
-        sync: false
       - key: BUNNY_STREAM_LIBRARY_ID
         sync: false
       - key: BUNNY_STREAM_API_KEY
         sync: false
-      - key: EMAIL_FROM
-        value: "EvenFlow <no-reply@evenflow.app>"
+      # Gmail SMTP (via nodemailer) — see server/.env.example for how to
+      # generate GMAIL_APP_PASSWORD. If either is unset or wrong, invite/
+      # reset emails honestly report emailStatus: "NOT_CONFIGURED" or
+      # "FAILED" rather than pretending to send.
+      - key: GMAIL_USER
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      - key: EMAIL_FROM_NAME
+        value: "EvenFlow"
       # Optional — leave unset until you're ready to connect a real provider.
       # The app runs correctly without any of these (honest NOT_CONFIGURED states).
       - key: TRANSCRIPTION_PROVIDER_API_KEY
