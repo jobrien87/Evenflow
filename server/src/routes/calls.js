@@ -119,6 +119,76 @@ router.get('/coaching', requireRole('PRODUCER', 'AGENCY_MANAGER', 'AGENCY_OWNER'
   }
 });
 
+// The Call Scoring profile — a single producer's complete call-coaching
+// picture (drill category breakdown, score trend over time, their real
+// recent calls, and review/override activity), reusing computeDrillScore/
+// computeCoachingBreakdown exactly as /coaching does rather than a second
+// scoring pass. Owner/Manager/Platform Owner only — Call Scoring itself is
+// not a Producer-facing surface (a Producer's own self-service breakdown
+// is /coaching, used from Call Diagnostics). Registered before /:id for
+// the same anti-shadowing reason as /coaching.
+router.get('/producer-profile/:userId', requireRole('AGENCY_MANAGER', 'AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const target = await prisma.user.findUnique({ where: { id: req.params.userId } });
+    if (!target) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (req.user.role !== 'PLATFORM_OWNER' && target.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+
+    const to = req.query.to ? new Date(req.query.to) : new Date();
+    const from = req.query.from ? new Date(req.query.from) : new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const [coaching, calls] = await Promise.all([
+      computeCoachingBreakdown({ prisma, agencyId: target.agencyId, userId: target.id, from, to }),
+      prisma.call.findMany({
+        where: { uploadedById: target.id, ...(target.agencyId ? { agencyId: target.agencyId } : {}), createdAt: { gte: from, lte: to } },
+        include: { analysis: { select: { overallScore: true, dimensionScores: true, strengths: true, coachingOpportunities: true, reviewRecommended: true, managerOverrideScore: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+      }),
+    ]);
+
+    const recentCalls = calls.map((c) => {
+      const drill = c.analysis ? computeDrillScore(c.analysis.dimensionScores) : null;
+      return {
+        id: c.id,
+        filename: c.filename,
+        status: c.status,
+        createdAt: c.createdAt,
+        overallScore: c.analysis?.overallScore ?? null,
+        drillScore: drill?.drillScore ?? null,
+        reviewRecommended: c.analysis?.reviewRecommended ?? false,
+        managerOverrideScore: c.analysis?.managerOverrideScore ?? null,
+        topStrength: c.analysis?.strengths?.[0] ?? null,
+        topCoachingOpportunity: c.analysis?.coachingOpportunities?.[0] ?? null,
+      };
+    });
+
+    // Chronological, analyzed calls only — what the trend sparkline draws.
+    const scoreTrend = recentCalls
+      .filter((c) => c.overallScore !== null)
+      .slice()
+      .reverse()
+      .map((c) => ({ callId: c.id, date: c.createdAt, overallScore: c.overallScore, drillScore: c.drillScore }));
+
+    const flaggedForReviewCount = recentCalls.filter((c) => c.reviewRecommended).length;
+    const managerOverrideCount = recentCalls.filter((c) => c.managerOverrideScore !== null).length;
+
+    return res.json({
+      success: true,
+      user: { id: target.id, firstName: target.firstName, lastName: target.lastName, email: target.email, phone: target.phone },
+      period: { from: from.toISOString(), to: to.toISOString() },
+      coaching,
+      recentCalls,
+      scoreTrend,
+      flaggedForReviewCount,
+      managerOverrideCount,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Registered before /:id for the same anti-shadowing reason as /coaching
 // above — "coaching-videos" would otherwise be swallowed as an id.
 router.get('/coaching-videos', async (req, res, next) => {
