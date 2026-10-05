@@ -91,11 +91,16 @@ async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
       saleProduct: true,
       assignedToId: true,
       assignedTo: { select: { id: true, firstName: true, lastName: true } },
+      vendorId: true,
+      vendor: { select: { id: true, name: true } },
+      zip: true,
     },
   });
 
   const byProducerMap = new Map();
   const byProductMap = new Map();
+  const byVendorMap = new Map();
+  const byZipMap = new Map();
   for (const lead of soldLeads) {
     const premium = lead.salePremiumCents || 0;
     if (lead.assignedToId) {
@@ -115,10 +120,35 @@ async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
     prow.soldCount += 1;
     prow.premiumCents += premium;
     byProductMap.set(product, prow);
+
+    // Vendor-less sales (manual/telemarketer/bulk-import leads) bucket
+    // under a real, honest "Direct / No Vendor" row rather than being
+    // silently dropped from the breakdown.
+    const vendorKey = lead.vendorId || '__direct__';
+    const vrow = byVendorMap.get(vendorKey) || {
+      vendorId: lead.vendorId || null,
+      vendorName: lead.vendor?.name || 'Direct / No Vendor',
+      soldCount: 0,
+      premiumCents: 0,
+    };
+    vrow.soldCount += 1;
+    vrow.premiumCents += premium;
+    byVendorMap.set(vendorKey, vrow);
+
+    // zip is only ever captured on telemarketer-intake leads today — a
+    // sale from any other source buckets under an honest "Unknown" row
+    // rather than being dropped or fabricated.
+    const zipKey = lead.zip || 'Unknown';
+    const zrow = byZipMap.get(zipKey) || { zip: zipKey, soldCount: 0, premiumCents: 0 };
+    zrow.soldCount += 1;
+    zrow.premiumCents += premium;
+    byZipMap.set(zipKey, zrow);
   }
 
   const byProducer = Array.from(byProducerMap.values()).sort((a, b) => b.premiumCents - a.premiumCents);
   const byProduct = Array.from(byProductMap.values()).sort((a, b) => b.premiumCents - a.premiumCents);
+  const byVendor = Array.from(byVendorMap.values()).sort((a, b) => b.premiumCents - a.premiumCents);
+  const byZip = Array.from(byZipMap.values()).sort((a, b) => b.premiumCents - a.premiumCents);
   const series = buildSeries(soldLeads, g, range.from, range.to);
 
   return {
@@ -130,6 +160,8 @@ async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
     },
     byProducer,
     byProduct,
+    byVendor,
+    byZip,
     series,
   };
 }

@@ -1,23 +1,35 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { ExportButton } from '../ui';
+import { ExportButton, DateRangeFilter } from '../ui';
+import { resolveDateRange } from '../lib/dateRange';
 import { downloadCsv } from '../lib/downloadCsv';
+
+const PERIODS = [
+  { key: 'month', label: 'This month', from: () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); } },
+  { key: 'quarter', label: 'This quarter', from: () => { const d = new Date(); return new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3, 1); } },
+];
 
 // A real-time assembly view over data that already persists elsewhere
 // (Flow Score snapshots, funnel metrics, call analysis, goals) — every
 // number here is read from, or computed by, the same source the
 // standalone cards use. Nothing is recalculated a second, divergent way.
 export default function RunningReportPage({ scope = 'me', agencyId, onClose }) {
+  const [periodKey, setPeriodKey] = useState('month');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [report, setReport] = useState(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
     load();
-  }, [scope, agencyId]);
+  }, [scope, agencyId, periodKey, customFrom, customTo]);
 
   async function load() {
+    const range = resolveDateRange(periodKey, PERIODS, customFrom, customTo);
+    if (!range) return; // custom selected, dates not both picked yet
+    const params = `?from=${range.from}&to=${range.to}`;
     try {
-      const res = scope === 'agency' ? await api.agencyRunningReport(agencyId) : await api.myRunningReport();
+      const res = scope === 'agency' ? await api.agencyRunningReport(agencyId, params) : await api.myRunningReport(params);
       setReport(res.report);
     } catch (err) {
       setError(err.data?.message || 'Could not load the running report.');
@@ -33,7 +45,18 @@ export default function RunningReportPage({ scope = 'me', agencyId, onClose }) {
     <div style={s.wrap}>
       <div style={s.headerRow}>
         <h2 style={s.h2}>{scope === 'agency' ? 'AGENCY RUNNING REPORT' : 'MY RUNNING REPORT'}</h2>
-        {onClose && <button style={s.closeButton} onClick={onClose}>CLOSE</button>}
+        <div style={s.headerActions}>
+          <DateRangeFilter
+            presets={PERIODS.map((p) => ({ key: p.key, label: p.label.toUpperCase() }))}
+            periodKey={periodKey}
+            onSelectPreset={setPeriodKey}
+            customFrom={customFrom}
+            customTo={customTo}
+            onCustomFromChange={setCustomFrom}
+            onCustomToChange={setCustomTo}
+          />
+          {onClose && <button style={s.closeButton} onClick={onClose}>CLOSE</button>}
+        </div>
       </div>
 
       <section style={s.section}>
@@ -61,7 +84,9 @@ export default function RunningReportPage({ scope = 'me', agencyId, onClose }) {
       </section>
 
       <section style={s.section}>
-        <div style={s.sectionLabel}>FUNNEL (THIS MONTH)</div>
+        <div style={s.sectionLabel}>
+          FUNNEL ({new Date(report.period.from).toLocaleDateString()} – {new Date(report.period.to).toLocaleDateString()})
+        </div>
         <div style={s.ratesRow}>
           <Rate label="Contact rate" value={funnel?.contactRate ?? null} sampleSize={funnel?.contactRateSampleSize ?? 0} />
           <Rate label="Quote rate" value={funnel?.quoteRate ?? null} sampleSize={funnel?.quoteRateSampleSize ?? 0} />
@@ -179,7 +204,8 @@ function Rate({ label, value, sampleSize }) {
 
 const s = {
   wrap: { color: 'var(--text-primary)', maxWidth: 640, margin: '0 auto', padding: 24 },
-  headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+  headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24, flexWrap: 'wrap', gap: 10 },
+  headerActions: { display: 'flex', alignItems: 'flex-start', gap: 10 },
   h2: { fontWeight: 400, color: 'var(--text-primary)', letterSpacing: 1, fontSize: 18 },
   closeButton: { padding: '6px 12px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, cursor: 'pointer', fontSize: 11 },
   section: { background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 10, padding: 20, marginBottom: 20 },

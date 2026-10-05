@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { Card, SectionHeader, Button, StatTile } from '../ui';
+import { Card, SectionHeader, StatTile, DateRangeFilter } from '../ui';
+import { resolveDateRange } from '../lib/dateRange';
 
 const PERIODS = [
   { key: 'month', label: 'This month', from: () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); } },
@@ -50,21 +51,22 @@ function Rate({ label, value, sampleSize, onClick, isDuration, tone }) {
 // used, so the drill-down list is never a fabricated or approximate subset.
 export default function FunnelMetricsCard({ scope = 'me', title = 'FUNNEL', onSelectStage }) {
   const [periodKey, setPeriodKey] = useState('month');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [range, setRange] = useState(null);
 
   useEffect(() => {
     load();
-  }, [periodKey, scope]);
+  }, [periodKey, customFrom, customTo, scope]);
 
   async function load() {
+    const resolved = resolveDateRange(periodKey, PERIODS, customFrom, customTo);
+    if (!resolved) return; // custom selected, dates not both picked yet
     try {
-      const period = PERIODS.find((p) => p.key === periodKey);
-      const from = period.from().toISOString();
-      const to = new Date().toISOString();
-      setRange({ from, to });
-      const res = await api.leadFunnel(`?scope=${scope}&from=${from}`);
+      setRange(resolved);
+      const res = await api.leadFunnel(`?scope=${scope}&from=${resolved.from}&to=${resolved.to}`);
       setData(res);
     } catch (err) {
       setError(err.data?.message || 'Could not load funnel metrics.');
@@ -82,13 +84,15 @@ export default function FunnelMetricsCard({ scope = 'me', title = 'FUNNEL', onSe
     <Card>
       <SectionHeader
         right={
-          <div style={s.periodRow}>
-            {PERIODS.map((p) => (
-              <Button key={p.key} size="sm" variant={p.key === periodKey ? 'primary' : 'secondary'} onClick={() => setPeriodKey(p.key)}>
-                {p.label}
-              </Button>
-            ))}
-          </div>
+          <DateRangeFilter
+            presets={PERIODS.map((p) => ({ key: p.key, label: p.label.toUpperCase() }))}
+            periodKey={periodKey}
+            onSelectPreset={setPeriodKey}
+            customFrom={customFrom}
+            customTo={customTo}
+            onCustomFromChange={setCustomFrom}
+            onCustomToChange={setCustomTo}
+          />
         }
       >
         {title}
@@ -116,7 +120,6 @@ export default function FunnelMetricsCard({ scope = 'me', title = 'FUNNEL', onSe
 }
 
 const s = {
-  periodRow: { display: 'flex', gap: 6 },
   ratesRow: { display: 'flex', gap: 20, flexWrap: 'wrap' },
   comparisonNote: { color: 'var(--text-muted)', fontSize: 12, marginTop: 14, borderTop: '1px solid var(--border-hairline)', paddingTop: 10 },
   muted: { color: 'var(--text-muted)', fontSize: 13 },

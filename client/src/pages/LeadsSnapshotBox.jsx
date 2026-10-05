@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { Card, SectionHeader, Button, StatTile } from '../ui';
+import { Card, SectionHeader, StatTile, DateRangeFilter } from '../ui';
+import { resolveDateRange } from '../lib/dateRange';
 
 const PERIODS = [
   { key: 'month', label: 'This month', from: () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); } },
@@ -15,21 +16,22 @@ const ZERO = { totalLeads: 0, inMoshpit: 0, untouched: 0, quoted: 0, sold: 0 };
 // state just because nothing has happened yet in the selected period.
 export default function LeadsSnapshotBox({ agencyId, title = 'LEADS SNAPSHOT' }) {
   const [periodKey, setPeriodKey] = useState('month');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
     load();
-  }, [periodKey, agencyId]);
+  }, [periodKey, customFrom, customTo, agencyId]);
 
   async function load() {
     if (!agencyId) return;
+    const range = resolveDateRange(periodKey, PERIODS, customFrom, customTo);
+    if (!range) return; // custom selected, dates not both picked yet
     setError('');
     try {
-      const period = PERIODS.find((p) => p.key === periodKey);
-      const from = period.from().toISOString();
-      const to = new Date().toISOString();
-      const res = await api.leadsSnapshot(`?agencyId=${agencyId}&from=${from}&to=${to}`);
+      const res = await api.leadsSnapshot(`?agencyId=${agencyId}&from=${range.from}&to=${range.to}`);
       setData(res);
     } catch (err) {
       setError(err.data?.message || 'Could not load leads snapshot.');
@@ -42,13 +44,15 @@ export default function LeadsSnapshotBox({ agencyId, title = 'LEADS SNAPSHOT' })
     <Card>
       <SectionHeader
         right={
-          <div style={s.periodRow}>
-            {PERIODS.map((p) => (
-              <Button key={p.key} size="sm" variant={p.key === periodKey ? 'primary' : 'secondary'} onClick={() => setPeriodKey(p.key)}>
-                {p.label}
-              </Button>
-            ))}
-          </div>
+          <DateRangeFilter
+            presets={PERIODS.map((p) => ({ key: p.key, label: p.label.toUpperCase() }))}
+            periodKey={periodKey}
+            onSelectPreset={setPeriodKey}
+            customFrom={customFrom}
+            customTo={customTo}
+            onCustomFromChange={setCustomFrom}
+            onCustomToChange={setCustomTo}
+          />
         }
       >
         {title}
@@ -68,7 +72,6 @@ export default function LeadsSnapshotBox({ agencyId, title = 'LEADS SNAPSHOT' })
 }
 
 const s = {
-  periodRow: { display: 'flex', gap: 6 },
   error: { color: 'var(--danger)', fontSize: 12, marginBottom: 10 },
   statsGrid: { display: 'flex', gap: 24, flexWrap: 'wrap' },
 };

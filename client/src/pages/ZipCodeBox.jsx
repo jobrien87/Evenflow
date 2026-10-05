@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { Card, SectionHeader, Button, Modal } from '../ui';
+import { Card, SectionHeader, Button, Modal, DateRangeFilter } from '../ui';
+import { resolveDateRange } from '../lib/dateRange';
 
 const PERIODS = [
   { key: 'month', label: 'This month', from: () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); } },
@@ -23,22 +24,23 @@ function money(v) {
 // same as FlowScoreCard's onViewReport pattern.
 export default function ZipCodeBox({ agencyId, onViewReport, title = 'ZIP CODE PERFORMANCE' }) {
   const [periodKey, setPeriodKey] = useState('month');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [rows, setRows] = useState([]);
   const [error, setError] = useState('');
   const [showEmail, setShowEmail] = useState(false);
 
   useEffect(() => {
     load();
-  }, [periodKey, agencyId]);
+  }, [periodKey, customFrom, customTo, agencyId]);
 
   async function load() {
     if (!agencyId) return;
+    const range = resolveDateRange(periodKey, PERIODS, customFrom, customTo);
+    if (!range) return; // custom selected, dates not both picked yet
     setError('');
     try {
-      const period = PERIODS.find((p) => p.key === periodKey);
-      const from = period.from().toISOString();
-      const to = new Date().toISOString();
-      const res = await api.zipReport(`?agencyId=${agencyId}&from=${from}&to=${to}`);
+      const res = await api.zipReport(`?agencyId=${agencyId}&from=${range.from}&to=${range.to}`);
       setRows(res.rows.slice(0, SCROLL_N));
     } catch (err) {
       setError(err.data?.message || 'Could not load the zip code report.');
@@ -49,13 +51,15 @@ export default function ZipCodeBox({ agencyId, onViewReport, title = 'ZIP CODE P
     <Card>
       <SectionHeader
         right={
-          <div style={s.actionsRow}>
-            {PERIODS.map((p) => (
-              <Button key={p.key} size="sm" variant={p.key === periodKey ? 'primary' : 'secondary'} onClick={() => setPeriodKey(p.key)}>
-                {p.label}
-              </Button>
-            ))}
-          </div>
+          <DateRangeFilter
+            presets={PERIODS.map((p) => ({ key: p.key, label: p.label.toUpperCase() }))}
+            periodKey={periodKey}
+            onSelectPreset={setPeriodKey}
+            customFrom={customFrom}
+            customTo={customTo}
+            onCustomFromChange={setCustomFrom}
+            onCustomToChange={setCustomTo}
+          />
         }
       >
         {title}
@@ -97,6 +101,8 @@ export default function ZipCodeBox({ agencyId, onViewReport, title = 'ZIP CODE P
         <EmailZipReportModal
           agencyId={agencyId}
           periodKey={periodKey}
+          customFrom={customFrom}
+          customTo={customTo}
           onClose={() => setShowEmail(false)}
         />
       )}
@@ -104,20 +110,22 @@ export default function ZipCodeBox({ agencyId, onViewReport, title = 'ZIP CODE P
   );
 }
 
-function EmailZipReportModal({ agencyId, periodKey, onClose }) {
+function EmailZipReportModal({ agencyId, periodKey, customFrom, customTo, onClose }) {
   const [email, setEmail] = useState('');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
 
   async function send(e) {
     e.preventDefault();
+    const range = resolveDateRange(periodKey, PERIODS, customFrom, customTo);
+    if (!range) {
+      setStatus('Pick both a start and end date first.');
+      return;
+    }
     setBusy(true);
     setStatus('');
     try {
-      const period = PERIODS.find((p) => p.key === periodKey);
-      const from = period.from().toISOString();
-      const to = new Date().toISOString();
-      const res = await api.emailZipReport(email, `?agencyId=${agencyId}&from=${from}&to=${to}`);
+      const res = await api.emailZipReport(email, `?agencyId=${agencyId}&from=${range.from}&to=${range.to}`);
       setStatus(`Email status: ${res.emailStatus}`);
     } catch (err) {
       setStatus(err.data?.message || 'Failed to send report.');
@@ -148,7 +156,6 @@ function EmailZipReportModal({ agencyId, periodKey, onClose }) {
 }
 
 const s = {
-  actionsRow: { display: 'flex', gap: 6, flexWrap: 'wrap' },
   error: { color: 'var(--danger)', fontSize: 12, marginBottom: 10 },
   empty: { color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 13, padding: '8px 0' },
   headerRow: {

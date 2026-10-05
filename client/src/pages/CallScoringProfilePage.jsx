@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { Card, Badge, Button, SectionHeader, StatTile, Sparkline, BarRow, EmptyState } from '../ui';
+import { Card, Badge, Button, SectionHeader, StatTile, Sparkline, BarRow, DateRangeFilter, EmptyState } from '../ui';
+import { resolveDateRange } from '../lib/dateRange';
 import { STATUS_COLOR, Section, List, ObjectionsList, ScoreGrid, ManagerReviewForm, TranscriptEntry } from './CallsPanel';
 import FlowScoreSummaryCard from './FlowScoreSummaryCard';
 import CoachingHelperSection from './CoachingHelperSection';
@@ -36,6 +37,8 @@ export default function CallScoringProfilePage() {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
   const [periodKey, setPeriodKey] = useState('month');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [performance, setPerformance] = useState(null);
   const [callData, setCallData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -45,17 +48,16 @@ export default function CallScoringProfilePage() {
 
   useEffect(() => {
     load();
-  }, [periodKey, userId]);
+  }, [periodKey, customFrom, customTo, userId]);
 
   async function load() {
+    const range = resolveDateRange(periodKey, PERIODS, customFrom, customTo);
+    if (!range) return; // custom selected, dates not both picked yet
     setError('');
     try {
-      const period = PERIODS.find((p) => p.key === periodKey);
-      const from = period.from().toISOString();
-      const to = new Date().toISOString();
       const [perfRes, callRes] = await Promise.all([
-        api.userPerformance(userId, `?from=${from}&to=${to}`),
-        api.callScoringProfile(userId, `?from=${from}&to=${to}`),
+        api.userPerformance(userId, `?from=${range.from}&to=${range.to}`),
+        api.callScoringProfile(userId, `?from=${range.from}&to=${range.to}`),
       ]);
       setPerformance(perfRes);
       setCallData(callRes);
@@ -126,11 +128,15 @@ export default function CallScoringProfilePage() {
           <h3 style={s.h3}>{user.firstName} {user.lastName}</h3>
           <div style={s.subtitle}>CALL SCORING PROFILE</div>
         </div>
-        <div style={s.periodRow}>
-          {PERIODS.map((p) => (
-            <button key={p.key} style={s.periodBtn(periodKey === p.key)} onClick={() => setPeriodKey(p.key)}>{p.label}</button>
-          ))}
-        </div>
+        <DateRangeFilter
+          presets={PERIODS.map((p) => ({ key: p.key, label: p.label.toUpperCase() }))}
+          periodKey={periodKey}
+          onSelectPreset={setPeriodKey}
+          customFrom={customFrom}
+          customTo={customTo}
+          onCustomFromChange={setCustomFrom}
+          onCustomToChange={setCustomTo}
+        />
       </div>
 
       <FlowScoreSummaryCard snapshot={snapshot} explanation={explanation} componentPlaceholders={componentPlaceholders} />
@@ -354,11 +360,6 @@ const s = {
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, flexWrap: 'wrap', gap: 10 },
   h3: { color: 'var(--text-primary)', fontSize: 22, fontFamily: 'var(--font-display)', marginTop: 4 },
   subtitle: { color: 'var(--accent)', fontSize: 10, fontWeight: 700, letterSpacing: 2, marginTop: 2 },
-  periodRow: { display: 'flex', gap: 6 },
-  periodBtn: (active) => ({
-    padding: '8px 14px', borderRadius: 6, fontSize: 11, fontWeight: 700, letterSpacing: 0.3, cursor: 'pointer', border: 'none',
-    background: active ? 'var(--accent-gradient)' : 'var(--bg-elevated)', color: active ? 'var(--accent-on)' : 'var(--text-secondary)',
-  }),
   section: { marginBottom: 24 },
   statsRow: { display: 'flex', gap: 32, flexWrap: 'wrap', alignItems: 'center' },
   trendTile: { display: 'flex', flexDirection: 'column', gap: 6 },

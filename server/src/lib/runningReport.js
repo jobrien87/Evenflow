@@ -129,14 +129,20 @@ async function goalsWithProgress({ agencyId, userId = null }) {
   );
 }
 
-async function assembleProducerReport(userId) {
+// range: optional {from, to} Date pair overriding the default "this month
+// to now" window — only the funnel block honors it (recent calls stay
+// "most recent 5 regardless of period," goals stay scoped to whichever
+// goal is currently active, neither of which is "a report for a range").
+async function assembleProducerReport(userId, range) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) return null;
 
   const now = new Date();
+  const from = range?.from || startOfMonth(now);
+  const to = range?.to || now;
   const [flowScore, funnel, calls, goals] = await Promise.all([
     flowScoreBlock('USER', userId),
-    computeFunnel({ agencyId: user.agencyId, userId, from: startOfMonth(now), to: now }),
+    computeFunnel({ agencyId: user.agencyId, userId, from, to }),
     prisma.call.findMany({
       where: { uploadedById: userId },
       include: { analysis: true },
@@ -148,6 +154,7 @@ async function assembleProducerReport(userId) {
 
   return {
     user: { id: user.id, firstName: user.firstName, lastName: user.lastName, role: user.role },
+    period: { from: from.toISOString(), to: to.toISOString() },
     flowScore,
     funnel,
     recentCalls: calls
@@ -163,11 +170,13 @@ async function assembleProducerReport(userId) {
   };
 }
 
-async function assembleAgencyReport(agencyId) {
+async function assembleAgencyReport(agencyId, range) {
   const now = new Date();
+  const from = range?.from || startOfMonth(now);
+  const to = range?.to || now;
   const [flowScore, funnel, goals, producers] = await Promise.all([
     flowScoreBlock('AGENCY', agencyId),
-    computeFunnel({ agencyId, from: startOfMonth(now), to: now }),
+    computeFunnel({ agencyId, from, to }),
     goalsWithProgress({ agencyId }),
     prisma.user.findMany({
       where: { agencyId, role: 'PRODUCER', status: 'ACTIVE' },
@@ -194,7 +203,7 @@ async function assembleAgencyReport(agencyId) {
   );
   roster.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
 
-  return { agencyId, flowScore, funnel, goals, roster };
+  return { agencyId, period: { from: from.toISOString(), to: to.toISOString() }, flowScore, funnel, goals, roster };
 }
 
 module.exports = { assembleProducerReport, assembleAgencyReport, computeGoalActual, goalsWithProgress };

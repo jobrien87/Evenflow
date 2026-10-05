@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
-import { Card, Badge, Button, SectionHeader, EmptyState, ExportButton, StatTile, BarRow, LeadTypeIcon } from '../ui';
+import { Card, Badge, Button, SectionHeader, EmptyState, ExportButton, StatTile, BarRow, DateRangeFilter, LeadTypeIcon } from '../ui';
+import { resolveDateRange } from '../lib/dateRange';
 import { downloadCsv, fetchAllPages } from '../lib/downloadCsv';
 import ChatThread from './ChatThread';
 import TransferHistoryPanel from './TransferHistoryPanel';
@@ -65,6 +66,8 @@ export default function YieldTransfersPanel() {
   const [bulkError, setBulkError] = useState('');
   const [view, setView] = useState('live');
   const [tmPeriodKey, setTmPeriodKey] = useState('month');
+  const [tmCustomFrom, setTmCustomFrom] = useState('');
+  const [tmCustomTo, setTmCustomTo] = useState('');
   const [tmPerformance, setTmPerformance] = useState(null);
   const [tmPerfError, setTmPerfError] = useState('');
 
@@ -76,15 +79,14 @@ export default function YieldTransfersPanel() {
 
   useEffect(() => {
     loadTmPerformance();
-  }, [tmPeriodKey]);
+  }, [tmPeriodKey, tmCustomFrom, tmCustomTo]);
 
   async function loadTmPerformance() {
+    const range = resolveDateRange(tmPeriodKey, TM_PERIODS, tmCustomFrom, tmCustomTo);
+    if (!range) return; // custom selected, dates not both picked yet
     setTmPerfError('');
     try {
-      const period = TM_PERIODS.find((p) => p.key === tmPeriodKey);
-      const from = period.from().toISOString();
-      const to = new Date().toISOString();
-      const res = await api.telemarketerPerformance(`?from=${from}&to=${to}`);
+      const res = await api.telemarketerPerformance(`?from=${range.from}&to=${range.to}`);
       setTmPerformance(res.telemarketers);
     } catch (err) {
       setTmPerfError(err.data?.message || 'Could not load telemarketer performance.');
@@ -211,11 +213,15 @@ export default function YieldTransfersPanel() {
       <section style={s.tmPerfSection}>
         <div style={s.headerRow}>
           <SectionHeader>Telemarketer Performance</SectionHeader>
-          <div style={s.periodRow}>
-            {TM_PERIODS.map((p) => (
-              <button key={p.key} type="button" style={s.periodBtn(tmPeriodKey === p.key)} onClick={() => setTmPeriodKey(p.key)}>{p.label}</button>
-            ))}
-          </div>
+          <DateRangeFilter
+            presets={TM_PERIODS.map((p) => ({ key: p.key, label: p.label.toUpperCase() }))}
+            periodKey={tmPeriodKey}
+            onSelectPreset={setTmPeriodKey}
+            customFrom={tmCustomFrom}
+            customTo={tmCustomTo}
+            onCustomFromChange={setTmCustomFrom}
+            onCustomToChange={setTmCustomTo}
+          />
         </div>
         {tmPerfError && <div style={s.error}>{tmPerfError}</div>}
         {!tmPerfError && (!tmPerformance || tmPerformance.length === 0) && (
@@ -448,12 +454,7 @@ const s = {
   statsRow: { display: 'flex', gap: 32, marginBottom: 20, flexWrap: 'wrap' },
   breakdownCard: { marginBottom: 16 },
   tmPerfSection: { marginBottom: 28 },
-  headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 },
-  periodRow: { display: 'flex', gap: 6 },
-  periodBtn: (active) => ({
-    padding: '8px 14px', borderRadius: 6, fontSize: 11, fontWeight: 700, letterSpacing: 0.3, cursor: 'pointer', border: 'none',
-    background: active ? 'var(--accent-gradient)' : 'var(--bg-elevated)', color: active ? 'var(--accent-on)' : 'var(--text-secondary)',
-  }),
+  headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10, flexWrap: 'wrap', gap: 8 },
   tableCard: { padding: 0, overflow: 'hidden' },
   tmTableHeaderRow: { display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', padding: '10px 16px', fontSize: 10, letterSpacing: 1, color: 'var(--text-muted)', fontWeight: 700, borderBottom: '1px solid var(--border-hairline)' },
   tmTableRow: { display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', padding: '10px 16px', fontSize: 12, color: 'var(--text-primary)', borderBottom: '1px solid var(--border-hairline)', alignItems: 'center' },

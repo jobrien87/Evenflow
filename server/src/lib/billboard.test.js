@@ -36,6 +36,7 @@ const suffix = Date.now();
 let agencyId;
 let producerAId;
 let producerBId;
+let vendorId;
 
 before(async () => {
   const agency = await prisma.agency.create({ data: { name: `Billboard Test Agency ${suffix}` } });
@@ -50,15 +51,21 @@ before(async () => {
   });
   producerBId = producerB.id;
 
-  async function makeSoldLead(assignedToId, product, premiumCents) {
+  const vendor = await prisma.vendor.create({
+    data: { agencyId, name: `Billboard Test Vendor ${suffix}`, email: `vendor-${suffix}@test.local`, product: 'AUTO' },
+  });
+  vendorId = vendor.id;
+
+  async function makeSoldLead(assignedToId, product, premiumCents, extra = {}) {
     const customer = await prisma.customer.create({ data: { firstName: 'Billboard', lastName: 'Cust' } });
     return prisma.lead.create({
-      data: { agencyId, customerId: customer.id, assignedToId, status: 'SOLD', saleProduct: product, salePremiumCents: premiumCents },
+      data: { agencyId, customerId: customer.id, assignedToId, status: 'SOLD', saleProduct: product, salePremiumCents: premiumCents, ...extra },
     });
   }
 
-  // Producer A: 2 Auto sales ($100 + $200). Producer B: 1 Home sale ($300).
-  await makeSoldLead(producerAId, 'AUTO', 10000);
+  // Producer A: 2 Auto sales ($100 + $200), one vendor-sourced w/ zip, one
+  // direct/no-vendor w/ no zip. Producer B: 1 Home sale ($300), direct.
+  await makeSoldLead(producerAId, 'AUTO', 10000, { vendorId, zip: '90210' });
   await makeSoldLead(producerAId, 'AUTO', 20000);
   await makeSoldLead(producerBId, 'HOME', 30000);
 });
@@ -86,6 +93,23 @@ test('computeBillboard: aggregates real sold leads by producer and by product', 
   const home = result.byProduct.find((p) => p.product === 'HOME');
   assert.equal(home.soldCount, 1);
   assert.equal(home.premiumCents, 30000);
+
+  const vendorRow = result.byVendor.find((v) => v.vendorId === vendorId);
+  assert.equal(vendorRow.soldCount, 1);
+  assert.equal(vendorRow.premiumCents, 10000);
+
+  const directRow = result.byVendor.find((v) => v.vendorId === null);
+  assert.equal(directRow.vendorName, 'Direct / No Vendor');
+  assert.equal(directRow.soldCount, 2);
+  assert.equal(directRow.premiumCents, 50000);
+
+  const zipRow = result.byZip.find((z) => z.zip === '90210');
+  assert.equal(zipRow.soldCount, 1);
+  assert.equal(zipRow.premiumCents, 10000);
+
+  const unknownZipRow = result.byZip.find((z) => z.zip === 'Unknown');
+  assert.equal(unknownZipRow.soldCount, 2);
+  assert.equal(unknownZipRow.premiumCents, 50000);
 });
 
 test('computeBillboard: an agency with no sales in range returns real zeros, not an error', async () => {
@@ -95,5 +119,7 @@ test('computeBillboard: an agency with no sales in range returns real zeros, not
   assert.equal(result.totals.premiumCents, 0);
   assert.deepEqual(result.byProducer, []);
   assert.deepEqual(result.byProduct, []);
+  assert.deepEqual(result.byVendor, []);
+  assert.deepEqual(result.byZip, []);
   assert.ok(result.series.length > 0, 'series is still fully bucketed even with no data');
 });

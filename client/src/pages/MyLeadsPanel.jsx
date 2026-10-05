@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
-import { Card, Badge, Button, SectionHeader, StatTile, EmptyState, LeadTypeIcon } from '../ui';
+import { Card, Badge, Button, SectionHeader, StatTile, DateRangeFilter, EmptyState, LeadTypeIcon } from '../ui';
+import { resolveDateRange } from '../lib/dateRange';
 import LeadDetailModal from './LeadDetailModal';
 
 const PERIODS = [
@@ -22,6 +23,8 @@ const pct = (v) => (v === null || v === undefined ? '—' : `${v}%`);
 export default function MyLeadsPanel() {
   const { user } = useAuth();
   const [periodKey, setPeriodKey] = useState('month');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [performance, setPerformance] = useState(null);
   const [leads, setLeads] = useState([]);
   const [total, setTotal] = useState(0);
@@ -32,7 +35,7 @@ export default function MyLeadsPanel() {
 
   useEffect(() => {
     load();
-  }, [periodKey, user?.id]);
+  }, [periodKey, customFrom, customTo, user?.id]);
 
   useEffect(() => {
     loadLeads();
@@ -40,13 +43,12 @@ export default function MyLeadsPanel() {
 
   async function load() {
     if (!user?.id) return;
+    const range = resolveDateRange(periodKey, PERIODS, customFrom, customTo);
+    if (!range) return; // custom selected, dates not both picked yet
     setError('');
     try {
-      const period = PERIODS.find((p) => p.key === periodKey);
-      const from = period.from().toISOString();
-      const to = new Date().toISOString();
       const [perfRes] = await Promise.all([
-        api.userPerformance(user.id, `?from=${from}&to=${to}`),
+        api.userPerformance(user.id, `?from=${range.from}&to=${range.to}`),
         loadLeads(),
       ]);
       setPerformance(perfRes);
@@ -77,11 +79,15 @@ export default function MyLeadsPanel() {
     <div style={s.wrap}>
       <div style={s.headerRow}>
         <h3 style={s.h3}>MY LEADS ({total})</h3>
-        <div style={s.periodRow}>
-          {PERIODS.map((p) => (
-            <button key={p.key} style={s.periodBtn(periodKey === p.key)} onClick={() => setPeriodKey(p.key)}>{p.label}</button>
-          ))}
-        </div>
+        <DateRangeFilter
+          presets={PERIODS.map((p) => ({ key: p.key, label: p.label.toUpperCase() }))}
+          periodKey={periodKey}
+          onSelectPreset={setPeriodKey}
+          customFrom={customFrom}
+          customTo={customTo}
+          onCustomFromChange={setCustomFrom}
+          onCustomToChange={setCustomTo}
+        />
       </div>
 
       {error && (
@@ -180,11 +186,6 @@ const s = {
   wrap: {},
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 },
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2 },
-  periodRow: { display: 'flex', gap: 6 },
-  periodBtn: (active) => ({
-    padding: '8px 14px', borderRadius: 6, fontSize: 11, fontWeight: 700, letterSpacing: 0.3, cursor: 'pointer', border: 'none',
-    background: active ? 'var(--accent-gradient)' : 'var(--bg-elevated)', color: active ? 'var(--accent-on)' : 'var(--text-secondary)',
-  }),
   loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16 },
   retryButton: { padding: '6px 12px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 11 },
   statsSection: { marginBottom: 24 },

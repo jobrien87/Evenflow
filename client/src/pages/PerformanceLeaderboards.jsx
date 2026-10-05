@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
-import { Card, SectionHeader, Button, ExportButton } from '../ui';
+import { Card, SectionHeader, ExportButton, DateRangeFilter } from '../ui';
+import { resolveDateRange } from '../lib/dateRange';
 import { downloadCsv } from '../lib/downloadCsv';
 
 const PERIODS = [
@@ -20,21 +21,22 @@ const pct = (v) => (v === null || v === undefined ? '—' : `${v}%`);
 export default function PerformanceLeaderboards({ agencyId, title = 'PERFORMANCE', highlightUserId, showVendors = true, linkToDetail = false }) {
   const navigate = useNavigate();
   const [periodKey, setPeriodKey] = useState('month');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [vendors, setVendors] = useState(null);
   const [agents, setAgents] = useState(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
     load();
-  }, [periodKey, agencyId]);
+  }, [periodKey, customFrom, customTo, agencyId]);
 
   async function load() {
     if (!agencyId) return;
+    const range = resolveDateRange(periodKey, PERIODS, customFrom, customTo);
+    if (!range) return; // custom selected, dates not both picked yet
     try {
-      const period = PERIODS.find((p) => p.key === periodKey);
-      const from = period.from().toISOString();
-      const to = new Date().toISOString();
-      const params = `?agencyId=${agencyId}&from=${from}&to=${to}`;
+      const params = `?agencyId=${agencyId}&from=${range.from}&to=${range.to}`;
       // Vendor cost data (cost-per-lead/quote/sale) is owner/manager business
       // info — Producers only get their own leaderboard's visibility.
       const [vendorRes, agentRes] = await Promise.all([
@@ -53,13 +55,15 @@ export default function PerformanceLeaderboards({ agencyId, title = 'PERFORMANCE
     <div>
       <SectionHeader
         right={
-          <div style={s.periodRow}>
-            {PERIODS.map((p) => (
-              <Button key={p.key} size="sm" variant={p.key === periodKey ? 'primary' : 'secondary'} onClick={() => setPeriodKey(p.key)}>
-                {p.label}
-              </Button>
-            ))}
-          </div>
+          <DateRangeFilter
+            presets={PERIODS.map((p) => ({ key: p.key, label: p.label.toUpperCase() }))}
+            periodKey={periodKey}
+            onSelectPreset={setPeriodKey}
+            customFrom={customFrom}
+            customTo={customTo}
+            onCustomFromChange={setCustomFrom}
+            onCustomToChange={setCustomTo}
+          />
         }
       >
         {title}
@@ -200,7 +204,6 @@ function RankBadge({ n }) {
 }
 
 const s = {
-  periodRow: { display: 'flex', gap: 6, flexWrap: 'wrap' },
   error: { color: 'var(--danger)', fontSize: 13, marginBottom: 12 },
   grid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 },
   gridSingle: { display: 'grid', gridTemplateColumns: '1fr', gap: 16 },

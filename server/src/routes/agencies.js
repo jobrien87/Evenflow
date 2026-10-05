@@ -272,15 +272,23 @@ router.get('/:agencyId/activity', async (req, res, next) => {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const pageSize = Math.min(Math.max(parseInt(req.query.pageSize, 10) || 50, 1), 100);
 
+    // Optional real date-range filter — same "no from/to means no filter
+    // at all" default every other date-scoped report in this app uses,
+    // rather than silently defaulting to a window the caller never asked for.
+    const from = req.query.from ? new Date(req.query.from) : undefined;
+    const to = req.query.to ? new Date(req.query.to) : undefined;
+    const hasValidRange = from && to && !Number.isNaN(from.getTime()) && !Number.isNaN(to.getTime());
+    const where = { agencyId: req.params.agencyId, ...(hasValidRange ? { createdAt: { gte: from, lte: to } } : {}) };
+
     const [events, total] = await Promise.all([
       prisma.auditEvent.findMany({
-        where: { agencyId: req.params.agencyId },
+        where,
         include: { actor: { select: { firstName: true, lastName: true, role: true } } },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
-      prisma.auditEvent.count({ where: { agencyId: req.params.agencyId } }),
+      prisma.auditEvent.count({ where }),
     ]);
 
     return res.json({ success: true, page, pageSize, total, events });

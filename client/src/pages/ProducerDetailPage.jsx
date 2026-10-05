@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
-import { Card, Badge, Button, SectionHeader, StatTile, EmptyState } from '../ui';
+import { Card, Badge, Button, SectionHeader, StatTile, DateRangeFilter, EmptyState } from '../ui';
+import { resolveDateRange } from '../lib/dateRange';
 import CoachingHelperSection from './CoachingHelperSection';
 import FlowScoreSummaryCard from './FlowScoreSummaryCard';
 
@@ -17,21 +18,22 @@ export default function ProducerDetailPage() {
   const { userId } = useParams();
   const navigate = useNavigate();
   const [periodKey, setPeriodKey] = useState('month');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
     load();
-  }, [periodKey, userId]);
+  }, [periodKey, customFrom, customTo, userId]);
 
   async function load() {
+    const range = resolveDateRange(periodKey, PERIODS, customFrom, customTo);
+    if (!range) return; // custom selected, dates not both picked yet
     setError('');
     try {
-      const period = PERIODS.find((p) => p.key === periodKey);
-      const from = period.from().toISOString();
-      const to = new Date().toISOString();
-      const res = await api.userPerformance(userId, `?from=${from}&to=${to}`);
+      const res = await api.userPerformance(userId, `?from=${range.from}&to=${range.to}`);
       setData(res);
     } catch (err) {
       setError(err.data?.message || 'Could not load this producer\'s performance. Try refreshing.');
@@ -67,11 +69,15 @@ export default function ProducerDetailPage() {
           <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>← BACK</Button>
           <h3 style={s.h3}>{user.firstName} {user.lastName}</h3>
         </div>
-        <div style={s.periodRow}>
-          {PERIODS.map((p) => (
-            <button key={p.key} style={s.periodBtn(periodKey === p.key)} onClick={() => setPeriodKey(p.key)}>{p.label}</button>
-          ))}
-        </div>
+        <DateRangeFilter
+          presets={PERIODS.map((p) => ({ key: p.key, label: p.label.toUpperCase() }))}
+          periodKey={periodKey}
+          onSelectPreset={setPeriodKey}
+          customFrom={customFrom}
+          customTo={customTo}
+          onCustomFromChange={setCustomFrom}
+          onCustomToChange={setCustomTo}
+        />
       </div>
 
       <FlowScoreSummaryCard snapshot={snapshot} explanation={explanation} componentPlaceholders={componentPlaceholders} />
@@ -155,11 +161,6 @@ const s = {
   wrap: {},
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, flexWrap: 'wrap', gap: 10 },
   h3: { color: 'var(--text-primary)', fontSize: 22, fontFamily: 'var(--font-display)', marginTop: 4 },
-  periodRow: { display: 'flex', gap: 6 },
-  periodBtn: (active) => ({
-    padding: '8px 14px', borderRadius: 6, fontSize: 11, fontWeight: 700, letterSpacing: 0.3, cursor: 'pointer', border: 'none',
-    background: active ? 'var(--accent-gradient)' : 'var(--bg-elevated)', color: active ? 'var(--accent-on)' : 'var(--text-secondary)',
-  }),
   loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   retryButton: { padding: '6px 12px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 11 },
   section: { marginBottom: 24 },

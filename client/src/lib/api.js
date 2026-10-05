@@ -299,8 +299,8 @@ export const api = {
   deleteGoal: (id) => request(`/goals/${id}`, { method: 'DELETE' }),
   parseGoal: (text) => request('/goals/parse', { method: 'POST', body: { text } }),
 
-  myRunningReport: () => request('/running-report/me'),
-  agencyRunningReport: (agencyId) => request(`/running-report/agency/${agencyId}`),
+  myRunningReport: (params = '') => request(`/running-report/me${params}`),
+  agencyRunningReport: (agencyId, params = '') => request(`/running-report/agency/${agencyId}${params}`),
 
   chatConversations: () => request('/chat/conversations'),
   chatEntityConversation: (entityType, entityId) => request(`/chat/conversations/entity/${entityType}/${entityId}`),

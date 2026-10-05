@@ -1,14 +1,28 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { ExportButton, EdSuggestionBox } from '../ui';
+import { ExportButton, EdSuggestionBox, DateRangeFilter } from '../ui';
+import { resolveDateRange } from '../lib/dateRange';
 import { downloadCsv, fetchAllPages } from '../lib/downloadCsv';
 
 const REVENUE_CATEGORIES = ['SUBSCRIPTION', 'TRANSFER_REVENUE', 'LEAD_REVENUE', 'OTHER'];
 const COST_CATEGORIES = ['VENDOR_LEAD_COST', 'TELEMARKETER_COST', 'TRANSFER_COST', 'API_COST', 'CREDIT', 'REFUND', 'OTHER'];
 
+// No preset row existed here at all before — /financials/summary and
+// /by-vendor both already default to "this month" server-side
+// (parseDateRange) when no from/to is sent, so 'month' is both this
+// page's default preset and the fallback the backend itself would pick.
+const PERIODS = [
+  { key: 'month', label: 'This month', from: () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); } },
+  { key: 'quarter', label: 'This quarter', from: () => { const d = new Date(); return new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3, 1); } },
+  { key: 'ytd', label: 'Year to date', from: () => { const d = new Date(); return new Date(d.getFullYear(), 0, 1); } },
+];
+
 export default function FinancialsPanel() {
   const { user } = useAuth();
+  const [periodKey, setPeriodKey] = useState('month');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [summary, setSummary] = useState(null);
   const [vendors, setVendors] = useState([]);
   const [aiUsage, setAiUsage] = useState(null);
@@ -22,16 +36,21 @@ export default function FinancialsPanel() {
 
   useEffect(() => {
     load();
-  }, []);
+  }, [periodKey, customFrom, customTo]);
 
   async function load() {
+    const range = resolveDateRange(periodKey, PERIODS, customFrom, customTo);
+    if (!range) return; // custom selected, dates not both picked yet
     setLoadError('');
+    const params = `?from=${range.from}&to=${range.to}`;
     // /financials/by-vendor now always requires a single agencyId (an
     // unscoped platform-wide vendor breakdown isn't a real report and was
     // a scale/N+1 risk) — Platform Owner's financials view stays
     // aggregate-only here rather than picking one agency arbitrarily.
-    const promises = [api.financialSummary()];
-    if (!isPlatformOwner) promises.push(api.financialByVendor());
+    // AI operational cost is a lifetime running total with no date
+    // filter of its own (GET /ed/usage-summary) — left out of the range.
+    const promises = [api.financialSummary(params)];
+    if (!isPlatformOwner) promises.push(api.financialByVendor(params));
     if (isPlatformOwner) promises.push(api.edUsageSummary());
     try {
       const results = await Promise.all(promises);
@@ -94,7 +113,18 @@ export default function FinancialsPanel() {
         <div style={s.periodLabel}>
           {new Date(summary.period.from).toLocaleDateString()} – {new Date(summary.period.to).toLocaleDateString()}
         </div>
-        <ExportButton label="EXPORT FULL LEDGER" onExport={exportLedger} />
+        <div style={s.periodControlsRow}>
+          <DateRangeFilter
+            presets={PERIODS.map((p) => ({ key: p.key, label: p.label.toUpperCase() }))}
+            periodKey={periodKey}
+            onSelectPreset={setPeriodKey}
+            customFrom={customFrom}
+            customTo={customTo}
+            onCustomFromChange={setCustomFrom}
+            onCustomToChange={setCustomTo}
+          />
+          <ExportButton label="EXPORT FULL LEDGER" onExport={exportLedger} />
+        </div>
       </div>
 
       <div style={{ marginBottom: 16 }}>
@@ -264,8 +294,9 @@ const s = {
   wrap: {},
   loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', gap: 12 },
   retryButton: { padding: '6px 14px', background: 'transparent', border: '1px solid var(--danger)', color: 'var(--danger)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700 },
-  periodHeaderRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 8, flexWrap: 'wrap' },
-  periodLabel: { color: 'var(--text-muted)', fontSize: 12 },
+  periodHeaderRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, gap: 8, flexWrap: 'wrap' },
+  periodLabel: { color: 'var(--text-muted)', fontSize: 12, paddingTop: 8 },
+  periodControlsRow: { display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' },
   statsRow: { display: 'flex', gap: 16, marginBottom: 16 },
   stat: { background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 16, flex: 1, textAlign: 'center' },
   statValue: { fontSize: 24, fontWeight: 700 },

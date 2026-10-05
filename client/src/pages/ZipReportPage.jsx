@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
-import { ExportButton, EmptyState } from '../ui';
+import { ExportButton, DateRangeFilter, EmptyState } from '../ui';
+import { resolveDateRange } from '../lib/dateRange';
 import { downloadCsv } from '../lib/downloadCsv';
 
 const PERIODS = [
@@ -26,6 +27,8 @@ function money(v) {
 // CLOSE handled by the parent, ExportButton + downloadCsv for CSV export).
 export default function ZipReportPage({ agencyId, onClose }) {
   const [periodKey, setPeriodKey] = useState('month');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [rows, setRows] = useState([]);
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState('totalLeads');
@@ -34,16 +37,15 @@ export default function ZipReportPage({ agencyId, onClose }) {
 
   useEffect(() => {
     load();
-  }, [periodKey, agencyId]);
+  }, [periodKey, customFrom, customTo, agencyId]);
 
   async function load() {
+    const range = resolveDateRange(periodKey, PERIODS, customFrom, customTo);
+    if (!range) return; // custom selected, dates not both picked yet
     setError('');
     setLoading(true);
     try {
-      const period = PERIODS.find((p) => p.key === periodKey);
-      const from = period.from().toISOString();
-      const to = new Date().toISOString();
-      const res = await api.zipReport(`?agencyId=${agencyId}&from=${from}&to=${to}`);
+      const res = await api.zipReport(`?agencyId=${agencyId}&from=${range.from}&to=${range.to}`);
       setRows(res.rows);
     } catch (err) {
       setError(err.data?.message || 'Could not load the zip code report.');
@@ -87,13 +89,15 @@ export default function ZipReportPage({ agencyId, onClose }) {
       </div>
 
       <div style={s.filterRow}>
-        <div style={s.periodRow}>
-          {PERIODS.map((p) => (
-            <button key={p.key} style={p.key === periodKey ? s.periodButtonActive : s.periodButton} onClick={() => setPeriodKey(p.key)}>
-              {p.label}
-            </button>
-          ))}
-        </div>
+        <DateRangeFilter
+          presets={PERIODS.map((p) => ({ key: p.key, label: p.label.toUpperCase() }))}
+          periodKey={periodKey}
+          onSelectPreset={setPeriodKey}
+          customFrom={customFrom}
+          customTo={customTo}
+          onCustomFromChange={setCustomFrom}
+          onCustomToChange={setCustomTo}
+        />
         <input
           style={s.searchInput}
           placeholder="Filter by zip…"
@@ -152,16 +156,7 @@ const s = {
     background: 'none', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-secondary)',
     fontSize: 12, fontWeight: 700, padding: '8px 14px', cursor: 'pointer',
   },
-  filterRow: { display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' },
-  periodRow: { display: 'flex', gap: 6 },
-  periodButton: {
-    background: 'none', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-secondary)',
-    fontSize: 12, padding: '7px 12px', cursor: 'pointer',
-  },
-  periodButtonActive: {
-    background: 'var(--accent-gradient)', border: '1px solid var(--border-accent)', borderRadius: 6, color: 'var(--accent-on)',
-    fontSize: 12, fontWeight: 700, padding: '7px 12px', cursor: 'pointer',
-  },
+  filterRow: { display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'flex-start' },
   searchInput: { flex: 1, minWidth: 160, padding: '8px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 13 },
   sortSelect: { padding: '8px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 13 },
   error: { color: 'var(--danger)', fontSize: 13, marginBottom: 12 },

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { Card, StatTile, SectionHeader } from '../ui';
+import { Card, StatTile, SectionHeader, DateRangeFilter } from '../ui';
+import { resolveDateRange } from '../lib/dateRange';
 import CoachingBreakdownResult from './CoachingBreakdownResult';
 import CoachingVideoTheater from './CoachingVideoTheater';
 
@@ -44,18 +45,19 @@ export default function CallsPanel() {
   }, [user?.role]);
 
   const [coachPeriod, setCoachPeriod] = useState('month');
+  const [coachCustomFrom, setCoachCustomFrom] = useState('');
+  const [coachCustomTo, setCoachCustomTo] = useState('');
   const [coachResult, setCoachResult] = useState(null);
   const [coachBusy, setCoachBusy] = useState(false);
   const [coachError, setCoachError] = useState('');
 
   async function generateMyCoaching() {
+    const range = resolveDateRange(coachPeriod, COACHING_PERIODS, coachCustomFrom, coachCustomTo);
+    if (!range) return; // custom selected, dates not both picked yet
     setCoachBusy(true);
     setCoachError('');
     try {
-      const period = COACHING_PERIODS.find((p) => p.key === coachPeriod);
-      const from = period.from().toISOString();
-      const to = new Date().toISOString();
-      const data = await api.coachingBreakdown(`?from=${from}&to=${to}`);
+      const data = await api.coachingBreakdown(`?from=${range.from}&to=${range.to}`);
       setCoachResult(data);
     } catch (err) {
       setCoachError(err.data?.message || 'Could not generate your coaching breakdown.');
@@ -69,7 +71,7 @@ export default function CallsPanel() {
   // on Call Scoring instead, scoped to whichever producer they pick).
   useEffect(() => {
     if (user?.role === 'PRODUCER') generateMyCoaching();
-  }, [user?.role, coachPeriod]);
+  }, [user?.role, coachPeriod, coachCustomFrom, coachCustomTo]);
 
   if (notEntitled) {
     return (
@@ -116,9 +118,15 @@ export default function CallsPanel() {
         <section style={s.section}>
           <div style={s.headerRow}>
             <SectionHeader>My Coaching Breakdown</SectionHeader>
-            <select style={s.periodSelect} value={coachPeriod} onChange={(e) => setCoachPeriod(e.target.value)}>
-              {COACHING_PERIODS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-            </select>
+            <DateRangeFilter
+              presets={COACHING_PERIODS.map((p) => ({ key: p.key, label: p.label.toUpperCase() }))}
+              periodKey={coachPeriod}
+              onSelectPreset={setCoachPeriod}
+              customFrom={coachCustomFrom}
+              customTo={coachCustomTo}
+              onCustomFromChange={setCoachCustomFrom}
+              onCustomToChange={setCoachCustomTo}
+            />
           </div>
           <Card>
             {coachError && <div style={s.error}>{coachError}</div>}
@@ -347,7 +355,6 @@ export function ManagerReviewForm({ analysis, onSubmit }) {
 }
 
 const s = {
-  periodSelect: { padding: '8px 10px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 11 },
   thinking: { color: 'var(--text-muted)', fontSize: 13, fontStyle: 'italic' },
   notEntitledBox: { background: 'var(--warning-soft)', border: '1px solid rgba(255, 184, 77, 0.4)', color: 'var(--warning)', padding: 20, borderRadius: 8, fontSize: 13, lineHeight: 1.6 },
   reviewForm: { background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 14, marginBottom: 18 },

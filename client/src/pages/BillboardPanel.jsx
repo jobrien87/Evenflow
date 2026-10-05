@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { Card, SectionHeader, StatTile, BarRow, Badge, ExportButton, EmptyState } from '../ui';
+import { Card, SectionHeader, StatTile, BarRow, Badge, ExportButton, DateRangeFilter, EmptyState } from '../ui';
 import { downloadCsv } from '../lib/downloadCsv';
 
 const GRANULARITIES = [
-  { key: 'day', label: 'Day' },
-  { key: 'week', label: 'Week' },
-  { key: 'month', label: 'Month' },
-  { key: 'year', label: 'Year' },
+  { key: 'day', label: 'DAY' },
+  { key: 'week', label: 'WEEK' },
+  { key: 'month', label: 'MONTH' },
+  { key: 'year', label: 'YEAR' },
 ];
 
 const money = (cents) => `$${((cents || 0) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
@@ -51,17 +51,38 @@ function TrendLine({ series, height = 140 }) {
 export default function BillboardPanel() {
   const { user } = useAuth();
   const [granularity, setGranularity] = useState('month');
+  // The granularity tabs (Day/Week/Month/Year) double as range presets —
+  // each implies its own default lookback window server-side. "Custom"
+  // keeps whichever granularity was last picked (still controls the trend
+  // line's bucket size) but overrides the implied range with real dates.
+  const [useCustomRange, setUseCustomRange] = useState(false);
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
     load();
-  }, [granularity]);
+  }, [granularity, useCustomRange, customFrom, customTo]);
+
+  function selectPreset(key) {
+    if (key === 'custom') {
+      setUseCustomRange(true);
+      return;
+    }
+    setUseCustomRange(false);
+    setGranularity(key);
+  }
 
   async function load() {
     setError('');
     try {
-      const res = await api.billboard(`?granularity=${granularity}`);
+      const params = new URLSearchParams({ granularity });
+      if (useCustomRange && customFrom && customTo) {
+        params.set('from', new Date(`${customFrom}T00:00:00.000Z`).toISOString());
+        params.set('to', new Date(`${customTo}T23:59:59.999Z`).toISOString());
+      }
+      const res = await api.billboard(`?${params.toString()}`);
       setData(res);
     } catch (err) {
       setError(err.data?.message || 'Could not load the Billboard. Try refreshing.');
@@ -75,11 +96,15 @@ export default function BillboardPanel() {
     <div>
       <div style={s.headerRow}>
         <SectionHeader>Billboard</SectionHeader>
-        <div style={s.tabRow}>
-          {GRANULARITIES.map((g) => (
-            <button key={g.key} style={s.tab(granularity === g.key)} onClick={() => setGranularity(g.key)}>{g.label.toUpperCase()}</button>
-          ))}
-        </div>
+        <DateRangeFilter
+          presets={GRANULARITIES}
+          periodKey={useCustomRange ? 'custom' : granularity}
+          onSelectPreset={selectPreset}
+          customFrom={customFrom}
+          customTo={customTo}
+          onCustomFromChange={setCustomFrom}
+          onCustomToChange={setCustomTo}
+        />
       </div>
 
       <div style={s.statsRow}>
@@ -139,17 +164,60 @@ export default function BillboardPanel() {
           ))
         )}
       </Card>
+
+      <Card style={s.card}>
+        <div style={s.cardTitleRow}>
+          <div style={s.cardTitle}>BY VENDOR</div>
+          <ExportButton onExport={() => downloadCsv('billboard-by-vendor', data.byVendor, [
+            { key: 'vendorName', label: 'Vendor' },
+            { key: 'soldCount', label: 'Sold' },
+            { key: (r) => (r.premiumCents / 100).toFixed(2), label: 'Premium ($)' },
+          ])} />
+        </div>
+        {data.byVendor.length === 0 ? (
+          <div style={s.empty}>No sales in this period yet.</div>
+        ) : (
+          data.byVendor.map((row) => (
+            <BarRow
+              key={row.vendorId || 'direct'}
+              label={row.vendorName}
+              value={row.soldCount}
+              max={data.totals.soldCount || 1}
+              valueLabel={`${row.soldCount} · ${money(row.premiumCents)}`}
+            />
+          ))
+        )}
+      </Card>
+
+      <Card style={s.card}>
+        <div style={s.cardTitleRow}>
+          <div style={s.cardTitle}>BY ZIP CODE</div>
+          <ExportButton onExport={() => downloadCsv('billboard-by-zip', data.byZip, [
+            { key: 'zip', label: 'Zip' },
+            { key: 'soldCount', label: 'Sold' },
+            { key: (r) => (r.premiumCents / 100).toFixed(2), label: 'Premium ($)' },
+          ])} />
+        </div>
+        {data.byZip.length === 0 ? (
+          <div style={s.empty}>No sales in this period yet.</div>
+        ) : (
+          data.byZip.map((row) => (
+            <BarRow
+              key={row.zip}
+              label={row.zip}
+              value={row.soldCount}
+              max={data.totals.soldCount || 1}
+              valueLabel={`${row.soldCount} · ${money(row.premiumCents)}`}
+            />
+          ))
+        )}
+      </Card>
     </div>
   );
 }
 
 const s = {
-  headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 16 },
-  tabRow: { display: 'flex', gap: 8 },
-  tab: (active) => ({
-    padding: '8px 14px', borderRadius: 6, border: '1px solid var(--border-strong)', cursor: 'pointer', fontSize: 11, fontWeight: 700,
-    background: active ? 'var(--accent-gradient)' : 'transparent', color: active ? 'var(--accent-on)' : 'var(--text-secondary)',
-  }),
+  headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10, marginBottom: 16 },
   statsRow: { display: 'flex', gap: 32, flexWrap: 'wrap', marginBottom: 20 },
   card: { marginBottom: 16, padding: 'var(--space-4)' },
   cardTitleRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },

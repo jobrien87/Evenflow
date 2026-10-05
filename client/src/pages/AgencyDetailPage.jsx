@@ -1,10 +1,17 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
-import { Card, Badge, Button, StatTile, SectionHeader, EmptyState, Modal, ExportButton } from '../ui';
+import { Card, Badge, Button, StatTile, SectionHeader, EmptyState, Modal, ExportButton, DateRangeFilter } from '../ui';
+import { resolveDateRange } from '../lib/dateRange';
 import { downloadCsv } from '../lib/downloadCsv';
 import { emailStatusMessage } from '../lib/emailStatus';
 import AgencySettingsModal from './AgencySettingsModal';
+
+const ACTIVITY_PERIODS = [
+  { key: 'month', label: 'This month', from: () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); } },
+  { key: 'quarter', label: 'This quarter', from: () => { const d = new Date(); return new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3, 1); } },
+];
+const ACTIVITY_ALL_TIME = 'all';
 
 function statusTone(status) {
   if (status === 'ACTIVE') return 'accent';
@@ -24,6 +31,9 @@ export default function AgencyDetailPage() {
   const [agency, setAgency] = useState(null);
   const [roster, setRoster] = useState(null);
   const [activity, setActivity] = useState([]);
+  const [activityPeriodKey, setActivityPeriodKey] = useState(ACTIVITY_ALL_TIME);
+  const [activityCustomFrom, setActivityCustomFrom] = useState('');
+  const [activityCustomTo, setActivityCustomTo] = useState('');
   const [plans, setPlans] = useState([]);
   const [error, setError] = useState('');
   const [showEdit, setShowEdit] = useState(false);
@@ -35,16 +45,18 @@ export default function AgencyDetailPage() {
     load();
   }, [agencyId]);
 
+  useEffect(() => {
+    loadActivity();
+  }, [agencyId, activityPeriodKey, activityCustomFrom, activityCustomTo]);
+
   async function load() {
     try {
-      const [detail, activityData, planData] = await Promise.all([
+      const [detail, planData] = await Promise.all([
         api.agencyDetail(agencyId),
-        api.agencyActivity(agencyId, '?pageSize=20'),
         api.plans(),
       ]);
       setAgency(detail.agency);
       setRoster(detail.roster);
-      setActivity(activityData.events);
       setPlans(planData.plans);
       setError('');
     } catch (err) {
@@ -52,10 +64,25 @@ export default function AgencyDetailPage() {
     }
   }
 
+  async function loadActivity() {
+    let params = '?pageSize=20';
+    if (activityPeriodKey !== ACTIVITY_ALL_TIME) {
+      const range = resolveDateRange(activityPeriodKey, ACTIVITY_PERIODS, activityCustomFrom, activityCustomTo);
+      if (!range) return; // custom selected, dates not both picked yet
+      params += `&from=${range.from}&to=${range.to}`;
+    }
+    try {
+      const activityData = await api.agencyActivity(agencyId, params);
+      setActivity(activityData.events);
+    } catch (err) {
+      setError(err.data?.message || 'Could not load agency activity.');
+    }
+  }
+
   async function toggleEntitlement(key) {
     try {
       await api.updateAgencyEntitlements(agencyId, { [key]: !agency[key] });
-      await load();
+      await Promise.all([load(), loadActivity()]);
     } catch (err) {
       setError(err.data?.message || 'Failed to update entitlement.');
     }
@@ -160,7 +187,21 @@ export default function AgencyDetailPage() {
         <RosterSection title="TELEMARKETERS" users={roster.telemarketers} onResetPassword={sendReset} />
       </div>
 
-      <SectionHeader>RECENT ACTIVITY</SectionHeader>
+      <SectionHeader
+        right={
+          <DateRangeFilter
+            presets={[{ key: ACTIVITY_ALL_TIME, label: 'ALL TIME' }, ...ACTIVITY_PERIODS.map((p) => ({ key: p.key, label: p.label.toUpperCase() }))]}
+            periodKey={activityPeriodKey}
+            onSelectPreset={setActivityPeriodKey}
+            customFrom={activityCustomFrom}
+            customTo={activityCustomTo}
+            onCustomFromChange={setActivityCustomFrom}
+            onCustomToChange={setActivityCustomTo}
+          />
+        }
+      >
+        RECENT ACTIVITY
+      </SectionHeader>
       {activity.length === 0 ? (
         <EmptyState title="No activity yet" description="Actions taken on this agency will show up here." />
       ) : (
@@ -177,13 +218,13 @@ export default function AgencyDetailPage() {
       )}
 
       {showEdit && (
-        <AgencySettingsModal agency={agency} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); load(); }} />
+        <AgencySettingsModal agency={agency} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); load(); loadActivity(); }} />
       )}
       {showInvite && (
-        <InviteOwnerModal agencyId={agencyId} onClose={() => setShowInvite(false)} onSent={() => { setShowInvite(false); load(); }} />
+        <InviteOwnerModal agencyId={agencyId} onClose={() => setShowInvite(false)} onSent={() => { setShowInvite(false); load(); loadActivity(); }} />
       )}
       {showChangePlan && (
-        <ChangePlanModal agencyId={agencyId} plans={plans} onClose={() => setShowChangePlan(false)} onChanged={() => { setShowChangePlan(false); load(); }} />
+        <ChangePlanModal agencyId={agencyId} plans={plans} onClose={() => setShowChangePlan(false)} onChanged={() => { setShowChangePlan(false); load(); loadActivity(); }} />
       )}
     </div>
   );
