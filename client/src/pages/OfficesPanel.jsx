@@ -274,5 +274,5 @@ const s = {
   rowTitle: { fontWeight: 600, fontSize: 14, marginBottom: 8 },
   letterGrid: { display: 'grid', gridTemplateColumns: 'repeat(13, 1fr)', gap: 4, marginBottom: 8 },
   letterTile: { padding: '6px 0', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 4, color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 11, fontWeight: 700 },
-  letterTileActive: { background: 'var(--accent)', color: 'var(--accent-on, #000)', borderColor: 'var(--accent)' },
+  letterTileActive: { background: 'var(--accent)', color: 'var(--accent-on, #000)', border: '1px solid var(--accent)' },
 };
