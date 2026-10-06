@@ -282,3 +282,82 @@ test('undo deletes every HistoricalRecord for the batch unconditionally, and the
   assert.equal(body.revenue, 0, 'back to zero once historical data is undone (live seed lead has no RevenueEvent)');
   assert.equal(body.historicalRecordsIncluded, 0);
 });
+
+// Real Performology-shaped header set (Part 7 hardening): "Issue Date" as
+// the date column, "Customer" as a single full-name column, "Policy Type"
+// for product, "Premium Amount" for premium, "Dataset" carrying Sale/
+// Termination/Reinstatement text, "Location" for office matching, plus an
+// unrecognized "Source Batch" column that must still be captured losslessly.
+function performologyCsv() {
+  const header = 'Issue Date,Customer,Policy Type,Location,Premium Amount,Dataset,Source Batch\n';
+  const rows = [
+    `2024-06-05,Pat Historical,Auto,HQ Office ${suffix},500,Sale,BATCH-001`,
+    // A termination carrying its original policy's premium must never be
+    // double-counted as a new sale, regardless of the premium figure.
+    `2024-06-10,Terminated Guy,Auto,HQ Office ${suffix},900,Termination,BATCH-002`,
+    // A reinstatement IS a real incremental sale.
+    `2024-06-15,Reinstated Person,Auto,HQ Office ${suffix},700,Reinstatement,BATCH-003`,
+    // No office named this — officeId must stay null, officeNameRaw kept.
+    `2024-06-20,No Office Guy,Auto,Nowhere Branch,200,Sale,BATCH-004`,
+  ];
+  return new Blob([header + rows.join('\n')], { type: 'text/csv' });
+}
+
+let performologyOfficeId;
+let performologyBatchId;
+
+test('a real Performology-shaped file is fully handled by the new synonyms alone, with zero AI calls', async () => {
+  const office = await prisma.office.create({ data: { agencyId, name: `HQ Office ${suffix}` } });
+  performologyOfficeId = office.id;
+
+  // Force the honest "not configured" path regardless of what this sandbox's
+  // own .env happens to have, so this assertion is about the synonyms
+  // themselves, never an accident of environment — mirrors
+  // columnMapper.test.js's own save/restore convention.
+  const originalKey = process.env.ANTHROPIC_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
+  try {
+    const form = new FormData();
+    form.append('file', performologyCsv(), 'performology.csv');
+    form.append('sourceSystem', 'PERFORMOLOGY');
+    const res = await fetch(`${baseUrl}/api/leads/historical-data-import`, { method: 'POST', headers: { Cookie: ownerCookie }, body: form });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.created, 4);
+    performologyBatchId = body.batchId;
+
+    assert.equal(body.columnMapping.aiUsed, false);
+    assert.equal(body.columnMapping.aiSkippedReason, 'not_configured', 'no live AI call in this test environment — the deterministic synonyms alone resolve every structured field');
+    assert.ok(body.columnMapping.matchedFields.includes('recordDate') && body.columnMapping.matchedFields.includes('office') && body.columnMapping.matchedFields.includes('outcome'), 'the new Performology synonyms resolved these deterministically, with no AI needed');
+  } finally {
+    if (originalKey !== undefined) process.env.ANTHROPIC_API_KEY = originalKey;
+  }
+
+  const records = await prisma.historicalRecord.findMany({ where: { importBatchId: performologyBatchId }, orderBy: { recordDate: 'asc' } });
+  assert.equal(records.length, 4);
+
+  const sale = records.find((r) => r.outcome === 'Sale' && r.premiumCents === 50000);
+  assert.ok(sale);
+  assert.equal(sale.isSold, true);
+  assert.equal(sale.officeId, performologyOfficeId, 'an exact "Location" match must resolve the real Office');
+  assert.equal(sale.rawFields['Source Batch'], 'BATCH-001', 'an unrecognized column must still be captured losslessly');
+
+  const termination = records.find((r) => r.outcome === 'Termination');
+  assert.ok(termination);
+  assert.equal(termination.premiumCents, 90000);
+  assert.equal(termination.isSold, false, 'a termination must never be counted as sold, even carrying a premium');
+
+  const reinstatement = records.find((r) => r.outcome === 'Reinstatement');
+  assert.ok(reinstatement);
+  assert.equal(reinstatement.isSold, true, 'a reinstatement is a real incremental sale');
+
+  const unmatchedOffice = records.find((r) => r.officeNameRaw === 'Nowhere Branch');
+  assert.ok(unmatchedOffice);
+  assert.equal(unmatchedOffice.officeId, null, 'no office named "Nowhere Branch" exists — must stay null, never guessed');
+});
+
+test('undo cleans up the Performology batch', async () => {
+  const undoRes = await fetch(`${baseUrl}/api/leads/import-batches/${performologyBatchId}/undo`, { method: 'POST', headers: { Cookie: ownerCookie } });
+  assert.equal(undoRes.status, 200);
+  await prisma.office.delete({ where: { id: performologyOfficeId } });
+});

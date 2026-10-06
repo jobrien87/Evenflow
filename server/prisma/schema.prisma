@@ -563,8 +563,9 @@ model Office {
   // within it.
   roundRobinCursor Int               @default(0)
 
-  users            User[]
-  alphaAssignments OfficeAlphaAssignment[]
+  users             User[]
+  alphaAssignments  OfficeAlphaAssignment[]
+  historicalRecords HistoricalRecord[]
 
   @@index([agencyId])
 }
@@ -720,6 +721,13 @@ model Lead {
   // Agency.priorityRules and lib/priority.js.
   leadType         LeadType         @default(MANUAL)
   customFields     Json?
+  // The full original spreadsheet row from a bulk/back-catalog import,
+  // keyed by its own literal header text — populated ONLY by those two
+  // import paths (never manual creation, vendor API, or telemarketer
+  // intake), and deliberately separate from customFields above (a hand-
+  // entered/vendor-named value this would otherwise risk colliding with,
+  // e.g. a column literally named "Current Carrier").
+  rawImportFields  Json?
   // Set only for a row created by POST /leads/bulk-import — lets the
   // whole batch be found again for the undo action below. Null for every
   // other creation path (manual, vendor API, telemarketer intake).
@@ -884,6 +892,11 @@ model HistoricalRecord {
   assignedToId  String?
   assignedTo    User?   @relation("HistoricalRecordAssignedTo", fields: [assignedToId], references: [id])
   agentNameRaw  String?
+  // Best-effort exact-name match against this agency's real Office rows —
+  // same null-when-unmatched/raw-text-kept convention as vendor/agent above.
+  officeId      String?
+  office        Office? @relation(fields: [officeId], references: [id])
+  officeNameRaw String?
 
   // isSold is derived at parse time as premiumCents > 0 — a reliable signal
   // across unverified source systems, rather than fuzzy-matching arbitrary
@@ -903,6 +916,7 @@ model HistoricalRecord {
   @@index([recordDate])
   @@index([vendorId])
   @@index([assignedToId])
+  @@index([officeId])
   @@index([agencyId, recordDate])
 }
 

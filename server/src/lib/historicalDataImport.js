@@ -7,43 +7,70 @@
 // leadBulkImport.js's own header comment for why not the npm package).
 
 const XLSX = require('xlsx');
+const { buildHeaderMap, buildRawRowCapture, resolveHeaderMapWithAiFallback } = require('./columnMapper');
 
 const HEADER_SYNONYMS = {
   // Required — an undated row can't be placed on any trend/timeline, so
   // rows missing this are rejected rather than imported with a guessed date.
-  recordDate: ['date', 'saledate', 'closedate', 'createddate', 'receiveddate', 'eventdate', 'recorddate'],
+  // "issueddate"/"issuedate" covers Performology's own export convention
+  // ("we use the issue date as the date").
+  recordDate: ['date', 'saledate', 'closedate', 'createddate', 'receiveddate', 'eventdate', 'recorddate', 'issueddate', 'issuedate'],
   firstName: ['firstname', 'first', 'fname'],
   lastName: ['lastname', 'last', 'lname', 'surname'],
-  name: ['name', 'fullname', 'customername', 'clientname'],
+  name: ['name', 'fullname', 'customername', 'clientname', 'customer'],
   phone: ['phone', 'phonenumber', 'cell', 'cellphone', 'mobile', 'mobilephone', 'telephone', 'contactnumber'],
   email: ['email', 'emailaddress'],
-  product: ['product', 'line', 'productline', 'lineofbusiness', 'lob'],
+  product: ['product', 'line', 'productline', 'lineofbusiness', 'lob', 'policytype'],
   zip: ['zip', 'zipcode', 'postalcode'],
   vendorName: ['vendor', 'source', 'leadsource', 'vendorname'],
   agentName: ['agent', 'producer', 'rep', 'salesperson', 'assignedto', 'agentname'],
-  premiumCents: ['premium', 'saleprice', 'policypremium', 'totalpremium', 'annualpremium'],
-  outcome: ['status', 'disposition', 'policystatus', 'leadstatus', 'stage', 'outcome'],
+  premiumCents: ['premium', 'saleprice', 'policypremium', 'totalpremium', 'annualpremium', 'premiumamount'],
+  // The raw status/disposition text for context — also where a "Dataset"
+  // column (Sales/Terminations/Reinstatements) lands, so isSold's
+  // keyword classifier below has something real to read.
+  outcome: ['status', 'disposition', 'policystatus', 'leadstatus', 'stage', 'outcome', 'dataset', 'recordtype'],
+  office: ['location', 'office', 'branch', 'officename'],
 };
 
+// Every known target field this parser can place a column into — used both
+// by the deterministic pass above and by the AI fallback (lib/columnMapper.js)
+// for whichever of these a source file's headers don't obviously name.
+const KNOWN_FIELDS = Object.keys(HEADER_SYNONYMS);
+const FIELD_DESCRIPTIONS = {
+  recordDate: 'the date this record happened (sale, close, or issue date) — required',
+  firstName: "the customer's first name",
+  lastName: "the customer's last name",
+  name: "the customer's full name, when first/last aren't split into separate columns",
+  phone: "the customer's phone number",
+  email: "the customer's email address",
+  product: 'the insurance product/line of business (e.g. Auto, Home, Life)',
+  zip: "the customer's zip code",
+  vendorName: 'the lead source/vendor this record came from',
+  agentName: 'the producer/agent/rep this record is attributed to',
+  premiumCents: 'the dollar premium amount',
+  outcome: 'the raw status/disposition/record-type text (e.g. Sale, Termination, Reinstatement)',
+  office: 'the office/branch/location name this record belongs to',
+};
+
+// A Termination can carry its original policy's premium, which must never
+// be double-counted as a new sale; a Reinstatement is a real incremental
+// revenue event, not a reversal. Anything else (including no outcome
+// column at all) falls through to the premiumCents>0 rule, unchanged —
+// keeps this fully backward compatible with imports that have no status
+// column at all.
+const NEGATIVE_SALE_SIGNALS = ['terminat', 'cancel', 'lapsed', 'nsf', 'chargeback', 'void', 'reject'];
+const POSITIVE_SALE_SIGNALS = ['sale', 'sold', 'issued', 'bound', 'active', 'reinstat'];
+
+function classifyIsSold(outcome, premiumCents) {
+  const text = String(outcome || '').toLowerCase();
+  if (text) {
+    if (NEGATIVE_SALE_SIGNALS.some((sig) => text.includes(sig))) return false;
+    if (POSITIVE_SALE_SIGNALS.some((sig) => text.includes(sig))) return true;
+  }
+  return !!premiumCents && premiumCents > 0;
+}
+
 const MAX_ROWS = 20000;
-
-function normalizeHeader(h) {
-  return String(h || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-function buildHeaderMap(headerRow) {
-  const map = {};
-  headerRow.forEach((raw, idx) => {
-    const norm = normalizeHeader(raw);
-    if (!norm) return;
-    for (const [field, synonyms] of Object.entries(HEADER_SYNONYMS)) {
-      if (map[field] === undefined && synonyms.includes(norm)) {
-        map[field] = idx;
-      }
-    }
-  });
-  return map;
-}
 
 function parseDateOrNull(value) {
   if (!value) return null;
@@ -62,7 +89,7 @@ function parsePremiumCentsOrNull(value) {
   return Math.round(dollars * 100);
 }
 
-function parseHistoricalFile(buffer) {
+function readWorkbookRows(buffer) {
   let workbook;
   try {
     workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
@@ -77,17 +104,22 @@ function parseHistoricalFile(buffer) {
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
   if (rows.length < 2) return { error: 'EMPTY', message: 'No data rows found below the header row.' };
 
-  const headerMap = buildHeaderMap(rows[0]);
+  return { headerRow: rows[0], dataRows: rows.slice(1) };
+}
+
+// Pure, synchronous row extraction given an already-resolved headerMap —
+// shared by both the deterministic-only entry point and the AI-assisted one.
+function extractHistoricalRecords({ headerRow, dataRows, headerMap }) {
   if (headerMap.recordDate === undefined) {
-    return { error: 'NO_DATE_COLUMN', message: 'Could not find a date column (e.g. "Date", "Sale Date", "Close Date") — historical data needs a real date on every row.' };
+    return { error: 'NO_DATE_COLUMN', message: 'Could not find a date column (e.g. "Date", "Sale Date", "Issue Date") — historical data needs a real date on every row.' };
   }
 
-  const dataRows = rows.slice(1, 1 + MAX_ROWS);
-  const truncated = rows.length - 1 > MAX_ROWS;
+  const truncated = dataRows.length > MAX_ROWS;
+  const limitedRows = dataRows.slice(0, MAX_ROWS);
   const records = [];
   const skipped = [];
 
-  dataRows.forEach((row, i) => {
+  limitedRows.forEach((row, i) => {
     const sourceRow = i + 2; // +1 for header, +1 for 1-indexing
     if (row.every((c) => String(c).trim() === '')) return;
 
@@ -111,6 +143,7 @@ function parseHistoricalFile(buffer) {
     }
 
     const premiumCents = parsePremiumCentsOrNull(get('premiumCents'));
+    const outcome = get('outcome') || null;
 
     records.push({
       _sourceRow: sourceRow,
@@ -123,18 +156,63 @@ function parseHistoricalFile(buffer) {
       zip: get('zip') || null,
       vendorNameRaw: get('vendorName') || null,
       agentNameRaw: get('agentName') || null,
+      officeNameRaw: get('office') || null,
       premiumCents,
-      isSold: !!premiumCents && premiumCents > 0,
-      outcome: get('outcome') || null,
-      rawFields: Object.fromEntries(
-        Object.keys(HEADER_SYNONYMS)
-          .map((field) => [field, get(field)])
-          .filter(([, v]) => v !== '')
-      ),
+      isSold: classifyIsSold(outcome, premiumCents),
+      outcome,
+      // The full original row, keyed by its own literal header text — never
+      // just the fields this parser recognizes, so an unmatched column
+      // (e.g. "Source Batch", "Policy #") is still captured losslessly.
+      rawFields: buildRawRowCapture(headerRow, row),
     });
   });
 
-  return { records, skipped, totalRows: dataRows.length, truncated, matchedFields: Object.keys(headerMap) };
+  return { records, skipped, totalRows: limitedRows.length, truncated, matchedFields: Object.keys(headerMap) };
 }
 
-module.exports = { parseHistoricalFile };
+// Deterministic-only entry point — no AI call, ever. Kept as the simple,
+// synchronous default for anything that doesn't need the AI fallback.
+function parseHistoricalFile(buffer) {
+  const read = readWorkbookRows(buffer);
+  if (read.error) return read;
+  const headerMap = buildHeaderMap(read.headerRow, HEADER_SYNONYMS);
+  return extractHistoricalRecords({ headerRow: read.headerRow, dataRows: read.dataRows, headerMap });
+}
+
+// The real entry point for the import route: deterministic pass first
+// (free, handles the common case — including every real Performology
+// header this round added synonyms for, with zero AI calls), then one
+// batched AI call for whatever's still unmapped (lib/columnMapper.js's
+// honest-degradation contract — never throws, skips cleanly when
+// unconfigured or nothing is left to map). Returns the same shape as
+// parseHistoricalFile, plus a `columnMapping` block.
+async function parseHistoricalFileWithAi(buffer) {
+  const read = readWorkbookRows(buffer);
+  if (read.error) return read;
+
+  const deterministicMap = buildHeaderMap(read.headerRow, HEADER_SYNONYMS);
+  const mapping = await resolveHeaderMapWithAiFallback({
+    headerRow: read.headerRow,
+    rows: read.dataRows,
+    HEADER_SYNONYMS,
+    knownFields: KNOWN_FIELDS,
+    fieldDescriptions: FIELD_DESCRIPTIONS,
+    headerMap: deterministicMap,
+  });
+
+  const extracted = extractHistoricalRecords({ headerRow: read.headerRow, dataRows: read.dataRows, headerMap: mapping.headerMap });
+  if (extracted.error) return extracted;
+
+  return {
+    ...extracted,
+    columnMapping: {
+      matchedFields: Object.keys(mapping.headerMap),
+      aiUsed: mapping.aiUsed,
+      aiSkippedReason: mapping.aiSkippedReason,
+      aiSuggestions: mapping.aiSuggestions,
+      unmappedHeaders: mapping.unmappedHeaders,
+    },
+  };
+}
+
+module.exports = { parseHistoricalFile, parseHistoricalFileWithAi, classifyIsSold, HEADER_SYNONYMS, KNOWN_FIELDS };

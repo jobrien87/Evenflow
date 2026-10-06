@@ -14,8 +14,8 @@ const { notifyUser, notifyUsers, notifyAgencyOwners } = require('../lib/notifica
 const { updateCustomerProductsAndDetectCrossSells } = require('../lib/opportunityEvents');
 const { computeProducerScore, computeAgencyScore, computeTelemarketerScore } = require('../lib/flowScore');
 const { computeFunnel } = require('../lib/funnelMetrics');
-const { parseLeadFile } = require('../lib/leadBulkImport');
-const { parseHistoricalFile } = require('../lib/historicalDataImport');
+const { parseLeadFileWithAi } = require('../lib/leadBulkImport');
+const { parseHistoricalFileWithAi } = require('../lib/historicalDataImport');
 const { resolveManualAssignment } = require('../lib/leadDistribution');
 const { computeZipBreakdown } = require('../lib/zipBreakdown');
 const { sendZipReportEmail } = require('../lib/email');
@@ -187,6 +187,13 @@ async function createLeadRecord({ agencyId, source, createdById, data, importBat
         status: 'NEW',
         createdById,
         customFields: data.customFields || {},
+        // Lossless full-row capture from a bulk/back-catalog import only —
+        // never manual creation, vendor API, or telemarketer intake, and
+        // deliberately a SEPARATE bucket from customFields (which already
+        // holds hand-entered/vendor-named values this would otherwise risk
+        // colliding with, e.g. a spreadsheet column literally named
+        // "Current Carrier").
+        rawImportFields: data.rawImportFields || null,
         dob: data.dob ? new Date(data.dob) : null,
         isLiveTransfer: !!data.isLiveTransfer,
         // Every telemarketer-submitted lead becomes Moshpit-claimable —
@@ -353,7 +360,7 @@ router.post('/', async (req, res, next) => {
 // and in whether/how they notify afterward — never in the create path
 // itself.
 async function importLeadsFromFile({ fileBuffer, agencyId, uploaderId, actorRole, leadCategory, categoryFields, sourceOverride, sourceSystem, assignRow, correlationId }) {
-  const parsedFile = parseLeadFile(fileBuffer);
+  const parsedFile = await parseLeadFileWithAi(fileBuffer);
   if (parsedFile.error) {
     return { error: parsedFile.error, message: parsedFile.message };
   }
@@ -388,7 +395,7 @@ async function importLeadsFromFile({ fileBuffer, agencyId, uploaderId, actorRole
         agencyId,
         source: sourceOverride,
         createdById: uploaderId,
-        data: { ...row, ...categoryFields, assignedToId: assignment.assignedToId, moshpitEligible: assignment.moshpitEligible },
+        data: { ...row, ...categoryFields, assignedToId: assignment.assignedToId, moshpitEligible: assignment.moshpitEligible, rawImportFields: row.rawImportFields },
         importBatchId: batch.id,
       });
       created += 1;
@@ -529,6 +536,7 @@ router.post('/bulk-import', uploadSpreadsheet.single('file'), async (req, res, n
       distributionMode,
       assigned: created - moshpitCount,
       sentToMoshpit: moshpitCount,
+      columnMapping: parsedFile.columnMapping,
     });
   } catch (err) {
     next(err);
@@ -602,6 +610,7 @@ router.post('/back-catalog-import', uploadSpreadsheet.single('file'), async (req
       created,
       skipped: failures.length,
       failures: failures.slice(0, 50),
+      columnMapping: parsedFile.columnMapping,
     });
   } catch (err) {
     next(err);
@@ -654,7 +663,7 @@ router.post('/historical-data-import', uploadSpreadsheet.single('file'), async (
     }
     if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
 
-    const parsedFile = parseHistoricalFile(req.file.buffer);
+    const parsedFile = await parseHistoricalFileWithAi(req.file.buffer);
     if (parsedFile.error) {
       return res.status(400).json({ success: false, error: parsedFile.error, message: parsedFile.message });
     }
@@ -667,12 +676,14 @@ router.post('/historical-data-import', uploadSpreadsheet.single('file'), async (
       });
     }
 
-    const [vendors, agents] = await Promise.all([
+    const [vendors, agents, offices] = await Promise.all([
       prisma.vendor.findMany({ where: { agencyId }, select: { id: true, name: true } }),
       prisma.user.findMany({ where: { agencyId }, select: { id: true, firstName: true, lastName: true } }),
+      prisma.office.findMany({ where: { agencyId }, select: { id: true, name: true } }),
     ]);
     const vendorIndex = buildNameIndex(vendors, (v) => v.name);
     const agentIndex = buildNameIndex(agents, (u) => `${u.firstName} ${u.lastName}`);
+    const officeIndex = buildNameIndex(offices, (o) => o.name);
 
     const batch = await prisma.leadImportBatch.create({
       data: {
@@ -688,6 +699,7 @@ router.post('/historical-data-import', uploadSpreadsheet.single('file'), async (
       try {
         const vendorId = record.vendorNameRaw ? vendorIndex.get(record.vendorNameRaw.trim().toLowerCase()) || null : null;
         const assignedToId = record.agentNameRaw ? agentIndex.get(record.agentNameRaw.trim().toLowerCase()) || null : null;
+        const officeId = record.officeNameRaw ? officeIndex.get(record.officeNameRaw.trim().toLowerCase()) || null : null;
 
         await prisma.historicalRecord.create({
           data: {
@@ -704,6 +716,8 @@ router.post('/historical-data-import', uploadSpreadsheet.single('file'), async (
             vendorNameRaw: record.vendorNameRaw,
             assignedToId,
             agentNameRaw: record.agentNameRaw,
+            officeId,
+            officeNameRaw: record.officeNameRaw,
             isSold: record.isSold,
             premiumCents: record.premiumCents,
             outcome: record.outcome,
@@ -734,6 +748,7 @@ router.post('/historical-data-import', uploadSpreadsheet.single('file'), async (
       created,
       skipped: failures.length,
       failures: failures.slice(0, 50),
+      columnMapping: parsedFile.columnMapping,
     });
   } catch (err) {
     next(err);

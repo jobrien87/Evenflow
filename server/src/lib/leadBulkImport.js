@@ -10,6 +10,7 @@
 // package's own package.json dependency entry.
 
 const XLSX = require('xlsx');
+const { buildHeaderMap, buildRawRowCapture, resolveHeaderMapWithAiFallback } = require('./columnMapper');
 
 const HEADER_SYNONYMS = {
   firstName: ['firstname', 'first', 'fname'],
@@ -49,25 +50,28 @@ const HEADER_SYNONYMS = {
   externalStatus: ['status', 'disposition', 'policystatus', 'leadstatus', 'stage'],
 };
 
+const KNOWN_FIELDS = Object.keys(HEADER_SYNONYMS);
+const FIELD_DESCRIPTIONS = {
+  firstName: "the customer's first name",
+  lastName: "the customer's last name",
+  name: "the customer's full name, when first/last aren't split into separate columns",
+  phone: "the customer's phone number",
+  email: "the customer's email address",
+  product: 'the insurance product/line of business (e.g. Auto, Home, Life)',
+  dob: "the customer's date of birth",
+  address: 'the street address',
+  city: 'the city',
+  state: 'the 2-letter state abbreviation',
+  zip: 'the zip code',
+  vehicleYear: 'the vehicle model year (Auto only)',
+  vehicleMake: 'the vehicle make (Auto only)',
+  vehicleModel: 'the vehicle model (Auto only)',
+  currentInsurance: 'the current insurance carrier',
+  currentPremium: 'the current premium amount',
+  externalStatus: 'a status/disposition text from the source system (for context only)',
+};
+
 const MAX_ROWS = 5000;
-
-function normalizeHeader(h) {
-  return String(h || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-function buildHeaderMap(headerRow) {
-  const map = {};
-  headerRow.forEach((raw, idx) => {
-    const norm = normalizeHeader(raw);
-    if (!norm) return;
-    for (const [field, synonyms] of Object.entries(HEADER_SYNONYMS)) {
-      if (map[field] === undefined && synonyms.includes(norm)) {
-        map[field] = idx;
-      }
-    }
-  });
-  return map;
-}
 
 // Best-effort — a spreadsheet date can arrive as almost any format.
 // Silently drops an unparsable value rather than failing the whole row
@@ -78,7 +82,7 @@ function toIsoDateOrEmpty(value) {
   return Number.isNaN(d.getTime()) ? '' : d.toISOString();
 }
 
-function parseLeadFile(buffer) {
+function readWorkbookRows(buffer) {
   let workbook;
   try {
     workbook = XLSX.read(buffer, { type: 'buffer', cellDates: true });
@@ -93,17 +97,20 @@ function parseLeadFile(buffer) {
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
   if (rows.length < 2) return { error: 'EMPTY', message: 'No data rows found below the header row.' };
 
-  const headerMap = buildHeaderMap(rows[0]);
+  return { headerRow: rows[0], dataRows: rows.slice(1) };
+}
+
+function extractLeads({ headerRow, dataRows, headerMap }) {
   if (headerMap.firstName === undefined && headerMap.name === undefined) {
     return { error: 'NO_NAME_COLUMN', message: 'Could not find a name column (e.g. "First Name"/"Last Name", or "Name").' };
   }
 
-  const dataRows = rows.slice(1, 1 + MAX_ROWS);
-  const truncated = rows.length - 1 > MAX_ROWS;
+  const truncated = dataRows.length > MAX_ROWS;
+  const limitedRows = dataRows.slice(0, MAX_ROWS);
   const leads = [];
   const skipped = [];
 
-  dataRows.forEach((row, i) => {
+  limitedRows.forEach((row, i) => {
     const sourceRow = i + 2; // +1 for header, +1 for 1-indexing
     if (row.every((c) => String(c).trim() === '')) return;
 
@@ -153,10 +160,56 @@ function parseLeadFile(buffer) {
       callbackTime: get('callbackTime'),
       tmNotes: get('tmNotes'),
       externalStatus: get('externalStatus'),
+      // The full original row, keyed by its own literal header text — never
+      // just the fields this parser recognizes, so an unmatched column is
+      // still captured losslessly (see Lead.rawImportFields).
+      rawImportFields: buildRawRowCapture(headerRow, row),
     });
   });
 
-  return { leads, skipped, totalRows: dataRows.length, truncated, matchedFields: Object.keys(headerMap) };
+  return { leads, skipped, totalRows: limitedRows.length, truncated, matchedFields: Object.keys(headerMap) };
 }
 
-module.exports = { parseLeadFile };
+// Deterministic-only entry point — no AI call, ever.
+function parseLeadFile(buffer) {
+  const read = readWorkbookRows(buffer);
+  if (read.error) return read;
+  const headerMap = buildHeaderMap(read.headerRow, HEADER_SYNONYMS);
+  return extractLeads({ headerRow: read.headerRow, dataRows: read.dataRows, headerMap });
+}
+
+// Deterministic pass first (free, handles the common case), then one
+// batched AI call for whatever target field is still unmapped — same
+// honest-degradation contract as historicalDataImport.js's own AI-assisted
+// entry point (lib/columnMapper.js never throws, skips cleanly when
+// unconfigured or nothing is left to map).
+async function parseLeadFileWithAi(buffer) {
+  const read = readWorkbookRows(buffer);
+  if (read.error) return read;
+
+  const deterministicMap = buildHeaderMap(read.headerRow, HEADER_SYNONYMS);
+  const mapping = await resolveHeaderMapWithAiFallback({
+    headerRow: read.headerRow,
+    rows: read.dataRows,
+    HEADER_SYNONYMS,
+    knownFields: KNOWN_FIELDS,
+    fieldDescriptions: FIELD_DESCRIPTIONS,
+    headerMap: deterministicMap,
+  });
+
+  const extracted = extractLeads({ headerRow: read.headerRow, dataRows: read.dataRows, headerMap: mapping.headerMap });
+  if (extracted.error) return extracted;
+
+  return {
+    ...extracted,
+    columnMapping: {
+      matchedFields: Object.keys(mapping.headerMap),
+      aiUsed: mapping.aiUsed,
+      aiSkippedReason: mapping.aiSkippedReason,
+      aiSuggestions: mapping.aiSuggestions,
+      unmappedHeaders: mapping.unmappedHeaders,
+    },
+  };
+}
+
+module.exports = { parseLeadFile, parseLeadFileWithAi };
