@@ -396,15 +396,18 @@ router.get('/:agencyId/factory-reset-preview', requireRole('AGENCY_OWNER', 'PLAT
     const userIds = agencyUsers.map((u) => u.id);
     const owner = agencyUsers.find((u) => u.role === 'AGENCY_OWNER') || agencyUsers[0] || null;
 
-    let wipeableCustomers = 0;
-    for (const customerId of customerIds) {
-      const [otherLead, otherTransfer, otherOpportunity] = await Promise.all([
-        prisma.lead.count({ where: { customerId, agencyId: { not: agencyId } } }),
-        prisma.transfer.count({ where: { customerId, agencyId: { not: agencyId } } }),
-        prisma.opportunity.count({ where: { customerId, agencyId: { not: agencyId } } }),
-      ]);
-      if (otherLead === 0 && otherTransfer === 0 && otherOpportunity === 0) wipeableCustomers += 1;
-    }
+    // Batched instead of one Promise.all per customer — a real agency can
+    // have 1000+ customers, and a per-row loop here once caused this route's
+    // sibling (the real delete transaction below) to blow Prisma's 5s
+    // interactive-transaction timeout at production scale.
+    const customerIdList = [...customerIds];
+    const [leadRefs, transferRefs, opportunityRefs] = await Promise.all([
+      prisma.lead.findMany({ where: { customerId: { in: customerIdList }, agencyId: { not: agencyId } }, select: { customerId: true } }),
+      prisma.transfer.findMany({ where: { customerId: { in: customerIdList }, agencyId: { not: agencyId } }, select: { customerId: true } }),
+      prisma.opportunity.findMany({ where: { customerId: { in: customerIdList }, agencyId: { not: agencyId } }, select: { customerId: true } }),
+    ]);
+    const stillReferencedElsewhere = new Set([...leadRefs, ...transferRefs, ...opportunityRefs].map((r) => r.customerId));
+    const wipeableCustomers = customerIdList.filter((id) => !stillReferencedElsewhere.has(id)).length;
 
     const [leadEvents, leadNotes, leadActivities, leadProductQuotes, leadTasks, opportunityEvents, creditRequests, transferEvents, revenueEvents, costEvents, callAnalyses, historicalRecords, importBatches, flowScoreSnapshots, notifications] = await Promise.all([
       prisma.leadEvent.count({ where: { leadId: { in: leadIds } } }),
@@ -515,22 +518,24 @@ router.post('/:agencyId/factory-reset', requireRole('AGENCY_OWNER', 'PLATFORM_OW
 
       counts.notifications = (await tx.notification.deleteMany({ where: { agencyId } })).count;
 
-      let wipeableCustomers = 0;
-      for (const customerId of customerIds) {
-        const [otherLead, otherTransfer, otherOpportunity] = await Promise.all([
-          tx.lead.count({ where: { customerId } }),
-          tx.transfer.count({ where: { customerId } }),
-          tx.opportunity.count({ where: { customerId } }),
-        ]);
-        if (otherLead === 0 && otherTransfer === 0 && otherOpportunity === 0) {
-          await tx.customer.delete({ where: { id: customerId } });
-          wipeableCustomers += 1;
-        }
-      }
-      counts.customers = wipeableCustomers;
+      // Batched instead of a per-customer loop (3 counts + a delete per
+      // customer) — at real-agency scale (1000+ customers) that was
+      // thousands of sequential round-trips inside this one transaction,
+      // guaranteed to blow Prisma's 5s interactive-transaction timeout.
+      // This agency's own Lead/Transfer/Opportunity rows are already gone
+      // above, so any remaining reference is inherently from another agency.
+      const customerIdList = [...customerIds];
+      const [leadRefs, transferRefs, opportunityRefs] = await Promise.all([
+        tx.lead.findMany({ where: { customerId: { in: customerIdList } }, select: { customerId: true } }),
+        tx.transfer.findMany({ where: { customerId: { in: customerIdList } }, select: { customerId: true } }),
+        tx.opportunity.findMany({ where: { customerId: { in: customerIdList } }, select: { customerId: true } }),
+      ]);
+      const stillReferenced = new Set([...leadRefs, ...transferRefs, ...opportunityRefs].map((r) => r.customerId));
+      const wipeableCustomerIds = customerIdList.filter((id) => !stillReferenced.has(id));
+      counts.customers = (await tx.customer.deleteMany({ where: { id: { in: wipeableCustomerIds } } })).count;
 
       return counts;
-    });
+    }, { timeout: 30000 });
 
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role, agencyId,

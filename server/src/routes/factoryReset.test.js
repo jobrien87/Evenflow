@@ -140,3 +140,79 @@ test('factory-reset wipes leads/financial/historical data but keeps Vendors/Offi
   assert.equal(goalLeft, 1, 'Goal must survive a factory reset');
   assert.equal(userLeft, 1, 'the Agency Owner login must survive a factory reset');
 });
+
+// Proves the batched orphaned-Customer logic (replacing a per-customer
+// query loop that timed out against a real, large production agency)
+// still correctly separates wipeable vs. still-referenced customers at a
+// meaningful scale — not just coincidentally correct at n=1 like the
+// fixture above.
+test('factory-reset-preview and factory-reset correctly batch-detect orphaned customers at scale', async () => {
+  const bigSuffix = `${suffix}-bulk`;
+  const bigAgency = await prisma.agency.create({ data: { name: `Factory Reset Bulk Agency ${bigSuffix}` } });
+  const otherAgency = await prisma.agency.create({ data: { name: `Factory Reset Other Agency ${bigSuffix}` } });
+
+  const hash = await bcrypt.hash('TestPass123!', 12);
+  const owner = await prisma.user.create({
+    data: { email: `fr-bulk-owner-${bigSuffix}@test.local`, passwordHash: hash, firstName: 'Bulk', lastName: 'Owner', role: 'AGENCY_OWNER', agencyId: bigAgency.id, status: 'ACTIVE' },
+  });
+  const session = await createSession(owner.id);
+  const cookie = `evenflow_session=${session.rawToken}`;
+  const vendor = await prisma.vendor.create({ data: { name: `FR Bulk Vendor ${bigSuffix}`, email: `frbulkvendor-${bigSuffix}@test.local`, agencyId: bigAgency.id, product: 'Auto', status: 'LIVE' } });
+
+  const wipeableCustomerIds = [];
+  const referencedCustomerIds = [];
+  const leadIds = [];
+  const otherLeadIds = [];
+  const otherCustomerIds = [];
+
+  // 15 customers exclusive to bigAgency — must be wiped.
+  for (let i = 0; i < 15; i += 1) {
+    const customer = await prisma.customer.create({ data: { firstName: 'Bulk', lastName: `Wipeable${i}`, phoneNormalized: `bulkwipe${bigSuffix}${i}` } });
+    wipeableCustomerIds.push(customer.id);
+    const lead = await prisma.lead.create({ data: { agencyId: bigAgency.id, customerId: customer.id, source: 'manual', status: 'NEW', vendorId: vendor.id, product: 'Auto', createdById: owner.id } });
+    leadIds.push(lead.id);
+  }
+
+  // 10 customers ALSO referenced by a different agency's own Lead — must survive.
+  for (let i = 0; i < 10; i += 1) {
+    const customer = await prisma.customer.create({ data: { firstName: 'Bulk', lastName: `Referenced${i}`, phoneNormalized: `bulkref${bigSuffix}${i}` } });
+    referencedCustomerIds.push(customer.id);
+    const lead = await prisma.lead.create({ data: { agencyId: bigAgency.id, customerId: customer.id, source: 'manual', status: 'NEW', vendorId: vendor.id, product: 'Auto', createdById: owner.id } });
+    leadIds.push(lead.id);
+    const otherLead = await prisma.lead.create({ data: { agencyId: otherAgency.id, customerId: customer.id, source: 'manual', status: 'NEW', product: 'Auto', createdById: owner.id } });
+    otherLeadIds.push(otherLead.id);
+    otherCustomerIds.push(customer.id);
+  }
+
+  try {
+    const previewRes = await fetch(`${baseUrl}/api/agencies/${bigAgency.id}/factory-reset-preview`, { headers: { Cookie: cookie } });
+    assert.equal(previewRes.status, 200);
+    const previewBody = await previewRes.json();
+    assert.equal(previewBody.counts.customers, 25, 'preview must see all 25 customers referenced by this agency');
+    assert.equal(previewBody.counts.wipeableCustomers, 15, 'preview must correctly identify only the 15 unreferenced-elsewhere customers as wipeable');
+
+    const deleteRes = await fetch(`${baseUrl}/api/agencies/${bigAgency.id}/factory-reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ confirmText: bigAgency.name }),
+    });
+    assert.equal(deleteRes.status, 200);
+    const deleteBody = await deleteRes.json();
+    assert.equal(deleteBody.wipedCounts.customers, 15, 'delete must wipe exactly the 15 unreferenced customers, not the 10 referenced ones');
+
+    const [wipeableLeft, referencedLeft] = await Promise.all([
+      prisma.customer.count({ where: { id: { in: wipeableCustomerIds } } }),
+      prisma.customer.count({ where: { id: { in: referencedCustomerIds } } }),
+    ]);
+    assert.equal(wipeableLeft, 0, 'all 15 unreferenced customers must be gone');
+    assert.equal(referencedLeft, 10, 'all 10 customers still referenced by another agency must survive');
+  } finally {
+    await prisma.lead.deleteMany({ where: { id: { in: otherLeadIds } } }).catch(() => {});
+    await prisma.lead.deleteMany({ where: { agencyId: bigAgency.id } }).catch(() => {});
+    await prisma.customer.deleteMany({ where: { id: { in: [...wipeableCustomerIds, ...referencedCustomerIds] } } }).catch(() => {});
+    await prisma.vendor.deleteMany({ where: { agencyId: bigAgency.id } }).catch(() => {});
+    await prisma.session.deleteMany({ where: { userId: owner.id } }).catch(() => {});
+    await prisma.user.deleteMany({ where: { id: owner.id } }).catch(() => {});
+    await prisma.agency.deleteMany({ where: { id: { in: [bigAgency.id, otherAgency.id] } } }).catch(() => {});
+  }
+});
