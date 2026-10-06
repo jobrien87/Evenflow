@@ -135,6 +135,8 @@ export const api = {
   updateAgency: (agencyId, payload) => request(`/agencies/${agencyId}`, { method: 'PATCH', body: payload }),
   updateAgencyEntitlements: (agencyId, payload) => request(`/agencies/${agencyId}/entitlements`, { method: 'PATCH', body: payload }),
   inviteAgencyOwner: (agencyId, payload) => request(`/agencies/${agencyId}/invite-owner`, { method: 'POST', body: payload }),
+  agencyFactoryResetPreview: (agencyId) => request(`/agencies/${agencyId}/factory-reset-preview`),
+  agencyFactoryReset: (agencyId, confirmText) => request(`/agencies/${agencyId}/factory-reset`, { method: 'POST', body: { confirmText } }),
 
   users: (params = '') => request(`/users${params}`),
   inviteUser: (payload) => request('/users/invite', { method: 'POST', body: payload }),

@@ -189,7 +189,11 @@ async function createLeadRecord({ agencyId, source, createdById, data, importBat
         customFields: data.customFields || {},
         dob: data.dob ? new Date(data.dob) : null,
         isLiveTransfer: !!data.isLiveTransfer,
-        moshpitEligible: !!data.moshpitEligible,
+        // Every telemarketer-submitted lead becomes Moshpit-claimable —
+        // not just ones explicitly flagged as a live transfer (that flag
+        // stays purely informational, driving the notification's urgency
+        // framing below, not eligibility).
+        moshpitEligible: source === 'telemarketer' ? true : !!data.moshpitEligible,
         leadType: data.leadTypeOverride || deriveLeadType({ isLiveTransfer: !!data.isLiveTransfer }),
         importBatchId: importBatchId || null,
         ...intakeFields,
@@ -297,24 +301,6 @@ router.post('/', async (req, res, next) => {
         relatedEntityType: 'Lead',
         relatedEntityId: result.lead.id,
       });
-    } else if (source === 'telemarketer' && isLiveTransfer) {
-      // A live transfer needs a producer NOW, not just visibility to the
-      // owner — same real "first to claim it gets it" broadcast a
-      // vendor-sourced Moshpit lead already gets, just triggered by the
-      // TM's flag instead of the vendor's distribution mode.
-      const eligibleProducers = await prisma.user.findMany({
-        where: { agencyId, role: 'PRODUCER', status: 'ACTIVE' },
-        select: { id: true },
-      });
-      await notifyUsers(eligibleProducers.map((u) => u.id), {
-        agencyId,
-        type: 'lead.moshpit_available',
-        severity: 'ACTION',
-        title: 'Live transfer — caller is on the line',
-        body: `${result.customer.firstName} ${result.customer.lastName}${parsed.data.product ? ' — ' + parsed.data.product : ''}. First to claim it gets it.`,
-        relatedEntityType: 'Lead',
-        relatedEntityId: result.lead.id,
-      });
     } else if (source === 'telemarketer') {
       // Instantly visible to the whole agency, per the Yield Transfers
       // rebuild — same real "new lead" notification pattern already used
@@ -324,6 +310,25 @@ router.post('/', async (req, res, next) => {
         severity: 'INFO',
         title: `New lead from ${req.user.firstName} ${req.user.lastName}`,
         body: `${result.customer.firstName} ${result.customer.lastName}${parsed.data.product ? ' — ' + parsed.data.product : ''}`,
+        relatedEntityType: 'Lead',
+        relatedEntityId: result.lead.id,
+      });
+      // Every telemarketer lead is now Moshpit-eligible (see
+      // createLeadRecord's moshpitEligible logic above) — broadcast to
+      // every eligible producer the same real "first to claim it gets it"
+      // way a vendor-sourced Moshpit lead already does. isLiveTransfer
+      // only changes the framing/urgency of the message, never whether
+      // it's sent.
+      const eligibleProducers = await prisma.user.findMany({
+        where: { agencyId, role: 'PRODUCER', status: 'ACTIVE' },
+        select: { id: true },
+      });
+      await notifyUsers(eligibleProducers.map((u) => u.id), {
+        agencyId,
+        type: 'lead.moshpit_available',
+        severity: isLiveTransfer ? 'ACTION' : 'INFO',
+        title: isLiveTransfer ? 'Live transfer — caller is on the line' : 'New Moshpit lead from a telemarketer',
+        body: `${result.customer.firstName} ${result.customer.lastName}${parsed.data.product ? ' — ' + parsed.data.product : ''}. First to claim it gets it.`,
         relatedEntityType: 'Lead',
         relatedEntityId: result.lead.id,
       });

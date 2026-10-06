@@ -33,6 +33,40 @@ export default function AgencySettingsModal({ agency, onClose, onSaved }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetPreview, setResetPreview] = useState(null);
+  const [resetConfirmText, setResetConfirmText] = useState('');
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetError, setResetError] = useState('');
+  const [resetDone, setResetDone] = useState(null);
+
+  async function openFactoryReset() {
+    setResetOpen(true);
+    setResetError('');
+    setResetDone(null);
+    try {
+      const data = await api.agencyFactoryResetPreview(agency.id);
+      setResetPreview(data.counts);
+    } catch (error) {
+      setResetError(error.data?.message || 'Could not load factory reset preview.');
+    }
+  }
+
+  async function confirmFactoryReset() {
+    setResetBusy(true);
+    setResetError('');
+    try {
+      const data = await api.agencyFactoryReset(agency.id, resetConfirmText);
+      setResetDone(data.wipedCounts);
+      setResetPreview(null);
+      setResetConfirmText('');
+    } catch (error) {
+      setResetError(error.data?.message || 'Could not complete the factory reset.');
+    } finally {
+      setResetBusy(false);
+    }
+  }
+
   function moveType(index, direction) {
     const target = index + direction;
     if (target < 0 || target >= typeRank.length) return;
@@ -125,6 +159,46 @@ export default function AgencySettingsModal({ agency, onClose, onSaved }) {
       <div style={s.divider} />
       <SectionHeader>Upload Leads</SectionHeader>
       <BulkLeadUploadBox agencyId={agency.id} />
+
+      <div style={s.divider} />
+      <SectionHeader>Danger Zone</SectionHeader>
+      {!resetOpen && (
+        <div style={s.dangerZoneBox}>
+          <div style={s.helpText}>
+            Permanently delete every lead, customer, transfer, opportunity, call, revenue/cost ledger entry, and historical-data record for this agency.
+            Vendors, Offices, Goals, and every user login stay exactly as they are.
+          </div>
+          <Button variant="danger" size="sm" onClick={openFactoryReset}>FACTORY RESET</Button>
+        </div>
+      )}
+      {resetOpen && (
+        <div style={s.dangerZoneBox}>
+          {resetError && <div style={s.error}>{resetError}</div>}
+          {resetDone && (
+            <div style={s.helpText}>
+              Done. Deleted {resetDone.leads} lead(s), {resetDone.customers} customer(s), {resetDone.transfers} transfer(s), {resetDone.opportunities} opportunity(ies), {resetDone.calls} call(s), {resetDone.historicalRecords} historical record(s), {resetDone.revenueEvents} revenue event(s), {resetDone.costEvents} cost event(s).
+            </div>
+          )}
+          {resetPreview && !resetDone && (
+            <>
+              <div style={s.helpText}>
+                This will permanently delete: {resetPreview.leads} lead(s), {resetPreview.customers} customer(s) (of {resetPreview.wipeableCustomers} eligible), {resetPreview.transfers} transfer(s), {resetPreview.opportunities} opportunity(ies), {resetPreview.calls} call(s), {resetPreview.historicalRecords} historical record(s), {resetPreview.leadImportBatches} import batch(es), {resetPreview.revenueEvents} revenue event(s), {resetPreview.costEvents} cost event(s), {resetPreview.flowScoreSnapshots} Flow Score snapshot(s). This cannot be undone.
+              </div>
+              <label style={s.fieldLabel}>
+                Type the agency's exact name to confirm: <b>{agency.name}</b>
+                <input style={s.input} value={resetConfirmText} onChange={(e) => setResetConfirmText(e.target.value)} />
+              </label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Button variant="danger" size="sm" disabled={resetBusy || resetConfirmText !== agency.name} onClick={confirmFactoryReset}>
+                  {resetBusy ? 'RESETTING…' : 'PERMANENTLY DELETE'}
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => setResetOpen(false)}>CANCEL</Button>
+              </div>
+            </>
+          )}
+          {resetDone && <Button variant="secondary" size="sm" onClick={() => setResetOpen(false)}>CLOSE</Button>}
+        </div>
+      )}
     </Modal>
   );
 }
@@ -149,4 +223,5 @@ const s = {
   miniInput: { padding: '6px 8px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12, width: 56 },
   removeButton: { background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12 },
   addRuleButton: { alignSelf: 'flex-start', background: 'none', border: '1px dashed var(--border-strong)', borderRadius: 6, color: 'var(--accent)', cursor: 'pointer', fontSize: 11, padding: '6px 10px' },
+  dangerZoneBox: { display: 'flex', flexDirection: 'column', gap: 10, padding: 12, border: '1px solid rgba(255, 77, 94, 0.3)', borderRadius: 8 },
 };

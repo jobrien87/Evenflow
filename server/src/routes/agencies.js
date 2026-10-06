@@ -351,6 +351,187 @@ router.patch('/:agencyId', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFO
   }
 });
 
+// Factory Reset — the permanent, properly-authenticated replacement for
+// the old temporary adminWipe.js (removed alongside this). Wipes every
+// lead/customer/financial/historical row for one agency so its owner can
+// start fresh, while deliberately leaving every User login, Vendor,
+// Office, and Goal intact — nobody has to reconfigure their roster or
+// vendor list from scratch. A real, irreversible delete (unlike every
+// other destructive action in this app, which archives), gated by the
+// caller re-typing the agency's own current name as confirmation rather
+// than a shared secret header.
+function factoryResetAuthorized(req, agencyId) {
+  return req.user.role === 'PLATFORM_OWNER' || (req.user.role === 'AGENCY_OWNER' && req.user.agencyId === agencyId);
+}
+
+async function collectFactoryResetScope(tx, agencyId) {
+  const [leadIds, transferIds, opportunityIds, callIds] = await Promise.all([
+    tx.lead.findMany({ where: { agencyId }, select: { id: true } }).then((r) => r.map((l) => l.id)),
+    tx.transfer.findMany({ where: { agencyId }, select: { id: true } }).then((r) => r.map((t) => t.id)),
+    tx.opportunity.findMany({ where: { agencyId }, select: { id: true } }).then((r) => r.map((o) => o.id)),
+    tx.call.findMany({ where: { agencyId }, select: { id: true } }).then((r) => r.map((c) => c.id)),
+  ]);
+
+  const customerIds = new Set();
+  (await tx.lead.findMany({ where: { agencyId, customerId: { not: null } }, select: { customerId: true } })).forEach((l) => customerIds.add(l.customerId));
+  (await tx.transfer.findMany({ where: { agencyId, customerId: { not: null } }, select: { customerId: true } })).forEach((t) => customerIds.add(t.customerId));
+  (await tx.opportunity.findMany({ where: { agencyId }, select: { customerId: true } })).forEach((o) => customerIds.add(o.customerId));
+
+  return { leadIds, transferIds, opportunityIds, callIds, customerIds };
+}
+
+router.get('/:agencyId/factory-reset-preview', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const agencyId = req.params.agencyId;
+    if (!factoryResetAuthorized(req, agencyId)) return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    const agency = await prisma.agency.findUnique({ where: { id: agencyId }, select: { id: true, name: true } });
+    if (!agency) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+
+    const { leadIds, transferIds, opportunityIds, callIds, customerIds } = await collectFactoryResetScope(prisma, agencyId);
+    const userIds = (await prisma.user.findMany({ where: { agencyId }, select: { id: true } })).map((u) => u.id);
+
+    let wipeableCustomers = 0;
+    for (const customerId of customerIds) {
+      const [otherLead, otherTransfer, otherOpportunity] = await Promise.all([
+        prisma.lead.count({ where: { customerId, agencyId: { not: agencyId } } }),
+        prisma.transfer.count({ where: { customerId, agencyId: { not: agencyId } } }),
+        prisma.opportunity.count({ where: { customerId, agencyId: { not: agencyId } } }),
+      ]);
+      if (otherLead === 0 && otherTransfer === 0 && otherOpportunity === 0) wipeableCustomers += 1;
+    }
+
+    const [leadEvents, leadNotes, leadActivities, leadProductQuotes, leadTasks, opportunityEvents, creditRequests, transferEvents, revenueEvents, costEvents, callAnalyses, historicalRecords, importBatches, flowScoreSnapshots, notifications] = await Promise.all([
+      prisma.leadEvent.count({ where: { leadId: { in: leadIds } } }),
+      prisma.leadNote.count({ where: { leadId: { in: leadIds } } }),
+      prisma.leadActivity.count({ where: { leadId: { in: leadIds } } }),
+      prisma.leadProductQuote.count({ where: { leadId: { in: leadIds } } }),
+      prisma.task.count({ where: { leadId: { in: leadIds } } }),
+      prisma.opportunityEvent.count({ where: { opportunityId: { in: opportunityIds } } }),
+      prisma.creditRequest.count({ where: { transferId: { in: transferIds } } }),
+      prisma.transferEvent.count({ where: { transferId: { in: transferIds } } }),
+      prisma.revenueEvent.count({ where: { agencyId } }),
+      prisma.costEvent.count({ where: { agencyId } }),
+      prisma.callAnalysis.count({ where: { callId: { in: callIds } } }),
+      prisma.historicalRecord.count({ where: { agencyId } }),
+      prisma.leadImportBatch.count({ where: { agencyId } }),
+      prisma.flowScoreSnapshot.count({ where: { OR: [{ subjectType: 'AGENCY', subjectId: agencyId }, { subjectType: 'USER', subjectId: { in: userIds } }] } }),
+      prisma.notification.count({ where: { agencyId } }),
+    ]);
+
+    return res.json({
+      success: true,
+      agency: { id: agency.id, name: agency.name },
+      counts: {
+        leads: leadIds.length,
+        customers: customerIds.size,
+        wipeableCustomers,
+        transfers: transferIds.length,
+        opportunities: opportunityIds.length,
+        calls: callIds.length,
+        callAnalyses,
+        leadEvents,
+        leadNotes,
+        leadActivities,
+        leadProductQuotes,
+        leadLinkedTasks: leadTasks,
+        opportunityEvents,
+        creditRequests,
+        transferEvents,
+        revenueEvents,
+        costEvents,
+        historicalRecords,
+        leadImportBatches: importBatches,
+        flowScoreSnapshots,
+        notifications,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:agencyId/factory-reset', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const agencyId = req.params.agencyId;
+    if (!factoryResetAuthorized(req, agencyId)) return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    const agency = await prisma.agency.findUnique({ where: { id: agencyId }, select: { id: true, name: true } });
+    if (!agency) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+
+    if (req.body?.confirmText !== agency.name) {
+      return res.status(400).json({ success: false, error: 'CONFIRMATION_MISMATCH', message: 'Type the agency\'s exact name to confirm.' });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const { leadIds, transferIds, opportunityIds, callIds, customerIds } = await collectFactoryResetScope(tx, agencyId);
+      const userIds = (await tx.user.findMany({ where: { agencyId }, select: { id: true } })).map((u) => u.id);
+
+      const counts = {};
+
+      counts.callAnalyses = (await tx.callAnalysis.deleteMany({ where: { callId: { in: callIds } } })).count;
+      counts.calls = (await tx.call.deleteMany({ where: { agencyId } })).count;
+
+      counts.leadEvents = (await tx.leadEvent.deleteMany({ where: { leadId: { in: leadIds } } })).count;
+      counts.leadNotes = (await tx.leadNote.deleteMany({ where: { leadId: { in: leadIds } } })).count;
+      counts.leadActivities = (await tx.leadActivity.deleteMany({ where: { leadId: { in: leadIds } } })).count;
+      counts.leadProductQuotes = (await tx.leadProductQuote.deleteMany({ where: { leadId: { in: leadIds } } })).count;
+      counts.leadLinkedTasks = (await tx.task.deleteMany({ where: { leadId: { in: leadIds } } })).count;
+
+      counts.leads = (await tx.lead.deleteMany({ where: { agencyId } })).count;
+
+      counts.opportunityEvents = (await tx.opportunityEvent.deleteMany({ where: { opportunityId: { in: opportunityIds } } })).count;
+      counts.opportunities = (await tx.opportunity.deleteMany({ where: { agencyId } })).count;
+
+      counts.creditRequests = (await tx.creditRequest.deleteMany({ where: { transferId: { in: transferIds } } })).count;
+      counts.transferEvents = (await tx.transferEvent.deleteMany({ where: { transferId: { in: transferIds } } })).count;
+      counts.transfers = (await tx.transfer.deleteMany({ where: { agencyId } })).count;
+
+      // Scoped directly by agencyId — not just transferId, which is the
+      // real gap the old adminWipe.js had: every manually-entered ledger
+      // row (POST /financials/events) carries agencyId but no transferId
+      // at all, so that route never actually cleared them.
+      counts.revenueEvents = (await tx.revenueEvent.deleteMany({ where: { agencyId } })).count;
+      counts.costEvents = (await tx.costEvent.deleteMany({ where: { agencyId } })).count;
+
+      // HistoricalRecord before LeadImportBatch — HistoricalRecord.importBatchId
+      // is a required FK into LeadImportBatch.
+      counts.historicalRecords = (await tx.historicalRecord.deleteMany({ where: { agencyId } })).count;
+      counts.leadImportBatches = (await tx.leadImportBatch.deleteMany({ where: { agencyId } })).count;
+
+      counts.flowScoreSnapshots = (await tx.flowScoreSnapshot.deleteMany({
+        where: { OR: [{ subjectType: 'AGENCY', subjectId: agencyId }, { subjectType: 'USER', subjectId: { in: userIds } }] },
+      })).count;
+
+      counts.notifications = (await tx.notification.deleteMany({ where: { agencyId } })).count;
+
+      let wipeableCustomers = 0;
+      for (const customerId of customerIds) {
+        const [otherLead, otherTransfer, otherOpportunity] = await Promise.all([
+          tx.lead.count({ where: { customerId } }),
+          tx.transfer.count({ where: { customerId } }),
+          tx.opportunity.count({ where: { customerId } }),
+        ]);
+        if (otherLead === 0 && otherTransfer === 0 && otherOpportunity === 0) {
+          await tx.customer.delete({ where: { id: customerId } });
+          wipeableCustomers += 1;
+        }
+      }
+      counts.customers = wipeableCustomers;
+
+      return counts;
+    });
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId,
+      action: 'agency.factory_reset', entityType: 'Agency', entityId: agencyId,
+      after: result, correlationId: req.correlationId,
+    });
+
+    return res.json({ success: true, agencyId, wipedCounts: result });
+  } catch (err) {
+    next(err);
+  }
+});
+
 const entitlementsSchema = z.object({
   crmEnabled: z.boolean().optional(),
   transfersEnabled: z.boolean().optional(),

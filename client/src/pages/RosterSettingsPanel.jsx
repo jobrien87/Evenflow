@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { Card, SectionHeader, Badge, Button, EmptyState } from '../ui';
+import { emailStatusMessage } from '../lib/emailStatus';
 import TimeClockReportPanel from './TimeClockReportPanel';
 import CoursesAdminPanel from './CoursesAdminPanel';
 
@@ -52,6 +53,9 @@ export default function RosterSettingsPanel() {
   const [inviteLastName, setInviteLastName] = useState('');
   const [inviteRole, setInviteRole] = useState('PRODUCER');
   const [inviteStatus, setInviteStatus] = useState('');
+  const [resendingId, setResendingId] = useState('');
+  const [resendStatus, setResendStatus] = useState('');
+  const [telemarketers, setTelemarketers] = useState([]);
   const [ptoForm, setPtoForm] = useState({ startDate: '', endDate: '', reason: '' });
   const [ptoStatus, setPtoStatus] = useState('');
   const [breakRoomEnabled, setBreakRoomEnabled] = useState(true);
@@ -97,11 +101,12 @@ export default function RosterSettingsPanel() {
   async function load() {
     setError('');
     try {
-      const [userData, badgeData, birthdayData, ptoData] = await Promise.all([
+      const [userData, badgeData, birthdayData, ptoData, agencyData] = await Promise.all([
         api.users(''),
         api.rosterBadges(),
         api.rosterBirthdays(),
         api.ptoRequests(),
+        user?.agencyId ? api.agencyDetail(user.agencyId) : Promise.resolve(null),
       ]);
       setUsers(userData.users);
       const grouped = {};
@@ -111,8 +116,22 @@ export default function RosterSettingsPanel() {
       setBadgesByUser(grouped);
       setBirthdays(birthdayData.birthdays);
       setPtoRequests(ptoData.requests);
+      setTelemarketers(agencyData?.roster?.telemarketers || []);
     } catch (err) {
       setError(err.data?.message || 'Could not load Roster Settings. Try refreshing.');
+    }
+  }
+
+  async function resendInvite(userId) {
+    setResendingId(userId);
+    setResendStatus('Resending…');
+    try {
+      const res = await api.resendUserInvite(userId);
+      setResendStatus(emailStatusMessage('Invitation resent.', res.emailStatus));
+    } catch (err) {
+      setResendStatus(err.data?.message || 'Failed to resend invitation.');
+    } finally {
+      setResendingId('');
     }
   }
 
@@ -224,6 +243,7 @@ export default function RosterSettingsPanel() {
 
           <Card style={s.card}>
             <div style={s.cardTitle}>TEAM ({users.length})</div>
+            {resendStatus && <div style={s.status}>{resendStatus}</div>}
             {users.map((u) => (
               <div key={u.id} style={s.userRow} className="ui-row-stack">
                 <div>
@@ -244,13 +264,30 @@ export default function RosterSettingsPanel() {
                       {BADGE_TYPES.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
                     </select>
                     {awardForUserId === u.id && <button style={s.smallButton} onClick={awardBadge}>AWARD</button>}
-                    {u.status === 'INVITED' && <button style={s.linkButton} onClick={() => api.resendUserInvite(u.id)}>RESEND</button>}
+                    {u.status === 'INVITED' && (
+                      <button style={s.linkButton} disabled={resendingId === u.id} onClick={() => resendInvite(u.id)}>
+                        {resendingId === u.id ? 'RESENDING…' : 'RESEND'}
+                      </button>
+                    )}
                     {u.status === 'ACTIVE' && u.id !== user?.id && <button style={s.deactivateButton} onClick={() => deactivate(u.id)}>DEACTIVATE</button>}
                   </div>
                 )}
               </div>
             ))}
             {users.length === 0 && <div style={s.empty}>No team members yet.</div>}
+          </Card>
+
+          <Card style={s.card}>
+            <div style={s.cardTitle}>TELEMARKETERS ({telemarketers.length})</div>
+            {telemarketers.length === 0 && <div style={s.empty}>No telemarketer currently assigned to this agency.</div>}
+            {telemarketers.map((t) => (
+              <div key={t.assignmentId} style={s.userRow} className="ui-row-stack">
+                <div>
+                  <div style={s.rowTitle}>{t.firstName} {t.lastName}</div>
+                  <div style={s.rowSub}>{t.email}{t.assignedAt ? ` · assigned ${new Date(t.assignedAt).toLocaleDateString()}` : ''}</div>
+                </div>
+              </div>
+            ))}
           </Card>
         </>
       )}

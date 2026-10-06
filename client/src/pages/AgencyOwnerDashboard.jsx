@@ -31,6 +31,7 @@ export default function AgencyOwnerDashboard() {
   const [showSettings, setShowSettings] = useState(false);
   const [showAnnounce, setShowAnnounce] = useState(false);
   const [agency, setAgency] = useState(null);
+  const [telemarketers, setTelemarketers] = useState([]);
   const [editingUserId, setEditingUserId] = useState(null);
   const [editUserForm, setEditUserForm] = useState({ firstName: '', lastName: '', officeId: '' });
   const [editUserError, setEditUserError] = useState('');
@@ -51,6 +52,7 @@ export default function AgencyOwnerDashboard() {
       const [userData, agencyData, officeData] = await Promise.all([api.users(''), api.agencyDetail(user.agencyId), api.offices()]);
       setUsers(userData.users);
       setAgency(agencyData.agency);
+      setTelemarketers(agencyData.roster?.telemarketers || []);
       setOffices(officeData.offices || []);
       loadProducerScores(userData.users);
     } catch (err) {
@@ -342,6 +344,21 @@ export default function AgencyOwnerDashboard() {
                 {editUserError && <div style={s.editUserError}>{editUserError}</div>}
               </div>
             )}
+          </div>
+        ))}
+      </section>
+
+      <section style={s.section}>
+        <div style={s.headerRow}>
+          <h3 style={s.h3}>TELEMARKETERS ({telemarketers.length})</h3>
+        </div>
+        {telemarketers.length === 0 && <div style={s.hint}>No telemarketer currently assigned to this agency.</div>}
+        {telemarketers.map((t) => (
+          <div key={t.assignmentId} style={s.row} className="ui-row-stack">
+            <div>
+              <div style={s.rowTitle}>{t.firstName} {t.lastName}</div>
+              <div style={s.rowSub}>{t.email}{t.assignedAt ? ` · assigned ${new Date(t.assignedAt).toLocaleDateString()}` : ''}</div>
+            </div>
           </div>
         ))}
       </section>
