@@ -36,6 +36,7 @@ const suffix = Date.now();
 let agencyId;
 let producerAId;
 let producerBId;
+let producerCId;
 let vendorId;
 
 before(async () => {
@@ -50,6 +51,16 @@ before(async () => {
     data: { agencyId, email: `billboard-b-${suffix}@test.local`, passwordHash: 'x', firstName: 'Bo', lastName: 'Dur', role: 'PRODUCER', status: 'ACTIVE' },
   });
   producerBId = producerB.id;
+  // No sales at all this range — must still appear on the leaderboard,
+  // zero-filled, rather than being silently absent.
+  const producerC = await prisma.user.create({
+    data: { agencyId, email: `billboard-c-${suffix}@test.local`, passwordHash: 'x', firstName: 'Zig', lastName: 'Zane', role: 'PRODUCER', status: 'ACTIVE' },
+  });
+  producerCId = producerC.id;
+  // Inactive — must NOT appear on the leaderboard.
+  await prisma.user.create({
+    data: { agencyId, email: `billboard-d-${suffix}@test.local`, passwordHash: 'x', firstName: 'De', lastName: 'Parted', role: 'PRODUCER', status: 'DEACTIVATED' },
+  });
 
   const vendor = await prisma.vendor.create({
     data: { agencyId, name: `Billboard Test Vendor ${suffix}`, email: `vendor-${suffix}@test.local`, product: 'AUTO' },
@@ -110,6 +121,19 @@ test('computeBillboard: aggregates real sold leads by producer and by product', 
   const unknownZipRow = result.byZip.find((z) => z.zip === 'Unknown');
   assert.equal(unknownZipRow.soldCount, 2);
   assert.equal(unknownZipRow.premiumCents, 50000);
+
+  // Every active producer must appear, zero-filled when they have no
+  // sales in range — not just whoever happened to sell something.
+  assert.equal(result.byProducer.length, 3, 'all 3 active producers must appear, including the one with zero sales');
+  const rowC = result.byProducer.find((r) => r.userId === producerCId);
+  assert.ok(rowC, 'a zero-activity active producer must still appear on the leaderboard');
+  assert.equal(rowC.soldCount, 0);
+  assert.equal(rowC.premiumCents, 0);
+  assert.equal(rowC.firstName, 'Zig');
+  assert.equal(rowC.lastName, 'Zane');
+  // Zero-premium rows tie on the primary sort key, so they fall back to
+  // an alphabetical-by-name tiebreak rather than arbitrary insertion order.
+  assert.equal(result.byProducer[2].userId, producerCId, 'the sole zero-sale producer is last, after the two who sold something');
 });
 
 test('computeBillboard: an agency with no sales in range returns real zeros, not an error', async () => {

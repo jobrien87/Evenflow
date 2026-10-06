@@ -84,7 +84,7 @@ async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
   const g = GRANULARITIES.includes(granularity) ? granularity : 'month';
   const range = from && to ? { from: new Date(from), to: new Date(to) } : defaultRange(g);
 
-  const [realSoldLeads, historicalRows] = await Promise.all([
+  const [realSoldLeads, historicalRows, producers] = await Promise.all([
     prisma.lead.findMany({
       where: { agencyId, status: 'SOLD', updatedAt: { gte: range.from, lte: range.to } },
       select: {
@@ -102,10 +102,17 @@ async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
     // Lead rows above — concatenated in so every grouping/series below
     // reuses this one aggregation pass rather than a second copy of it.
     historicalLeadLikeRows({ agencyId, from: range.from, to: range.to }),
+    // Same roster query financials.js's /by-agent already uses — every
+    // active producer must appear on the leaderboard even with zero sales
+    // in range, not just whoever happened to sell something.
+    prisma.user.findMany({ where: { agencyId, role: 'PRODUCER', status: 'ACTIVE' }, select: { id: true, firstName: true, lastName: true } }),
   ]);
   const soldLeads = [...realSoldLeads, ...historicalRows];
 
   const byProducerMap = new Map();
+  for (const p of producers) {
+    byProducerMap.set(p.id, { userId: p.id, firstName: p.firstName, lastName: p.lastName, soldCount: 0, premiumCents: 0 });
+  }
   const byProductMap = new Map();
   const byVendorMap = new Map();
   const byZipMap = new Map();
@@ -153,7 +160,9 @@ async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
     byZipMap.set(zipKey, zrow);
   }
 
-  const byProducer = Array.from(byProducerMap.values()).sort((a, b) => b.premiumCents - a.premiumCents);
+  const byProducer = Array.from(byProducerMap.values()).sort(
+    (a, b) => b.premiumCents - a.premiumCents || `${a.lastName}${a.firstName}`.localeCompare(`${b.lastName}${b.firstName}`)
+  );
   const byProduct = Array.from(byProductMap.values()).sort((a, b) => b.premiumCents - a.premiumCents);
   const byVendor = Array.from(byVendorMap.values()).sort((a, b) => b.premiumCents - a.premiumCents);
   const byZip = Array.from(byZipMap.values()).sort((a, b) => b.premiumCents - a.premiumCents);
