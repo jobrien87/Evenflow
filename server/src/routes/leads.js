@@ -15,6 +15,7 @@ const { updateCustomerProductsAndDetectCrossSells } = require('../lib/opportunit
 const { computeProducerScore, computeAgencyScore, computeTelemarketerScore } = require('../lib/flowScore');
 const { computeFunnel } = require('../lib/funnelMetrics');
 const { parseLeadFile } = require('../lib/leadBulkImport');
+const { parseHistoricalFile } = require('../lib/historicalDataImport');
 const { resolveManualAssignment } = require('../lib/leadDistribution');
 const { computeZipBreakdown } = require('../lib/zipBreakdown');
 const { sendZipReportEmail } = require('../lib/email');
@@ -602,6 +603,138 @@ router.post('/back-catalog-import', uploadSpreadsheet.single('file'), async (req
   }
 });
 
+// Best-effort case-insensitive name -> id lookup for Historical Data import
+// row matching — built once per request (not once per row) since an
+// agency's vendor/producer roster is small. An ambiguous name (two rows
+// sharing the same normalized name) resolves to null rather than guessing.
+function buildNameIndex(rows, nameOf) {
+  const index = new Map();
+  const seen = new Set();
+  for (const row of rows) {
+    const key = nameOf(row).trim().toLowerCase();
+    if (!key) continue;
+    if (seen.has(key)) index.set(key, null);
+    else {
+      seen.add(key);
+      index.set(key, row.id);
+    }
+  }
+  return index;
+}
+
+// Historical Data — raw facts for numbers/pattern-learning only, never a
+// workable Lead. No Customer, no distribution, no notification: the entire
+// point is this never shows up anywhere a producer would see or claim it.
+// See lib/historicalDataImport.js's own header comment for why this uses a
+// separate parser/vocabulary from the live-lead importer.
+router.post('/historical-data-import', uploadSpreadsheet.single('file'), async (req, res, next) => {
+  try {
+    if (!['AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'].includes(req.user.role)) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Expected a multipart field named "file".' });
+    }
+    const sourceSystem = req.body.sourceSystem;
+    if (!BACK_CATALOG_SYSTEMS.includes(sourceSystem)) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Choose which system this data is coming from.' });
+    }
+
+    let agencyId;
+    if (req.user.role === 'PLATFORM_OWNER') {
+      agencyId = req.body.agencyId;
+      if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+    } else {
+      agencyId = req.user.agencyId;
+    }
+    if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+
+    const parsedFile = parseHistoricalFile(req.file.buffer);
+    if (parsedFile.error) {
+      return res.status(400).json({ success: false, error: parsedFile.error, message: parsedFile.message });
+    }
+    if (parsedFile.records.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'NO_VALID_ROWS',
+        message: 'No rows had a usable date column.',
+        skipped: parsedFile.skipped,
+      });
+    }
+
+    const [vendors, agents] = await Promise.all([
+      prisma.vendor.findMany({ where: { agencyId }, select: { id: true, name: true } }),
+      prisma.user.findMany({ where: { agencyId }, select: { id: true, firstName: true, lastName: true } }),
+    ]);
+    const vendorIndex = buildNameIndex(vendors, (v) => v.name);
+    const agentIndex = buildNameIndex(agents, (u) => `${u.firstName} ${u.lastName}`);
+
+    const batch = await prisma.leadImportBatch.create({
+      data: {
+        agencyId, uploadedById: req.user.id, isHistorical: true, sourceSystem,
+        leadCategory: null, totalRows: parsedFile.totalRows, created: 0, skipped: 0,
+      },
+    });
+
+    let created = 0;
+    const failures = parsedFile.skipped.map((s) => ({ row: s.row, reason: s.reason }));
+
+    for (const record of parsedFile.records) {
+      try {
+        const vendorId = record.vendorNameRaw ? vendorIndex.get(record.vendorNameRaw.trim().toLowerCase()) || null : null;
+        const assignedToId = record.agentNameRaw ? agentIndex.get(record.agentNameRaw.trim().toLowerCase()) || null : null;
+
+        await prisma.historicalRecord.create({
+          data: {
+            agencyId,
+            importBatchId: batch.id,
+            recordDate: record.recordDate,
+            firstName: record.firstName,
+            lastName: record.lastName,
+            phone: record.phone,
+            email: record.email,
+            product: record.product,
+            zip: record.zip,
+            vendorId,
+            vendorNameRaw: record.vendorNameRaw,
+            assignedToId,
+            agentNameRaw: record.agentNameRaw,
+            isSold: record.isSold,
+            premiumCents: record.premiumCents,
+            outcome: record.outcome,
+            sourceSystem,
+            rawFields: record.rawFields,
+          },
+        });
+        created += 1;
+      } catch (err) {
+        failures.push({ row: record._sourceRow, reason: err.message || 'Failed to create this row.' });
+      }
+    }
+
+    await prisma.leadImportBatch.update({ where: { id: batch.id }, data: { created, skipped: failures.length } });
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId,
+      action: 'historical_data.imported', entityType: 'LeadImportBatch', entityId: batch.id,
+      after: { created, skipped: failures.length, sourceSystem }, correlationId: req.correlationId,
+    });
+
+    return res.json({
+      success: true,
+      batchId: batch.id,
+      sourceSystem,
+      totalRows: parsedFile.totalRows,
+      truncated: parsedFile.truncated,
+      created,
+      skipped: failures.length,
+      failures: failures.slice(0, 50),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Undo window — a batch older than this can no longer be undone in one
 // click (matches staleLeadReminders.js's own "a few business hours" scale
 // for what counts as still-fresh activity on a lead).
@@ -636,14 +769,19 @@ router.get('/import-batches', async (req, res, next) => {
     const agencyId = req.user.role === 'PLATFORM_OWNER' ? req.query.agencyId : req.user.agencyId;
     if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
 
-    // Two separate history lists share this one route: the ordinary live
-    // bulk-upload flow (sourceSystem null) and the Back Catalog tab's
-    // historical-system imports (sourceSystem set) — kept apart so neither
-    // list's UI has to explain the other's rows.
-    const sourceSystemFilter = req.query.kind === 'back_catalog' ? { not: null } : null;
+    // Three separate history lists share this one route: the ordinary live
+    // bulk-upload flow (isHistorical false, sourceSystem null), the Back
+    // Catalog tab's historical-LEAD imports (isHistorical false, sourceSystem
+    // set), and Historical Data imports (isHistorical true, numbers only) —
+    // kept apart so no list's UI has to explain another's rows.
+    const kind = req.query.kind;
+    const where = { agencyId, isHistorical: kind === 'historical_data' };
+    if (kind !== 'historical_data') {
+      where.sourceSystem = kind === 'back_catalog' ? { not: null } : null;
+    }
 
     const batches = await prisma.leadImportBatch.findMany({
-      where: { agencyId, sourceSystem: sourceSystemFilter },
+      where,
       include: {
         uploadedBy: { select: { id: true, firstName: true, lastName: true } },
         leads: {
@@ -652,6 +790,7 @@ router.get('/import-batches', async (req, res, next) => {
             _count: { select: { notes: true, activities: true, tasks: true, calls: true, productQuotes: true } },
           },
         },
+        _count: { select: { historicalRecords: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: 20,
@@ -660,10 +799,23 @@ router.get('/import-batches', async (req, res, next) => {
     return res.json({
       success: true,
       batches: batches.map((b) => {
+        if (b.isHistorical) {
+          // No "untouched since import" concept for Historical Data — these
+          // were never workable, so undo is always available, unconditionally.
+          return {
+            id: b.id, leadCategory: b.leadCategory, sourceSystem: b.sourceSystem, isHistorical: true,
+            totalRows: b.totalRows, created: b.created, skipped: b.skipped,
+            createdAt: b.createdAt, uploadedBy: b.uploadedBy, undoneAt: b.undoneAt,
+            withinUndoWindow: true,
+            undoableCount: b.undoneAt ? 0 : b._count.historicalRecords,
+            totalActive: b._count.historicalRecords,
+          };
+        }
         const activeLeads = b.leads.filter((l) => !l.archivedAt);
         const undoable = activeLeads.filter(leadIsUntouchedSinceImport).length;
         return {
-          id: b.id, leadCategory: b.leadCategory, sourceSystem: b.sourceSystem, totalRows: b.totalRows, created: b.created, skipped: b.skipped,
+          id: b.id, leadCategory: b.leadCategory, sourceSystem: b.sourceSystem, isHistorical: false,
+          totalRows: b.totalRows, created: b.created, skipped: b.skipped,
           createdAt: b.createdAt, uploadedBy: b.uploadedBy, undoneAt: b.undoneAt,
           withinUndoWindow: Date.now() - new Date(b.createdAt).getTime() < IMPORT_UNDO_WINDOW_MS,
           undoableCount: undoable, totalActive: activeLeads.length,
@@ -709,7 +861,7 @@ router.post('/import-batches/:batchId/undo', async (req, res, next) => {
     if (batch.undoneAt) {
       return res.status(409).json({ success: false, error: 'ALREADY_UNDONE', message: 'This import was already undone.' });
     }
-    if (Date.now() - new Date(batch.createdAt).getTime() > IMPORT_UNDO_WINDOW_MS) {
+    if (!batch.isHistorical && Date.now() - new Date(batch.createdAt).getTime() > IMPORT_UNDO_WINDOW_MS) {
       return res.status(409).json({ success: false, error: 'WINDOW_EXPIRED', message: 'This import is too old to undo automatically — archive the leads individually instead.' });
     }
 
@@ -719,6 +871,18 @@ router.post('/import-batches/:batchId/undo', async (req, res, next) => {
     });
     if (claim.count === 0) {
       return res.status(409).json({ success: false, error: 'ALREADY_UNDONE', message: 'This import was already undone.' });
+    }
+
+    // Historical Data has no "untouched since import" concept — these rows
+    // were never workable, so undo is an unconditional, unguarded delete.
+    if (batch.isHistorical) {
+      const { count } = await prisma.historicalRecord.deleteMany({ where: { importBatchId: batch.id } });
+      await recordAudit({
+        actorId: req.user.id, actorRole: req.user.role, agencyId: batch.agencyId,
+        action: 'historical_data.import_undone', entityType: 'LeadImportBatch', entityId: batch.id,
+        after: { deleted: count }, correlationId: req.correlationId,
+      });
+      return res.json({ success: true, archived: count, kept: 0 });
     }
 
     const { archived, kept } = await prisma.$transaction(async (tx) => {

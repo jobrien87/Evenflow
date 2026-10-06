@@ -164,12 +164,12 @@ export default function PerformanceLeaderboards({ agencyId, title = 'PERFORMANCE
               )}
               {agents.map((a, i) => (
                 <div
-                  key={a.userId}
+                  key={a.userId ?? `unattributed-${i}`}
                   style={{
                     ...(a.userId === highlightUserId ? { ...s.agentRow, ...s.agentRowMe } : s.agentRow),
-                    ...(linkToDetail ? { cursor: 'pointer' } : {}),
+                    ...(linkToDetail && a.userId ? { cursor: 'pointer' } : {}),
                   }}
-                  onClick={linkToDetail ? () => navigate(`/agency/producers/${a.userId}`) : undefined}
+                  onClick={linkToDetail && a.userId ? () => navigate(`/agency/producers/${a.userId}`) : undefined}
                 >
                   <div style={s.colRank}><RankBadge n={i + 1} /></div>
                   <div style={s.colName}>{a.firstName} {a.lastName}{a.userId === highlightUserId && <span style={s.meTag}>YOU</span>}</div>

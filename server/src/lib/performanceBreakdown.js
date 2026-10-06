@@ -7,6 +7,7 @@
 
 const { prisma } = require('./db');
 const { computeFunnel, pct } = require('./funnelMetrics');
+const { historicalByProduct } = require('./historicalAggregates');
 
 const QUOTED_OR_BEYOND = ['QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'];
 
@@ -54,15 +55,18 @@ async function computeVendorBreakdown({ agencyId, userId, from, to }) {
 // { agencyId, userId?, from, to } -> one row per distinct Lead.product
 // this scope received in the period.
 async function computeProductBreakdown({ agencyId, userId, from, to }) {
-  const leads = await prisma.lead.findMany({
-    where: {
-      agencyId,
-      ...(userId ? { assignedToId: userId } : {}),
-      receivedAt: { gte: from, lte: to },
-      archivedAt: null,
-    },
-    select: { product: true, status: true, firstContactAt: true },
-  });
+  const [leads, historicalProducts] = await Promise.all([
+    prisma.lead.findMany({
+      where: {
+        agencyId,
+        ...(userId ? { assignedToId: userId } : {}),
+        receivedAt: { gte: from, lte: to },
+        archivedAt: null,
+      },
+      select: { product: true, status: true, firstContactAt: true },
+    }),
+    historicalByProduct({ agencyId, from, to, assignedToId: userId || undefined }),
+  ]);
 
   const byProduct = new Map();
   for (const lead of leads) {
@@ -71,22 +75,34 @@ async function computeProductBreakdown({ agencyId, userId, from, to }) {
     byProduct.get(key).push(lead);
   }
 
-  return [...byProduct.entries()]
-    .map(([product, productLeads]) => {
-      const total = productLeads.length;
-      const contacted = productLeads.filter((l) => l.firstContactAt).length;
-      const quotedOrBeyond = productLeads.filter((l) => QUOTED_OR_BEYOND.includes(l.status)).length;
-      const sold = productLeads.filter((l) => l.status === 'SOLD').length;
-      return {
-        product,
-        totalLeads: total,
-        contactRate: pct(contacted, total),
-        quoteRate: pct(quotedOrBeyond, total),
-        closeRate: pct(sold, total),
-        salesCount: sold,
-      };
-    })
-    .sort((a, b) => b.totalLeads - a.totalLeads);
+  // Historical Data adds to salesCount only — never totalLeads/contactRate/
+  // quoteRate/closeRate, since those are pipeline-speed rate metrics that
+  // old bulk-imported rows never had real touchpoints to measure against.
+  const rows = [...byProduct.entries()].map(([product, productLeads]) => {
+    const total = productLeads.length;
+    const contacted = productLeads.filter((l) => l.firstContactAt).length;
+    const quotedOrBeyond = productLeads.filter((l) => QUOTED_OR_BEYOND.includes(l.status)).length;
+    const sold = productLeads.filter((l) => l.status === 'SOLD').length;
+    const historicalSold = historicalProducts[product]?.count || 0;
+    return {
+      product,
+      totalLeads: total,
+      contactRate: pct(contacted, total),
+      quoteRate: pct(quotedOrBeyond, total),
+      closeRate: pct(sold, total),
+      salesCount: sold + historicalSold,
+    };
+  });
+
+  // A product with historical sales but zero live leads in this period
+  // still needs a row, so its historical contribution isn't silently lost.
+  for (const [product, { count }] of Object.entries(historicalProducts)) {
+    if (!byProduct.has(product)) {
+      rows.push({ product, totalLeads: 0, contactRate: null, quoteRate: null, closeRate: null, salesCount: count });
+    }
+  }
+
+  return rows.sort((a, b) => b.totalLeads - a.totalLeads);
 }
 
 // { agencyId, from, to } -> one row per TM actively assigned to this

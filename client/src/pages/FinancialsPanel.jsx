@@ -151,6 +151,12 @@ export default function FinancialsPanel() {
         <Stat label="Sales Recorded" value={summary.salesRecorded} />
       </div>
 
+      {summary.historicalRecordsIncluded > 0 && (
+        <div style={s.historicalNote}>
+          Includes {summary.historicalRecordsIncluded} historical record{summary.historicalRecordsIncluded === 1 ? '' : 's'} from Back Catalog uploads.
+        </div>
+      )}
+
       {(summary.marginReason || summary.roiReason) && (
         <div style={s.reasonNote}>
           {summary.marginReason && <div>{summary.marginReason}</div>}
@@ -302,6 +308,7 @@ const s = {
   statValue: { fontSize: 24, fontWeight: 700 },
   statLabel: { fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 },
   reasonNote: { color: 'var(--warning)', fontSize: 12, marginBottom: 20, fontStyle: 'italic' },
+  historicalNote: { color: 'var(--text-muted)', fontSize: 12, marginBottom: 20, fontStyle: 'italic' },
   section: { marginBottom: 28 },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2 },

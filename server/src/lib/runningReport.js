@@ -7,6 +7,7 @@
 const { prisma } = require('./db');
 const { explainScore } = require('./flowScore');
 const { computeFunnel } = require('./funnelMetrics');
+const { sumHistoricalPremium, countHistoricalSold } = require('./historicalAggregates');
 
 function startOfMonth(d) {
   return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -53,10 +54,17 @@ async function computeGoalActual(goal) {
   const leadScope = { agencyId, ...(userId ? { assignedToId: userId } : {}) };
 
   switch (metric) {
-    case 'sales':
-      return prisma.leadEvent.count({
+    case 'sales': {
+      const live = await prisma.leadEvent.count({
         where: { type: 'lead.disposition', toStatus: 'SOLD', createdAt: { gte: periodStart, lte: periodEnd }, lead: leadScope },
       });
+      // Historical Data (Back Catalog) rows count toward sold-count goals
+      // too — never toward response-speed/pipeline-stage metrics (quotes,
+      // contacts), since old bulk-imported rows never had those real
+      // touchpoints tracked.
+      const historical = await countHistoricalSold({ agencyId, from: periodStart, to: periodEnd, assignedToId: userId || undefined });
+      return live + historical;
+    }
     case 'quotes':
       return prisma.leadEvent.count({
         where: { type: 'lead.disposition', toStatus: 'QUOTED', createdAt: { gte: periodStart, lte: periodEnd }, lead: leadScope },
@@ -74,12 +82,12 @@ async function computeGoalActual(goal) {
         where: { type: 'lead.disposition', toStatus: 'SOLD', createdAt: { gte: periodStart, lte: periodEnd }, lead: leadScope },
         select: { leadId: true },
       });
-      if (soldEvents.length === 0) return 0;
-      const leads = await prisma.lead.findMany({
-        where: { id: { in: soldEvents.map((e) => e.leadId) } },
-        select: { salePremiumCents: true },
-      });
-      return leads.reduce((sum, l) => sum + (l.salePremiumCents || 0), 0);
+      const leads = soldEvents.length
+        ? await prisma.lead.findMany({ where: { id: { in: soldEvents.map((e) => e.leadId) } }, select: { salePremiumCents: true } })
+        : [];
+      const livePremium = leads.reduce((sum, l) => sum + (l.salePremiumCents || 0), 0);
+      const historicalPremium = await sumHistoricalPremium({ agencyId, from: periodStart, to: periodEnd, assignedToId: userId || undefined });
+      return livePremium + historicalPremium;
     }
     case 'cross_sells':
     case 'winbacks':

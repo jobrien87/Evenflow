@@ -25,11 +25,17 @@ const SOURCE_SYSTEM_OPTIONS = [
 // parse/create/batch-tracking/undo engine under the hood (see
 // POST /leads/back-catalog-import), so undo works identically to the
 // live upload's "Recent Imports" list — just its own separate history.
+const MODES = [
+  { value: 'leads', label: 'Workable Leads' },
+  { value: 'historical', label: 'Historical Data (numbers only)' },
+];
+
 export default function BackCatalogPanel() {
   // This page is only mounted for AGENCY_OWNER/AGENCY_MANAGER (App.jsx's
   // RoleGate) — the server infers their own agencyId server-side, so no
   // agencyId needs to be threaded through here (unlike BulkLeadUploadBox,
   // which is also reused from a Platform-Owner-facing surface).
+  const [mode, setMode] = useState('leads');
   const [sourceSystem, setSourceSystem] = useState('');
   const [leadCategory, setLeadCategory] = useState('');
   const [busy, setBusy] = useState(false);
@@ -40,9 +46,11 @@ export default function BackCatalogPanel() {
   const [undoingId, setUndoingId] = useState(null);
   const [undoError, setUndoError] = useState('');
 
-  const loadBatches = useCallback(async () => {
+  const isHistorical = mode === 'historical';
+
+  const loadBatches = useCallback(async (kind) => {
     try {
-      const data = await api.leadImportBatches('?kind=back_catalog');
+      const data = await api.leadImportBatches(`?kind=${kind}`);
       setBatches(data.batches || []);
       setBatchesError('');
     } catch (err) {
@@ -51,17 +59,21 @@ export default function BackCatalogPanel() {
   }, []);
 
   useEffect(() => {
-    loadBatches();
-  }, [loadBatches]);
+    setResult(null);
+    setError('');
+    loadBatches(isHistorical ? 'historical_data' : 'back_catalog');
+  }, [isHistorical, loadBatches]);
 
   async function handleFile(file) {
     setBusy(true);
     setError('');
     setResult(null);
     try {
-      const data = await api.backCatalogImport(file, undefined, sourceSystem, leadCategory);
+      const data = isHistorical
+        ? await api.historicalDataImport(file, undefined, sourceSystem)
+        : await api.backCatalogImport(file, undefined, sourceSystem, leadCategory);
       setResult(data);
-      await loadBatches();
+      await loadBatches(isHistorical ? 'historical_data' : 'back_catalog');
     } catch (err) {
       setError(err.data?.message || 'Could not import that file.');
     } finally {
@@ -71,14 +83,15 @@ export default function BackCatalogPanel() {
 
   async function undoImport(batch) {
     const label = SOURCE_SYSTEM_OPTIONS.find((o) => o.value === batch.sourceSystem)?.label || 'this import';
-    if (!confirm(`Undo this ${label} import (${batch.createdAt ? new Date(batch.createdAt).toLocaleString() : ''})? ${batch.undoableCount} untouched lead${batch.undoableCount === 1 ? '' : 's'} will be archived. Any lead that's already been worked is left alone.`)) {
-      return;
-    }
+    const confirmMsg = isHistorical
+      ? `Undo this ${label} historical data import (${batch.createdAt ? new Date(batch.createdAt).toLocaleString() : ''})? All ${batch.undoableCount} record${batch.undoableCount === 1 ? '' : 's'} will be permanently deleted.`
+      : `Undo this ${label} import (${batch.createdAt ? new Date(batch.createdAt).toLocaleString() : ''})? ${batch.undoableCount} untouched lead${batch.undoableCount === 1 ? '' : 's'} will be archived. Any lead that's already been worked is left alone.`;
+    if (!confirm(confirmMsg)) return;
     setUndoingId(batch.id);
     setUndoError('');
     try {
       await api.undoLeadImport(batch.id);
-      await loadBatches();
+      await loadBatches(isHistorical ? 'historical_data' : 'back_catalog');
     } catch (err) {
       setUndoError(err.data?.message || 'Could not undo this import.');
     } finally {
@@ -86,12 +99,30 @@ export default function BackCatalogPanel() {
     }
   }
 
-  const ready = sourceSystem && leadCategory;
+  const ready = isHistorical ? !!sourceSystem : sourceSystem && leadCategory;
 
   return (
     <div style={s.wrap}>
       <SectionHeader>BACK CATALOG</SectionHeader>
-      <div style={s.subtitle}>Port historical leads and customers in from another system</div>
+      <div style={s.subtitle}>
+        {isHistorical
+          ? 'Upload old datasets to teach the system — these never become workable leads, they just feed the real numbers'
+          : 'Port historical leads and customers in from another system'}
+      </div>
+
+      <div style={s.modeToggle}>
+        {MODES.map((m) => (
+          <button
+            key={m.value}
+            type="button"
+            style={{ ...s.modeButton, ...(mode === m.value ? s.modeButtonActive : {}) }}
+            onClick={() => setMode(m.value)}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+
       <Card style={s.card}>
         <label style={s.fieldLabel}>
           Which system is this coming from?
@@ -100,24 +131,37 @@ export default function BackCatalogPanel() {
             {SOURCE_SYSTEM_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </label>
-        <label style={s.fieldLabel}>
-          What kind of leads are these?
-          <select style={s.select} value={leadCategory} onChange={(e) => setLeadCategory(e.target.value)}>
-            <option value="">Select lead type…</option>
-            {CATEGORY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </label>
+        {!isHistorical && (
+          <label style={s.fieldLabel}>
+            What kind of leads are these?
+            <select style={s.select} value={leadCategory} onChange={(e) => setLeadCategory(e.target.value)}>
+              <option value="">Select lead type…</option>
+              {CATEGORY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </label>
+        )}
         <FileDropzone
           onFile={handleFile}
           disabled={busy || !ready}
-          label={busy ? 'Importing…' : !ready ? 'Choose a system and lead type above first' : 'Click to upload, or drag an export file here'}
-          hint="CSV, XLS, or XLSX exported from that system — any column headers, we'll match them up automatically"
+          label={busy ? 'Importing…' : !ready ? `Choose a system${isHistorical ? '' : ' and lead type'} above first` : 'Click to upload, or drag an export file here'}
+          hint={isHistorical
+            ? 'CSV, XLS, or XLSX — must include a date column; any other column headers are matched up automatically'
+            : 'CSV, XLS, or XLSX exported from that system — any column headers, we\'ll match them up automatically'}
         />
         {error && <div style={s.error}>{error}</div>}
         {result && (
           <div style={s.result}>
-            Imported {result.created} of {result.totalRows} row{result.totalRows === 1 ? '' : 's'} as historical leads (unassigned, not placed in the Moshpit).
-            {result.skipped > 0 ? ` ${result.skipped} row${result.skipped === 1 ? '' : 's'} skipped.` : ''}
+            {isHistorical ? (
+              <>
+                Imported {result.created} of {result.totalRows} row{result.totalRows === 1 ? '' : 's'} as historical records — stored for reporting/pattern-learning only, never assigned or shown to anyone to work.
+                {result.skipped > 0 ? ` ${result.skipped} row${result.skipped === 1 ? '' : 's'} skipped (usually a missing/unparseable date).` : ''}
+              </>
+            ) : (
+              <>
+                Imported {result.created} of {result.totalRows} row{result.totalRows === 1 ? '' : 's'} as historical leads (unassigned, not placed in the Moshpit).
+                {result.skipped > 0 ? ` ${result.skipped} row${result.skipped === 1 ? '' : 's'} skipped.` : ''}
+              </>
+            )}
             {result.truncated ? ' This file had more rows than one upload can process — split it up and upload the rest separately.' : ''}
           </div>
         )}
@@ -126,16 +170,21 @@ export default function BackCatalogPanel() {
       {undoError && <div style={s.error}>{undoError}</div>}
       {batchesError && <div style={s.error}>{batchesError}</div>}
       <div style={s.historyWrap}>
-        <div style={s.historyLabel}>IMPORT HISTORY</div>
+        <div style={s.historyLabel}>{isHistorical ? 'HISTORICAL DATA IMPORT HISTORY' : 'IMPORT HISTORY'}</div>
         {batches.length === 0 && !batchesError && (
-          <EmptyState title="No Back Catalog imports yet" description="Uploads from Performology, AgencyZoom, Ricochet, or another system will show up here." />
+          <EmptyState
+            title={isHistorical ? 'No Historical Data imports yet' : 'No Back Catalog imports yet'}
+            description={isHistorical
+              ? 'Uploads tagged as historical data will show up here — their numbers feed reports but the records are never workable leads.'
+              : 'Uploads from Performology, AgencyZoom, Ricochet, or another system will show up here.'}
+          />
         )}
         {batches.map((b) => {
           const systemLabel = SOURCE_SYSTEM_OPTIONS.find((o) => o.value === b.sourceSystem)?.label || b.sourceSystem;
           return (
             <div key={b.id} style={s.historyRow}>
               <div style={s.historyMeta}>
-                <span style={s.historySystem}>{systemLabel}</span> — {b.created} lead{b.created === 1 ? '' : 's'} by {b.uploadedBy ? `${b.uploadedBy.firstName} ${b.uploadedBy.lastName}` : 'someone'}, {new Date(b.createdAt).toLocaleString()}
+                <span style={s.historySystem}>{systemLabel}</span> — {b.created} {isHistorical ? 'record' : 'lead'}{b.created === 1 ? '' : 's'} by {b.uploadedBy ? `${b.uploadedBy.firstName} ${b.uploadedBy.lastName}` : 'someone'}, {new Date(b.createdAt).toLocaleString()}
                 {b.undoneAt && <span style={s.undoneTag}> · undone</span>}
               </div>
               {!b.undoneAt && b.withinUndoWindow && b.undoableCount > 0 && (
@@ -143,7 +192,7 @@ export default function BackCatalogPanel() {
                   {undoingId === b.id ? 'UNDOING…' : `UNDO (${b.undoableCount})`}
                 </button>
               )}
-              {!b.undoneAt && b.withinUndoWindow && b.undoableCount === 0 && (
+              {!b.undoneAt && b.withinUndoWindow && b.undoableCount === 0 && !isHistorical && (
                 <span style={s.undoneTag}>all leads already worked</span>
               )}
               {!b.undoneAt && !b.withinUndoWindow && (
@@ -160,6 +209,9 @@ export default function BackCatalogPanel() {
 const s = {
   wrap: { display: 'flex', flexDirection: 'column', gap: 16, padding: '0 0 24px' },
   subtitle: { fontSize: 12, color: 'var(--text-muted)', marginTop: -8 },
+  modeToggle: { display: 'flex', gap: 8 },
+  modeButton: { padding: '8px 14px', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', color: 'var(--text-secondary)', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 700 },
+  modeButtonActive: { background: 'var(--accent)', borderColor: 'var(--accent)', color: 'var(--bg)' },
   card: { display: 'flex', flexDirection: 'column', gap: 12, padding: 16 },
   fieldLabel: { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: 'var(--text-muted)' },
   select: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 13 },

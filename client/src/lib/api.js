@@ -107,6 +107,26 @@ export const api = {
     return data;
   },
 
+  // Historical Data — numbers-only backfill (never a workable Lead, never
+  // assigned, never notified). Same multipart shape as backCatalogImport,
+  // just the dedicated endpoint/field set — no leadCategory, since these
+  // rows feed report totals, not a worked lead queue.
+  historicalDataImport: async (file, agencyId, sourceSystem) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (agencyId) formData.append('agencyId', agencyId);
+    formData.append('sourceSystem', sourceSystem);
+    const res = await fetch(`${BASE}/leads/historical-data-import`, { method: 'POST', credentials: 'include', body: formData });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(data.message || data.error || 'Upload failed');
+      err.data = data;
+      err.status = res.status;
+      throw err;
+    }
+    return data;
+  },
+
   agencies: (params = '') => request(`/agencies${params}`),
   createAgency: (payload) => request('/agencies', { method: 'POST', body: payload }),
   resendAgencyInvite: (agencyId) => request(`/agencies/${agencyId}/resend-invite`, { method: 'POST' }),

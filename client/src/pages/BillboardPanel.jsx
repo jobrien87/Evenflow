@@ -108,7 +108,11 @@ export default function BillboardPanel() {
       </div>
 
       <div style={s.statsRow}>
-        <StatTile label="Sold" value={data.totals.soldCount} />
+        <StatTile
+          label="Sold"
+          value={data.totals.soldCount}
+          sub={data.historicalRecordsIncluded > 0 ? `includes ${data.historicalRecordsIncluded} historical` : undefined}
+        />
         <StatTile label="Premium Total" value={money(data.totals.premiumCents)} />
       </div>
 

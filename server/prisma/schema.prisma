@@ -352,6 +352,7 @@ model User {
   breakRoomHighScores       BreakRoomHighScore[]
   breakRoomAchievements     BreakRoomAchievement[]
   breakRoomJokeHistory      BreakRoomJokeHistory[]
+  historicalRecordsAssigned HistoricalRecord[]        @relation("HistoricalRecordAssignedTo")
 
   @@index([agencyId])
   @@index([role])
@@ -504,6 +505,7 @@ model Agency {
   offices                  Office[]
   recordStoreSubscriptions RecordStoreSubscription[]
   leadImportBatches        LeadImportBatch[]
+  historicalRecords        HistoricalRecord[]
   userBadges               UserBadge[]
   ptoRequests              PtoRequest[]
   breakRoomGameSessions    BreakRoomGameSession[]
@@ -748,7 +750,9 @@ model LeadImportBatch {
   agency       Agency    @relation(fields: [agencyId], references: [id])
   uploadedById String
   uploadedBy   User      @relation("LeadImportBatchUploadedBy", fields: [uploadedById], references: [id])
-  leadCategory String
+  // Null only for a Historical Data batch (isHistorical: true) — a
+  // numbers-only import has no "what kind of workable lead" meaning.
+  leadCategory String?
   totalRows    Int
   created      Int
   skipped      Int
@@ -764,9 +768,77 @@ model LeadImportBatch {
   // null) without mixing with the unrelated lead-list upload flow.
   sourceSystem String?
 
-  leads Lead[]
+  // True only for a Historical Data import (POST /leads/historical-data-import)
+  // — these rows live entirely in HistoricalRecord, never Lead, so this flag
+  // is what the import-batches history list (and its undo) key off of to
+  // treat the batch as a numbers-only import rather than a lead import.
+  isHistorical Boolean @default(false)
+
+  leads             Lead[]
+  historicalRecords HistoricalRecord[]
 
   @@index([agencyId])
+}
+
+// A raw historical fact from a bulk "Historical Data" import (Back Catalog
+// tab) — deliberately NOT a Lead. These rows are never assigned, never
+// shown to a producer, never read by GET /leads, the Moshpit pool,
+// work-queue, lead-priority recompute, Flow Score, or the pipeline-rate
+// side of funnelMetrics.js — only by lib/historicalAggregates.js, whose
+// output is merged into the existing revenue/premium/sold-count numbers on
+// Financials, Billboard, Running Report's sales/premium goals, and product
+// sold-counts (see those files for the merge points). The point is to let
+// the system "know the numbers" going back further than this app has
+// existed, without ever pretending old bulk data was a real work item.
+model HistoricalRecord {
+  id            String           @id @default(uuid())
+  agencyId      String
+  agency        Agency           @relation(fields: [agencyId], references: [id])
+  importBatchId String
+  importBatch   LeadImportBatch  @relation(fields: [importBatchId], references: [id])
+
+  // Required — an undated row can't be placed on any trend/timeline, which
+  // defeats the point of this table, so parsing rejects rows with no
+  // parseable date (see lib/historicalDataImport.js).
+  recordDate DateTime
+
+  firstName String?
+  lastName  String?
+  phone     String?
+  email     String?
+  product   String?
+  zip       String?
+
+  // Best-effort case-insensitive name match against this agency's real
+  // Vendor/User rows at import time — null when ambiguous or unmatched.
+  // The raw text is kept either way, so an unmatched row is still auditable
+  // and could be re-matched later without re-uploading.
+  vendorId     String?
+  vendor       Vendor? @relation(fields: [vendorId], references: [id])
+  vendorNameRaw String?
+  assignedToId String?
+  assignedTo   User?   @relation("HistoricalRecordAssignedTo", fields: [assignedToId], references: [id])
+  agentNameRaw String?
+
+  // isSold is derived at parse time as premiumCents > 0 — a reliable signal
+  // across unverified source systems, rather than fuzzy-matching arbitrary
+  // status text. outcome keeps that raw status/disposition text for context.
+  isSold       Boolean @default(false)
+  premiumCents Int?
+  outcome      String?
+
+  sourceSystem String
+  // The full parsed row, beyond the structured fields above — fuel for
+  // future pattern-learning/Ed use that doesn't fit a fixed column yet.
+  rawFields Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([agencyId])
+  @@index([recordDate])
+  @@index([vendorId])
+  @@index([assignedToId])
+  @@index([agencyId, recordDate])
 }
 
 enum LeadProductStatus {
@@ -1144,10 +1216,11 @@ model Vendor {
   // vendor inherits this as its Lead.leadType (see createLeadRecord).
   category VendorCategory @default(OTHER)
 
-  credentials     VendorCredential[]
-  leads           Lead[]
-  apiTransactions ApiTransaction[]
-  costEvents      CostEvent[]
+  credentials       VendorCredential[]
+  leads             Lead[]
+  apiTransactions   ApiTransaction[]
+  costEvents        CostEvent[]
+  historicalRecords HistoricalRecord[]
 
   @@index([agencyId])
 }

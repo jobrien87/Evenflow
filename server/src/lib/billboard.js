@@ -8,6 +8,7 @@
 
 const { prisma } = require('./db');
 const { PRODUCT_LABELS } = require('./products');
+const { historicalLeadLikeRows } = require('./historicalAggregates');
 
 const GRANULARITIES = ['day', 'week', 'month', 'year'];
 
@@ -83,19 +84,26 @@ async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
   const g = GRANULARITIES.includes(granularity) ? granularity : 'month';
   const range = from && to ? { from: new Date(from), to: new Date(to) } : defaultRange(g);
 
-  const soldLeads = await prisma.lead.findMany({
-    where: { agencyId, status: 'SOLD', updatedAt: { gte: range.from, lte: range.to } },
-    select: {
-      updatedAt: true,
-      salePremiumCents: true,
-      saleProduct: true,
-      assignedToId: true,
-      assignedTo: { select: { id: true, firstName: true, lastName: true } },
-      vendorId: true,
-      vendor: { select: { id: true, name: true } },
-      zip: true,
-    },
-  });
+  const [realSoldLeads, historicalRows] = await Promise.all([
+    prisma.lead.findMany({
+      where: { agencyId, status: 'SOLD', updatedAt: { gte: range.from, lte: range.to } },
+      select: {
+        updatedAt: true,
+        salePremiumCents: true,
+        saleProduct: true,
+        assignedToId: true,
+        assignedTo: { select: { id: true, firstName: true, lastName: true } },
+        vendorId: true,
+        vendor: { select: { id: true, name: true } },
+        zip: true,
+      },
+    }),
+    // Historical Data (Back Catalog) rows, shaped identically to the real
+    // Lead rows above — concatenated in so every grouping/series below
+    // reuses this one aggregation pass rather than a second copy of it.
+    historicalLeadLikeRows({ agencyId, from: range.from, to: range.to }),
+  ]);
+  const soldLeads = [...realSoldLeads, ...historicalRows];
 
   const byProducerMap = new Map();
   const byProductMap = new Map();
@@ -163,6 +171,10 @@ async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
     byVendor,
     byZip,
     series,
+    // Historical Data (Back Catalog) rows folded into the totals above —
+    // surfaced so the client can show a small "(includes N historical
+    // records)" caption without a second, parallel report surface.
+    historicalRecordsIncluded: historicalRows.length,
   };
 }
 
