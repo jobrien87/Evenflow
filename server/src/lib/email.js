@@ -1,96 +1,42 @@
-// Email service adapter — Gmail SMTP via nodemailer. GMAIL_USER is a real
-// Gmail/Google Workspace address; GMAIL_APP_PASSWORD is a 16-character App
-// Password generated for it (Google requires 2-Step Verification to be on
-// before it will issue one — a normal account password will not
-// authenticate over SMTP). If these are not configured, we do NOT pretend
-// the email sent. We record it as NOT_CONFIGURED so the UI can show an
-// honest state instead of a false success.
-
-const nodemailer = require('nodemailer');
+// Email service adapter — Brevo transactional email API (plain fetch, no
+// SDK). Uses Brevo's HTTPS API rather than SMTP: confirmed three separate
+// times in this app's own history (Brevo-over-SMTP, then Gmail SMTP on
+// port 465, then port 587) that raw SMTP egress is not viable from this
+// host — every attempt failed with a connection-level error (timeout/
+// ENETUNREACH/ESOCKET), while Brevo's HTTPS API is the one approach that
+// has actually delivered in production. If BREVO_API_KEY is not
+// configured, we do NOT pretend the email sent. We record it as
+// NOT_CONFIGURED so the UI can show an honest state instead of a false
+// success.
 
 const APP_URL = process.env.APP_URL || 'http://localhost:5173';
+const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
+const EMAIL_FROM = process.env.EMAIL_FROM || 'noreply@yield-marketing.com';
 const EMAIL_FROM_NAME = process.env.EMAIL_FROM_NAME || 'EvenFlow';
 
-let cachedTransporter = null;
-function getTransporter() {
-  if (!cachedTransporter) {
-    cachedTransporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      // Port 465 (implicit TLS) connects but then times out from Render —
-      // confirmed in production logs (a plain "Connection timeout" after the
-      // IPv4 fix, not ENETUNREACH), the signature of a cloud egress network
-      // silently dropping that specific port rather than a DNS/routing
-      // problem. Port 587 with STARTTLS is Google's primary documented SMTP
-      // port and far more commonly left open by cloud providers.
-      port: 587,
-      secure: false,
-      requireTLS: true,
-      auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
-      // Gmail's SMTP host resolves to both an IPv4 and an IPv6 address; on
-      // hosts without outbound IPv6 routing (confirmed on Render — a real
-      // production ENETUNREACH on the IPv6 address, not a credentials
-      // problem), Node can pick the unreachable IPv6 address first. Forcing
-      // IPv4 avoids that entirely.
-      family: 4,
-      // Reuse a small pool of authenticated SMTP connections instead of a
-      // fresh handshake per email — fewer handshakes means fewer chances
-      // for an unfamiliar-IP greeting delay or transient connect failure
-      // to hit any single send, and bulk invites (invite-bulk loops one
-      // send per row) stop paying a full connect+auth round trip each time.
-      pool: true,
-      maxConnections: 3,
-      maxMessages: 100,
-      // Unchanged from the already-proven-working baseline — confirmed
-      // production failures here were a silently-dropped port (fixed by
-      // switching to 587) and an unroutable IPv6 address (fixed by
-      // family: 4), not a slow-but-eventually-successful handshake, so
-      // there's no evidence a longer timeout helps. Left short and
-      // deliberately so a genuinely stuck connection fails fast into a
-      // retry (below) rather than holding the invite request open.
-      connectionTimeout: 8000,
-      greetingTimeout: 8000,
-      socketTimeout: 8000,
-    });
-  }
-  return cachedTransporter;
-}
-
 function isConfigured() {
-  return !!(process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD);
-}
-
-// Errors nodemailer/SMTP tag as permanent — retrying them wastes the
-// retry budget on something that will never succeed (bad credentials,
-// a rejected envelope/recipient). Everything else (timeouts, transient
-// connection resets, a slow/unfamiliar-IP greeting) is worth one retry.
-// Every invite/reset route awaits this synchronously before responding
-// to the HTTP request, so this is deliberately ONE retry, not several —
-// worst case (both attempts time out) is ~17s, not a request left
-// hanging for the better part of a minute.
-const NON_RETRYABLE_CODES = new Set(['EAUTH', 'EENVELOPE']);
-const MAX_SEND_ATTEMPTS = 2;
-const RETRY_DELAY_MS = [1200];
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return !!process.env.BREVO_API_KEY;
 }
 
 async function sendEmail({ to, subject, html }) {
-  const mail = { from: `"${EMAIL_FROM_NAME}" <${process.env.GMAIL_USER}>`, to, subject, html };
-  let lastErr;
-  for (let attempt = 1; attempt <= MAX_SEND_ATTEMPTS; attempt++) {
-    try {
-      await getTransporter().sendMail(mail);
-      return;
-    } catch (err) {
-      lastErr = err;
-      const retryable = !NON_RETRYABLE_CODES.has(err.code);
-      if (!retryable || attempt === MAX_SEND_ATTEMPTS) break;
-      console.warn(`[email:RETRY] attempt ${attempt} failed (${err.code || err.message}), retrying…`);
-      await sleep(RETRY_DELAY_MS[attempt - 1]);
-    }
+  const resp = await fetch(BREVO_API_URL, {
+    method: 'POST',
+    headers: {
+      'api-key': process.env.BREVO_API_KEY,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      sender: { email: EMAIL_FROM, name: EMAIL_FROM_NAME },
+      to: [{ email: to }],
+      subject,
+      htmlContent: html,
+    }),
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw new Error(`Brevo ${resp.status}: ${text}`);
   }
-  throw lastErr;
 }
 
 async function sendInvitationEmail({ to, role, agencyName, token }) {
@@ -99,7 +45,7 @@ async function sendInvitationEmail({ to, role, agencyName, token }) {
   if (!isConfigured()) {
     console.warn(
       `[email:NOT_CONFIGURED] Would send invitation to ${to} (role=${role}, agency=${agencyName}). ` +
-        `Set GMAIL_USER/GMAIL_APP_PASSWORD to enable real delivery. Accept URL: ${acceptUrl}`
+        `Set BREVO_API_KEY to enable real delivery. Accept URL: ${acceptUrl}`
     );
     return { status: 'NOT_CONFIGURED', acceptUrl };
   }
@@ -114,7 +60,11 @@ async function sendInvitationEmail({ to, role, agencyName, token }) {
     });
     return { status: 'SENT', acceptUrl };
   } catch (err) {
-    console.error('[email:FAILED]', err.message);
+    // The accept link is logged even on a real send failure (not just the
+    // NOT_CONFIGURED case above) — the one failure mode this app has hit
+    // repeatedly in production, and previously left an operator with no
+    // way to recover the link and relay it manually.
+    console.error(`[email:FAILED] ${err.message} — Accept URL: ${acceptUrl}`);
     return { status: 'FAILED', acceptUrl };
   }
 }
@@ -123,7 +73,7 @@ async function sendPasswordResetEmail({ to, token }) {
   const resetUrl = `${APP_URL}/reset-password?token=${token}`;
 
   if (!isConfigured()) {
-    console.warn(`[email:NOT_CONFIGURED] Would send password reset to ${to}. Set GMAIL_USER/GMAIL_APP_PASSWORD to enable real delivery. Reset URL: ${resetUrl}`);
+    console.warn(`[email:NOT_CONFIGURED] Would send password reset to ${to}. Set BREVO_API_KEY to enable real delivery. Reset URL: ${resetUrl}`);
     return { status: 'NOT_CONFIGURED', resetUrl };
   }
 
@@ -137,7 +87,7 @@ async function sendPasswordResetEmail({ to, token }) {
     });
     return { status: 'SENT', resetUrl };
   } catch (err) {
-    console.error('[email:FAILED]', err.message);
+    console.error(`[email:FAILED] ${err.message} — Reset URL: ${resetUrl}`);
     return { status: 'FAILED', resetUrl };
   }
 }

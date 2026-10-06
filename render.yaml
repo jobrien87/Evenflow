@@ -32,14 +32,14 @@ services:
         sync: false
       - key: BUNNY_STREAM_API_KEY
         sync: false
-      # Gmail SMTP (via nodemailer) — see server/.env.example for how to
-      # generate GMAIL_APP_PASSWORD. If either is unset or wrong, invite/
-      # reset emails honestly report emailStatus: "NOT_CONFIGURED" or
-      # "FAILED" rather than pretending to send.
-      - key: GMAIL_USER
+      # Brevo transactional email API (HTTPS, not SMTP — raw SMTP egress
+      # is not viable from Render, confirmed repeatedly in production).
+      # See server/.env.example. If unset, invite/reset emails honestly
+      # report emailStatus: "NOT_CONFIGURED" rather than pretending to send.
+      - key: BREVO_API_KEY
         sync: false
-      - key: GMAIL_APP_PASSWORD
-        sync: false
+      - key: EMAIL_FROM
+        value: "noreply@yield-marketing.com"
       - key: EMAIL_FROM_NAME
         value: "EvenFlow"
       # Optional — leave unset until you're ready to connect a real provider.
