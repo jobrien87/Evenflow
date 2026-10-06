@@ -124,7 +124,10 @@ router.post('/leads', requireVendorAuth, async (req, res) => {
         });
       }
 
-      const assignment = await resolveVendorAssignment(tx, req.vendor, { lastName: customer.lastName });
+      // The vendor API's postSchema has no `city` field today (state + zip
+      // only) — zip alone is enough to drive OFFICE_SPLIT/ALPHA_SPLIT's
+      // geography match for vendor-sourced leads.
+      const assignment = await resolveVendorAssignment(tx, req.vendor, { lastName: customer.lastName, zip: data.zip });
 
       const lead = await tx.lead.create({
         data: {

@@ -229,6 +229,7 @@ export const api = {
   createOffice: (payload) => request('/offices', { method: 'POST', body: payload }),
   updateOffice: (id, payload) => request(`/offices/${id}`, { method: 'PATCH', body: payload }),
   deleteOffice: (id) => request(`/offices/${id}`, { method: 'DELETE' }),
+  setOfficeAlphaAssignments: (id, assignments) => request(`/offices/${id}/alpha-assignments`, { method: 'PUT', body: { assignments } }),
 
   financialSummary: (params = '') => request(`/financials/summary${params}`),
   financialByVendor: (params = '') => request(`/financials/by-vendor${params}`),

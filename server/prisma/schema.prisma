@@ -353,6 +353,7 @@ model User {
   breakRoomAchievements     BreakRoomAchievement[]
   breakRoomJokeHistory      BreakRoomJokeHistory[]
   historicalRecordsAssigned HistoricalRecord[]        @relation("HistoricalRecordAssignedTo")
+  officeAlphaAssignments    OfficeAlphaAssignment[]
 
   @@index([agencyId])
   @@index([role])
@@ -523,6 +524,15 @@ enum BoberdooSyncStatus {
 // than one office assign producers to the right one and split vendor lead
 // flow across offices (LeadDistributionMode.OFFICE_SPLIT). Purely optional:
 // an agency that never creates one just has every producer unassigned.
+//
+// routingCities/routingZipRanges let an agency auto-route a lead to this
+// office by geography (checked zip-range first, then city, then whichever
+// office has isDefaultOffice:true) before producer-level distribution
+// (routingMode) ever runs — see lib/leadDistribution.js's two-stage
+// resolveOfficeForLead/officeAlphaAssignee/officeRoundRobinAssignee flow.
+// An office with none of these configured is simply never picked by
+// geography, and OFFICE_SPLIT falls back to today's existing round-robin-
+// across-offices-with-active-producers behavior unchanged.
 model Office {
   id        String   @id @default(uuid())
   agencyId  String
@@ -531,9 +541,64 @@ model Office {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users User[]
+  // Stored UPPERCASE/trimmed — exact-match city names for geographic
+  // auto-routing.
+  routingCities    String[]          @default([])
+  // [{start:"32301", end:"32399"}, ...] — 5-digit zero-padded zip strings
+  // (safe for lexicographic range comparison even for leading-zero zips),
+  // zod-validated on write (routes/offices.js).
+  routingZipRanges Json?             @default("[]")
+  // At most one true per agency — the geography fallback for a lead whose
+  // city/zip matches no office's rules. Enforced in application code
+  // (routes/offices.js), matching this schema's existing total absence of
+  // partial/filtered unique indexes.
+  isDefaultOffice  Boolean           @default(false)
+  // How a producer is picked WITHIN this office once it's been chosen
+  // (by geography or by the legacy cross-office fallback). Defaults to
+  // ROUND_ROBIN so every existing Office is a no-op on migration day.
+  routingMode      OfficeRoutingMode @default(ROUND_ROBIN)
+  // Cursor for ROUND_ROBIN-within-this-office — independent of any
+  // Vendor's own roundRobinCursor, which (once this ships) only ever picks
+  // WHICH office in the legacy no-geo-match fallback, never the producer
+  // within it.
+  roundRobinCursor Int               @default(0)
+
+  users            User[]
+  alphaAssignments OfficeAlphaAssignment[]
 
   @@index([agencyId])
+}
+
+enum OfficeRoutingMode {
+  ROUND_ROBIN
+  ALPHA_SPLIT
+}
+
+// One row per (office, producer) who owns a specific SET of starting
+// last-name letters — a plain letter array (not a range pair) so a
+// non-contiguous set like "M-W and Y-Z" needs no special-casing. Exactly
+// one row per office must have isFallback:true — the REQUIRED, explicit
+// catch-all for any letter nobody claims (e.g. "X"), replacing the old
+// auto-partition's silent "first active producer" fallback outright.
+//
+// Keyed by (officeId, userId) rather than a field on User directly,
+// because a letter claim is only meaningful at the one office it was
+// configured for — if a producer's Office changes later, their old
+// office's claim must not silently follow them (routes/users.js's
+// PATCH /:userId deletes the stale row when officeId changes).
+model OfficeAlphaAssignment {
+  id         String   @id @default(uuid())
+  officeId   String
+  office     Office   @relation(fields: [officeId], references: [id])
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  letters    String[] @default([])
+  isFallback Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([officeId, userId])
+  @@index([officeId])
 }
 
 // Roster Settings — recognition badges. Most types are manually awarded by
@@ -791,11 +856,11 @@ model LeadImportBatch {
 // the system "know the numbers" going back further than this app has
 // existed, without ever pretending old bulk data was a real work item.
 model HistoricalRecord {
-  id            String           @id @default(uuid())
+  id            String          @id @default(uuid())
   agencyId      String
-  agency        Agency           @relation(fields: [agencyId], references: [id])
+  agency        Agency          @relation(fields: [agencyId], references: [id])
   importBatchId String
-  importBatch   LeadImportBatch  @relation(fields: [importBatchId], references: [id])
+  importBatch   LeadImportBatch @relation(fields: [importBatchId], references: [id])
 
   // Required — an undated row can't be placed on any trend/timeline, which
   // defeats the point of this table, so parsing rejects rows with no
@@ -813,12 +878,12 @@ model HistoricalRecord {
   // Vendor/User rows at import time — null when ambiguous or unmatched.
   // The raw text is kept either way, so an unmatched row is still auditable
   // and could be re-matched later without re-uploading.
-  vendorId     String?
-  vendor       Vendor? @relation(fields: [vendorId], references: [id])
+  vendorId      String?
+  vendor        Vendor? @relation(fields: [vendorId], references: [id])
   vendorNameRaw String?
-  assignedToId String?
-  assignedTo   User?   @relation("HistoricalRecordAssignedTo", fields: [assignedToId], references: [id])
-  agentNameRaw String?
+  assignedToId  String?
+  assignedTo    User?   @relation("HistoricalRecordAssignedTo", fields: [assignedToId], references: [id])
+  agentNameRaw  String?
 
   // isSold is derived at parse time as premiumCents > 0 — a reliable signal
   // across unverified source systems, rather than fuzzy-matching arbitrary
@@ -830,7 +895,7 @@ model HistoricalRecord {
   sourceSystem String
   // The full parsed row, beyond the structured fields above — fuel for
   // future pattern-learning/Ed use that doesn't fit a fixed column yet.
-  rawFields Json?
+  rawFields    Json?
 
   createdAt DateTime @default(now())
 

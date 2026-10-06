@@ -474,7 +474,7 @@ router.post('/bulk-import', uploadSpreadsheet.single('file'), async (req, res, n
       sourceOverride: categoryFields.sourceOverride || 'bulk_upload',
       correlationId: req.correlationId,
       assignRow: async (row, cursor) => {
-        const assignment = await resolveManualAssignment(prisma, { agencyId, mode: distributionMode, selectedAgentIds, cursor, lastName: row.lastName });
+        const assignment = await resolveManualAssignment(prisma, { agencyId, mode: distributionMode, selectedAgentIds, cursor, lastName: row.lastName, city: row.city, zip: row.zip });
         return { assignedToId: assignment.assignedToId, moshpitEligible: assignment.mode === 'MOSHPIT', nextCursor: assignment.nextCursor };
       },
     });

@@ -424,7 +424,16 @@ router.patch('/:userId', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM
         return res.status(400).json({ success: false, error: 'VALIDATION', message: 'officeId must belong to this producer\'s own agency.' });
       }
     }
-    const updated = await prisma.user.update({ where: { id: target.id }, data: parsed.data });
+    const officeChanging = 'officeId' in parsed.data && parsed.data.officeId !== target.officeId;
+    const updated = await prisma.$transaction(async (tx) => {
+      if (officeChanging && target.officeId) {
+        // A letter claim only means anything at the office it was
+        // configured for — if the producer moves (or is unassigned), it
+        // must not silently follow them to (or linger at) the old office.
+        await tx.officeAlphaAssignment.deleteMany({ where: { officeId: target.officeId, userId: target.id } });
+      }
+      return tx.user.update({ where: { id: target.id }, data: parsed.data });
+    });
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role, agencyId: target.agencyId,
       action: 'user.updated', entityType: 'User', entityId: target.id,

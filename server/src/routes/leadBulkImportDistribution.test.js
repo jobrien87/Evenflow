@@ -178,19 +178,22 @@ test('a mode that resolves to no eligible candidates falls back to Moshpit per r
   assert.equal(leads[0].moshpitEligible, true);
 });
 
-test('ALPHA_SPLIT routes by each row\'s own last name, not a single value for the whole batch', async () => {
-  // 2 candidates: A-M -> first candidate, N-Z -> second (matches
-  // alphaSplitIndex's own partitioning, already unit-tested elsewhere).
+test('ALPHA_SPLIT with no offices configured for this agency sends every row to the Moshpit, honestly', async () => {
+  // ALPHA_SPLIT is now office-aware (lib/leadDistribution.js's two-stage
+  // engine, covered in depth by leadDistribution.test.js) — with zero
+  // offices configured for this agency, it can no longer auto-partition
+  // A-Z across producers; it must land in the Moshpit rather than guess.
   const res = await uploadBulk({
     rows: [{ firstName: 'Amy', lastName: 'Adams' }, { firstName: 'Zoe', lastName: 'Zimmerman' }],
     distributionMode: 'ALPHA_SPLIT',
   });
   assert.equal(res.status, 200);
+  assert.equal(res.body.sentToMoshpit, 2);
   const leads = await leadsForBatch(res.body.batchId);
-  const adams = leads.find((l) => l.customer.firstName === 'Amy');
-  const zimmerman = leads.find((l) => l.customer.firstName === 'Zoe');
-  assert.equal(adams.assignedToId, producerAId);
-  assert.equal(zimmerman.assignedToId, producerBId);
+  for (const lead of leads) {
+    assert.equal(lead.assignedToId, null);
+    assert.equal(lead.moshpitEligible, true);
+  }
 });
 
 test('a multi-lead ROUND_ROBIN batch sends exactly ONE aggregate notification per producer, never one per lead', async () => {

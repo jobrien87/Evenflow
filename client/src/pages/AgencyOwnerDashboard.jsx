@@ -246,9 +246,13 @@ export default function AgencyOwnerDashboard() {
             {offices.map((o) => (
               <div key={o.id} style={s.row}>
                 <div style={{ flex: 1 }}>
-                  <div style={s.rowTitle}>{o.name}</div>
-                  <div style={s.rowSub}>{(o.users || []).length} producer{(o.users || []).length === 1 ? '' : 's'}</div>
+                  <div style={s.rowTitle}>{o.name}{o.isDefaultOffice ? ' (default)' : ''}</div>
+                  <div style={s.rowSub}>
+                    {(o.users || []).length} producer{(o.users || []).length === 1 ? '' : 's'} ·{' '}
+                    {o.routingMode === 'ALPHA_SPLIT' ? 'Alpha Split' : 'Round Robin'}
+                  </div>
                 </div>
+                <button style={s.smallButtonOutline} onClick={() => navigate(`/agency/offices/${o.id}`)}>CONFIGURE ROUTING →</button>
                 <button style={s.resendButton} onClick={() => { const name = prompt('Rename office', o.name); if (name) renameOffice(o.id, name); }}>RENAME</button>
                 <button style={s.deactivateButton} onClick={() => removeOffice(o.id)}>DELETE</button>
               </div>
