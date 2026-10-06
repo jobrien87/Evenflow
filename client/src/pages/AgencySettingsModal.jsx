@@ -46,7 +46,10 @@ export default function AgencySettingsModal({ agency, onClose, onSaved }) {
     setResetDone(null);
     try {
       const data = await api.agencyFactoryResetPreview(agency.id);
-      setResetPreview(data.counts);
+      // Real roster identity alongside the counts — not just the (non-
+      // unique) agency name — so a duplicate-named Agency row is visually
+      // obvious before confirming (see server route's own comment).
+      setResetPreview({ ...data.counts, ownerEmail: data.ownerEmail, ownerName: data.ownerName, totalUsers: data.totalUsers });
     } catch (error) {
       setResetError(error.data?.message || 'Could not load factory reset preview.');
     }
@@ -181,6 +184,12 @@ export default function AgencySettingsModal({ agency, onClose, onSaved }) {
           )}
           {resetPreview && !resetDone && (
             <>
+              <div style={s.identityWarning}>
+                You are about to permanently delete data for <b>{agency.name}</b>, owned by{' '}
+                <b>{resetPreview.ownerEmail || 'no Agency Owner on file'}</b>
+                {resetPreview.ownerName ? ` (${resetPreview.ownerName})` : ''} — {resetPreview.totalUsers} user(s) total on this agency.
+                Double-check this is the account you mean before confirming — agency names are not unique.
+              </div>
               <div style={s.helpText}>
                 This will permanently delete: {resetPreview.leads} lead(s), {resetPreview.customers} customer(s) (of {resetPreview.wipeableCustomers} eligible), {resetPreview.transfers} transfer(s), {resetPreview.opportunities} opportunity(ies), {resetPreview.calls} call(s), {resetPreview.historicalRecords} historical record(s), {resetPreview.leadImportBatches} import batch(es), {resetPreview.revenueEvents} revenue event(s), {resetPreview.costEvents} cost event(s), {resetPreview.flowScoreSnapshots} Flow Score snapshot(s). This cannot be undone.
               </div>
@@ -210,6 +219,7 @@ const s = {
   error: { color: 'var(--danger)', fontSize: 13 },
   divider: { borderTop: '1px solid var(--border-hairline)', margin: '20px 0 16px' },
   helpText: { color: 'var(--text-muted)', fontSize: 11, marginBottom: 8, lineHeight: 1.5 },
+  identityWarning: { color: 'var(--danger)', fontSize: 13, lineHeight: 1.5, background: 'rgba(255, 77, 94, 0.1)', border: '1px solid rgba(255, 77, 94, 0.4)', borderRadius: 6, padding: 10, marginBottom: 8 },
   typeList: { display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 16 },
   typeRow: { display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 6 },
   typeRank: { color: 'var(--text-muted)', fontSize: 11, width: 16 },

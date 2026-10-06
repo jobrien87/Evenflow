@@ -388,7 +388,13 @@ router.get('/:agencyId/factory-reset-preview', requireRole('AGENCY_OWNER', 'PLAT
     if (!agency) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
 
     const { leadIds, transferIds, opportunityIds, callIds, customerIds } = await collectFactoryResetScope(prisma, agencyId);
-    const userIds = (await prisma.user.findMany({ where: { agencyId }, select: { id: true } })).map((u) => u.id);
+    // Fetched once, with enough fields to both scope FlowScoreSnapshot below
+    // AND show real roster identity in the confirm UI — a duplicate-named
+    // Agency row (schema has no uniqueness constraint on Agency.name) looks
+    // identical by name alone, but never shares a real owner email.
+    const agencyUsers = await prisma.user.findMany({ where: { agencyId }, select: { id: true, email: true, firstName: true, lastName: true, role: true } });
+    const userIds = agencyUsers.map((u) => u.id);
+    const owner = agencyUsers.find((u) => u.role === 'AGENCY_OWNER') || agencyUsers[0] || null;
 
     let wipeableCustomers = 0;
     for (const customerId of customerIds) {
@@ -421,6 +427,12 @@ router.get('/:agencyId/factory-reset-preview', requireRole('AGENCY_OWNER', 'PLAT
     return res.json({
       success: true,
       agency: { id: agency.id, name: agency.name },
+      // Real roster identity, not just the (non-unique) agency name — lets
+      // the confirm UI make a duplicate-named Agency row's mixup visually
+      // obvious before anyone types a confirmation.
+      ownerEmail: owner?.email || null,
+      ownerName: owner ? `${owner.firstName} ${owner.lastName}` : null,
+      totalUsers: agencyUsers.length,
       counts: {
         leads: leadIds.length,
         customers: customerIds.size,

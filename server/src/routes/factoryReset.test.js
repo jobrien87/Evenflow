@@ -83,6 +83,11 @@ test('factory-reset-preview returns real counts without deleting anything', asyn
   assert.equal(body.counts.leads, 1);
   assert.equal(body.counts.revenueEvents, 1);
   assert.equal(body.counts.costEvents, 1);
+  // Real roster identity, not just the (non-unique) agency name — lets the
+  // confirm UI make a duplicate-named Agency row's mixup visually obvious.
+  assert.equal(body.ownerEmail, `fr-owner-${suffix}@test.local`);
+  assert.equal(body.ownerName, 'Reset Owner');
+  assert.equal(body.totalUsers, 1);
 
   const stillThere = await prisma.lead.count({ where: { agencyId } });
   assert.equal(stillThere, 1, 'preview must never mutate anything');
