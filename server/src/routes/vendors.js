@@ -82,6 +82,10 @@ router.post('/', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res,
     if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
 
     const distributionMode = parsed.data.distributionMode || 'ROUND_ROBIN';
+    const category = parsed.data.category || 'OTHER';
+    if (distributionMode === 'MOSHPIT' && ['PAID_AD', 'META_AD'].includes(category)) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Paid Ad and Meta Ad vendors cannot use Moshpit distribution — these leads must always be directly assigned, never left to sit unclaimed.' });
+    }
     const selectedAgentIds = distributionMode === 'SELECTED_AGENTS' ? (parsed.data.selectedAgentIds || []) : [];
     if (selectedAgentIds.length > 0) {
       const { valid } = await validateSelectedAgentIds(agencyId, selectedAgentIds);
@@ -102,7 +106,7 @@ router.post('/', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res,
           costPerLeadCents: parsed.data.costPerLeadCents ?? null,
           distributionMode,
           selectedAgentIds,
-          category: parsed.data.category || 'OTHER',
+          category,
         },
       });
       const credential = await tx.vendorCredential.create({
@@ -228,6 +232,10 @@ router.patch('/:id', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, 
 
     const data = { ...parsed.data };
     const nextMode = data.distributionMode || vendor.distributionMode;
+    const nextCategory = data.category || vendor.category;
+    if (nextMode === 'MOSHPIT' && ['PAID_AD', 'META_AD'].includes(nextCategory)) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Paid Ad and Meta Ad vendors cannot use Moshpit distribution — these leads must always be directly assigned, never left to sit unclaimed.' });
+    }
     if (nextMode === 'SELECTED_AGENTS' && data.selectedAgentIds) {
       const { valid } = await validateSelectedAgentIds(vendor.agencyId, data.selectedAgentIds);
       if (!valid) return res.status(400).json({ success: false, error: 'INVALID_AGENTS', message: 'One or more selected agents are not active producers in this agency.' });

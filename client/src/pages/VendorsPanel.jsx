@@ -22,6 +22,13 @@ const DISTRIBUTION_MODES = [
 
 const distributionTone = (mode) => (mode === 'MOSHPIT' ? 'warning' : mode === 'SELECTED_AGENTS' || mode === 'ALPHA_SPLIT' || mode === 'OFFICE_SPLIT' ? 'info' : 'accent');
 const distributionLabel = (mode) => DISTRIBUTION_MODES.find((m) => m.value === mode)?.label || 'Round Robin';
+// Paid Ad / Meta Ad leads must always be directly assigned, never left to
+// sit unclaimed in the Moshpit — mirrors the same rule server-side
+// (routes/vendors.js's create/update validation is the real guarantee,
+// this is just the matching UX so a save never bounces off it unexplained).
+const MOSHPIT_BLOCKED_CATEGORIES = ['PAID_AD', 'META_AD'];
+const availableDistributionModes = (category) =>
+  MOSHPIT_BLOCKED_CATEGORIES.includes(category) ? DISTRIBUTION_MODES.filter((m) => m.value !== 'MOSHPIT') : DISTRIBUTION_MODES;
 
 function AgentPicker({ producers, selectedIds, onChange }) {
   if (producers.length === 0) {
@@ -242,7 +249,15 @@ export default function VendorsPanel() {
           <select style={s.input} value={form.product} onChange={(e) => setForm({ ...form, product: e.target.value })}>
             <option>Auto</option><option>Home</option><option>Life</option><option>Health</option>
           </select>
-          <select style={s.input} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+          <select
+            style={s.input}
+            value={form.category}
+            onChange={(e) => {
+              const category = e.target.value;
+              const stillValid = availableDistributionModes(category).some((m) => m.value === form.distributionMode);
+              setForm({ ...form, category, distributionMode: stillValid ? form.distributionMode : 'ROUND_ROBIN' });
+            }}
+          >
             {VENDOR_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
           </select>
           <input
@@ -258,9 +273,12 @@ export default function VendorsPanel() {
           <div style={s.distributionSection}>
             <div style={s.distributionLabel}>LEAD DISTRIBUTION</div>
             <select style={s.input} value={form.distributionMode} onChange={(e) => setForm({ ...form, distributionMode: e.target.value })}>
-              {DISTRIBUTION_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+              {availableDistributionModes(form.category).map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
             </select>
             <div style={s.distributionHint}>{DISTRIBUTION_MODES.find((m) => m.value === form.distributionMode)?.hint}</div>
+            {MOSHPIT_BLOCKED_CATEGORIES.includes(form.category) && (
+              <div style={s.distributionHint}>Moshpit isn't available for Paid Ad / Meta Ad vendors — these leads must always be directly assigned.</div>
+            )}
             {form.distributionMode === 'SELECTED_AGENTS' && (
               <AgentPicker
                 producers={producers}
@@ -324,7 +342,15 @@ export default function VendorsPanel() {
               <select style={s.input} value={editForm.product} onChange={(e) => setEditForm({ ...editForm, product: e.target.value })}>
                 <option>Auto</option><option>Home</option><option>Life</option><option>Health</option>
               </select>
-              <select style={s.input} value={editForm.category} onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}>
+              <select
+                style={s.input}
+                value={editForm.category}
+                onChange={(e) => {
+                  const category = e.target.value;
+                  const stillValid = availableDistributionModes(category).some((m) => m.value === editForm.distributionMode);
+                  setEditForm({ ...editForm, category, distributionMode: stillValid ? editForm.distributionMode : 'ROUND_ROBIN' });
+                }}
+              >
                 {VENDOR_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
               </select>
               <input style={s.input} type="number" step="0.01" min="0" value={editForm.costPerLeadCents} onChange={(e) => setEditForm({ ...editForm, costPerLeadCents: e.target.value })} placeholder="Cost per lead ($)" />
@@ -332,9 +358,12 @@ export default function VendorsPanel() {
               <div style={s.distributionSection}>
                 <div style={s.distributionLabel}>LEAD DISTRIBUTION</div>
                 <select style={s.input} value={editForm.distributionMode} onChange={(e) => setEditForm({ ...editForm, distributionMode: e.target.value })}>
-                  {DISTRIBUTION_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+                  {availableDistributionModes(editForm.category).map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
                 </select>
                 <div style={s.distributionHint}>{DISTRIBUTION_MODES.find((m) => m.value === editForm.distributionMode)?.hint}</div>
+                {MOSHPIT_BLOCKED_CATEGORIES.includes(editForm.category) && (
+                  <div style={s.distributionHint}>Moshpit isn't available for Paid Ad / Meta Ad vendors — these leads must always be directly assigned.</div>
+                )}
                 {editForm.distributionMode === 'SELECTED_AGENTS' && (
                   <AgentPicker
                     producers={producers}
