@@ -5,6 +5,7 @@ import { useAuth } from '../lib/AuthContext';
 import { Button, LeadTypeIcon, EmptyState } from '../ui';
 import LeadDetailModal from './LeadDetailModal';
 import BulkLeadUploadBox from './BulkLeadUploadBox';
+import AddClosedSaleModal from './AddClosedSaleModal';
 
 // Extracted out of AgencyOwnerDashboard (Main Stage) into its own "Leads"
 // tab — same real data/actions (bulk upload, manual add, the leads list,
@@ -18,6 +19,7 @@ export default function AgencyLeadsPanel() {
   const [openLeadId, setOpenLeadId] = useState(null);
   const [showAddLead, setShowAddLead] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
+  const [showAddSale, setShowAddSale] = useState(false);
   const [leadForm, setLeadForm] = useState({ firstName: '', lastName: '', phone: '', email: '', product: 'Auto', assignedToId: '' });
   const [leadStatus, setLeadStatus] = useState('');
   const [loadError, setLoadError] = useState('');
@@ -92,11 +94,15 @@ export default function AgencyLeadsPanel() {
             <button style={s.smallButtonOutline} onClick={clearStageFilter}>CLEAR FILTER</button>
           )}
           <button style={s.smallButtonOutline} onClick={() => setShowUpload(!showUpload)}>UPLOAD LEADS</button>
+          <button style={s.smallButtonOutline} onClick={() => setShowAddSale(true)}>+ ADD CLOSED SALE</button>
           <button style={s.smallButton} onClick={() => setShowAddLead(!showAddLead)}>+ ADD LEAD</button>
         </div>
       </div>
       {showUpload && (
         <BulkLeadUploadBox agencyId={user?.agencyId} onImported={load} />
+      )}
+      {showAddSale && (
+        <AddClosedSaleModal onClose={() => setShowAddSale(false)} onSaved={load} />
       )}
       {showAddLead && (
         <form onSubmit={addLead} style={s.form}>

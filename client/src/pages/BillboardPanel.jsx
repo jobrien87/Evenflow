@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { Card, SectionHeader, StatTile, BarRow, Badge, ExportButton, DateRangeFilter, EmptyState } from '../ui';
+import { Card, SectionHeader, StatTile, BarRow, Badge, Button, ExportButton, DateRangeFilter, EmptyState } from '../ui';
 import { downloadCsv } from '../lib/downloadCsv';
+import AddClosedSaleModal from './AddClosedSaleModal';
 
 const GRANULARITIES = [
   { key: 'day', label: 'DAY' },
@@ -60,6 +61,7 @@ export default function BillboardPanel() {
   const [customTo, setCustomTo] = useState('');
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
+  const [showAddSale, setShowAddSale] = useState(false);
 
   useEffect(() => {
     load();
@@ -96,16 +98,23 @@ export default function BillboardPanel() {
     <div>
       <div style={s.headerRow}>
         <SectionHeader>Billboard</SectionHeader>
-        <DateRangeFilter
-          presets={GRANULARITIES}
-          periodKey={useCustomRange ? 'custom' : granularity}
-          onSelectPreset={selectPreset}
-          customFrom={customFrom}
-          customTo={customTo}
-          onCustomFromChange={setCustomFrom}
-          onCustomToChange={setCustomTo}
-        />
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <Button size="sm" onClick={() => setShowAddSale(true)}>+ ADD CLOSED SALE</Button>
+          <DateRangeFilter
+            presets={GRANULARITIES}
+            periodKey={useCustomRange ? 'custom' : granularity}
+            onSelectPreset={selectPreset}
+            customFrom={customFrom}
+            customTo={customTo}
+            onCustomFromChange={setCustomFrom}
+            onCustomToChange={setCustomTo}
+          />
+        </div>
       </div>
+
+      {showAddSale && (
+        <AddClosedSaleModal onClose={() => setShowAddSale(false)} onSaved={load} />
+      )}
 
       <div style={s.statsRow}>
         <StatTile

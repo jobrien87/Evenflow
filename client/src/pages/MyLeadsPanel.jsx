@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { Card, Badge, Button, SectionHeader, StatTile, DateRangeFilter, EmptyState, LeadTypeIcon } from '../ui';
 import { resolveDateRange } from '../lib/dateRange';
 import LeadDetailModal from './LeadDetailModal';
+import AddClosedSaleModal from './AddClosedSaleModal';
 
 const PERIODS = [
   { key: 'month', label: 'This month', from: () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); } },
@@ -32,6 +33,7 @@ export default function MyLeadsPanel() {
   const [error, setError] = useState('');
   const [openLeadId, setOpenLeadId] = useState(null);
   const [statusFilter, setStatusFilter] = useState('');
+  const [showAddSale, setShowAddSale] = useState(false);
 
   useEffect(() => {
     load();
@@ -79,16 +81,23 @@ export default function MyLeadsPanel() {
     <div style={s.wrap}>
       <div style={s.headerRow}>
         <h3 style={s.h3}>MY LEADS ({total})</h3>
-        <DateRangeFilter
-          presets={PERIODS.map((p) => ({ key: p.key, label: p.label.toUpperCase() }))}
-          periodKey={periodKey}
-          onSelectPreset={setPeriodKey}
-          customFrom={customFrom}
-          customTo={customTo}
-          onCustomFromChange={setCustomFrom}
-          onCustomToChange={setCustomTo}
-        />
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <Button size="sm" onClick={() => setShowAddSale(true)}>+ ADD CLOSED SALE</Button>
+          <DateRangeFilter
+            presets={PERIODS.map((p) => ({ key: p.key, label: p.label.toUpperCase() }))}
+            periodKey={periodKey}
+            onSelectPreset={setPeriodKey}
+            customFrom={customFrom}
+            customTo={customTo}
+            onCustomFromChange={setCustomFrom}
+            onCustomToChange={setCustomTo}
+          />
+        </div>
       </div>
+
+      {showAddSale && (
+        <AddClosedSaleModal onClose={() => setShowAddSale(false)} onSaved={load} />
+      )}
 
       {error && (
         <div style={s.loadErrorBox}>

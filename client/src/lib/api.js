@@ -48,6 +48,13 @@ export const api = {
   logProductQuote: (id, payload) => request(`/leads/${id}/products`, { method: 'POST', body: payload }),
   deleteProductQuote: (id, product) => request(`/leads/${id}/products/${product}`, { method: 'DELETE' }),
 
+  // Add Closed Sale — standalone sales with no originating Lead in Evenflow.
+  checkSaleDuplicate: (payload) => request('/sales/check-duplicate', { method: 'POST', body: payload }),
+  createSale: (payload) => request('/sales', { method: 'POST', body: payload }),
+  sales: (params = '') => request(`/sales${params}`),
+  updateSale: (id, payload) => request(`/sales/${id}`, { method: 'PATCH', body: payload }),
+  voidSale: (id, voidReason) => request(`/sales/${id}/void`, { method: 'POST', body: { voidReason } }),
+
   tasks: (params = '') => request(`/tasks${params}`),
   createTask: (payload) => request('/tasks', { method: 'POST', body: payload }),
   completeTask: (id, payload) => request(`/tasks/${id}/complete`, { method: 'POST', body: payload }),
