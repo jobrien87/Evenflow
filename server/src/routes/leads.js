@@ -739,6 +739,17 @@ router.post('/historical-data-import', uploadSpreadsheet.single('file'), async (
       after: { created, skipped: failures.length, sourceSystem }, correlationId: req.correlationId,
     });
 
+    // A per-reason tally (parse-time skips from parsedFile.skippedReasons,
+    // plus any create-time DB failures appended above) so the client can
+    // show a clean breakdown ("340 missing/unparseable date") instead of
+    // either a vague guess or every individual row for a large file.
+    const skippedReasons = { ...parsedFile.skippedReasons };
+    for (const f of failures) {
+      if (f.row === undefined) continue;
+      const isParseSkip = parsedFile.skipped.some((s) => s.row === f.row && s.reason === f.reason);
+      if (!isParseSkip) skippedReasons[f.reason] = (skippedReasons[f.reason] || 0) + 1;
+    }
+
     return res.json({
       success: true,
       batchId: batch.id,
@@ -747,6 +758,7 @@ router.post('/historical-data-import', uploadSpreadsheet.single('file'), async (
       truncated: parsedFile.truncated,
       created,
       skipped: failures.length,
+      skippedReasons,
       failures: failures.slice(0, 50),
       columnMapping: parsedFile.columnMapping,
     });

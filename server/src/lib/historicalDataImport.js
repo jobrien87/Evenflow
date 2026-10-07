@@ -72,10 +72,64 @@ function classifyIsSold(outcome, premiumCents) {
 
 const MAX_ROWS = 20000;
 
+// Excel's date epoch is 1899-12-30 (not 1900-01-01 — accounts for the
+// historical 1900-leap-year bug Excel still carries). Only needed for a
+// formula/computed cell that yields a raw serial number rather than a
+// real date-typed cell (which cellDates:true already turns into a Date
+// before this ever runs).
+function excelSerialToDate(serial) {
+  const utcDays = Math.floor(serial - 25569);
+  const date = new Date(utcDays * 86400 * 1000);
+  const fractionalDay = serial - Math.floor(serial);
+  if (fractionalDay > 0) date.setUTCMilliseconds(Math.round(fractionalDay * 86400 * 1000));
+  return date;
+}
+
+// Explicit, unambiguous formats tried before falling back to the generic
+// `new Date(string)` parse — a text-typed date cell (not a real Excel date
+// cell) round-trips through SheetJS as a literal string, and a legacy
+// export's exact format isn't guaranteed to be one `new Date()` on its own
+// reliably parses the same way across platforms/locales.
+const EXPLICIT_DATE_PATTERNS = [
+  // MM/DD/YYYY, M/D/YYYY, MM-DD-YYYY, ... (US convention — this parser's
+  // existing synonyms and acceptance tests are already US-insurance-data
+  // oriented, so this assumption matches the rest of the file).
+  { re: /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/, build: (m) => new Date(Date.UTC(+m[3], +m[1] - 1, +m[2])) },
+  // YYYY-MM-DD, YYYY/MM/DD (ISO-ish, unambiguous regardless of locale).
+  { re: /^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/, build: (m) => new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])) },
+  // MM/DD/YY, M/D/YY — 2-digit year, assumed 2000s (no insurance data this
+  // app imports predates the year 2000).
+  { re: /^(\d{1,2})[/-](\d{1,2})[/-](\d{2})$/, build: (m) => new Date(Date.UTC(2000 + Number(m[3]), +m[1] - 1, +m[2])) },
+];
+
 function parseDateOrNull(value) {
-  if (!value) return null;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d;
+  if (value === undefined || value === null || value === '') return null;
+  // A real Excel date cell, read with cellDates:true + raw:true below,
+  // arrives here as an actual Date instance — use it directly rather than
+  // round-tripping through a formatted display string, which is the real
+  // cause a legacy export's date format could silently fail to parse.
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const d = excelSerialToDate(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const text = String(value).trim();
+  if (!text) return null;
+  // Strip a trailing time-of-day fragment some exports append to an
+  // otherwise plain date (e.g. "10/06/2026 12:00:00 AM") so the date-only
+  // patterns above still match.
+  const datePart = text.split(/\s+\d{1,2}:\d{2}/)[0].trim();
+  for (const { re, build } of EXPLICIT_DATE_PATTERNS) {
+    const m = datePart.match(re);
+    if (m) {
+      const d = build(m);
+      if (!Number.isNaN(d.getTime())) return d;
+    }
+  }
+  const generic = new Date(text);
+  return Number.isNaN(generic.getTime()) ? null : generic;
 }
 
 // Best-effort — strips everything but digits/decimal point, so "$1,200.00",
@@ -101,7 +155,13 @@ function readWorkbookRows(buffer) {
   if (!sheetName) return { error: 'EMPTY', message: 'This file has no sheets.' };
 
   const sheet = workbook.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
+  // raw:true (paired with cellDates:true above) returns a real date cell as
+  // a native Date instance and a text cell as its literal original string —
+  // never SheetJS's own locale-formatted display string, which was the real
+  // cause some rows' dates silently failed to parse (a legacy export's
+  // date format round-tripped through formatting into something
+  // new Date() couldn't read, with no visible reason why).
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '' });
   if (rows.length < 2) return { error: 'EMPTY', message: 'No data rows found below the header row.' };
 
   return { headerRow: rows[0], dataRows: rows.slice(1) };
@@ -121,11 +181,21 @@ function extractHistoricalRecords({ headerRow, dataRows, headerMap }) {
 
   limitedRows.forEach((row, i) => {
     const sourceRow = i + 2; // +1 for header, +1 for 1-indexing
-    if (row.every((c) => String(c).trim() === '')) return;
+    // A blank row previously vanished silently — counted in totalRows
+    // (measured before this filter) but added to neither records nor
+    // skipped, so the numbers shown to the user never reconciled. Folded
+    // into skipped now, same as any other real skip reason.
+    if (row.every((c) => String(c ?? '').trim() === '')) {
+      skipped.push({ row: sourceRow, reason: 'Blank row' });
+      return;
+    }
 
     const get = (field) => (headerMap[field] !== undefined ? String(row[headerMap[field]] ?? '').trim() : '');
+    // Deliberately NOT routed through get()'s String()-coercion — a real
+    // date cell needs its native Date/number value, not a stringified one.
+    const getRaw = (field) => (headerMap[field] !== undefined ? row[headerMap[field]] : undefined);
 
-    const recordDate = parseDateOrNull(get('recordDate'));
+    const recordDate = parseDateOrNull(getRaw('recordDate'));
     if (!recordDate) {
       skipped.push({ row: sourceRow, reason: 'Missing or unparseable date' });
       return;
@@ -167,7 +237,13 @@ function extractHistoricalRecords({ headerRow, dataRows, headerMap }) {
     });
   });
 
-  return { records, skipped, totalRows: limitedRows.length, truncated, matchedFields: Object.keys(headerMap) };
+  // A tally alongside the per-row `skipped` list — lets the client show a
+  // clean "340 missing/unparseable date, 12 blank" breakdown instead of
+  // either a vague guess or dumping every individual row for a huge file.
+  const skippedReasons = {};
+  for (const s of skipped) skippedReasons[s.reason] = (skippedReasons[s.reason] || 0) + 1;
+
+  return { records, skipped, skippedReasons, totalRows: limitedRows.length, truncated, matchedFields: Object.keys(headerMap) };
 }
 
 // Deterministic-only entry point — no AI call, ever. Kept as the simple,

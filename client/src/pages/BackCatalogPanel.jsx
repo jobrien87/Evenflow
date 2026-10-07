@@ -45,6 +45,7 @@ export default function BackCatalogPanel() {
   const [batchesError, setBatchesError] = useState('');
   const [undoingId, setUndoingId] = useState(null);
   const [undoError, setUndoError] = useState('');
+  const [showSkipDetails, setShowSkipDetails] = useState(false);
 
   const isHistorical = mode === 'historical';
 
@@ -68,6 +69,7 @@ export default function BackCatalogPanel() {
     setBusy(true);
     setError('');
     setResult(null);
+    setShowSkipDetails(false);
     try {
       const data = isHistorical
         ? await api.historicalDataImport(file, undefined, sourceSystem)
@@ -154,7 +156,7 @@ export default function BackCatalogPanel() {
             {isHistorical ? (
               <>
                 Imported {result.created} of {result.totalRows} row{result.totalRows === 1 ? '' : 's'} as historical records — stored for reporting/pattern-learning only, never assigned or shown to anyone to work.
-                {result.skipped > 0 ? ` ${result.skipped} row${result.skipped === 1 ? '' : 's'} skipped (usually a missing/unparseable date).` : ''}
+                {result.skipped > 0 ? ` ${result.skipped} row${result.skipped === 1 ? '' : 's'} skipped.` : ''}
               </>
             ) : (
               <>
@@ -163,6 +165,30 @@ export default function BackCatalogPanel() {
               </>
             )}
             {result.truncated ? ' This file had more rows than one upload can process — split it up and upload the rest separately.' : ''}
+            {result.skipped > 0 && result.skippedReasons && (
+              <div style={{ marginTop: 8 }}>
+                <button type="button" style={s.detailsToggle} onClick={() => setShowSkipDetails((v) => !v)}>
+                  {showSkipDetails ? 'HIDE' : 'VIEW'} why rows were skipped
+                </button>
+                {showSkipDetails && (
+                  <>
+                    <ul style={s.skipList}>
+                      {Object.entries(result.skippedReasons).map(([reason, count]) => (
+                        <li key={reason}>{count} row{count === 1 ? '' : 's'} — {reason}</li>
+                      ))}
+                    </ul>
+                    {result.failures?.length > 0 && (
+                      <div style={s.skipRowList}>
+                        {result.failures.slice(0, 50).map((f, i) => (
+                          <div key={i}>Row {f.row}: {f.reason}</div>
+                        ))}
+                        {result.skipped > 50 ? <div>…and {result.skipped - 50} more.</div> : null}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
           </div>
         )}
       </Card>
@@ -217,6 +243,9 @@ const s = {
   select: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 13 },
   error: { color: 'var(--danger)', fontSize: 12 },
   result: { color: 'var(--text-secondary)', fontSize: 12 },
+  detailsToggle: { background: 'none', border: 'none', padding: 0, color: 'var(--accent)', fontSize: 11, fontWeight: 700, cursor: 'pointer', textDecoration: 'underline' },
+  skipList: { margin: '6px 0', paddingLeft: 18 },
+  skipRowList: { marginTop: 6, maxHeight: 180, overflowY: 'auto', fontSize: 11, color: 'var(--text-muted)', background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 6, padding: 8 },
   historyWrap: { display: 'flex', flexDirection: 'column', gap: 8 },
   historyLabel: { fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', color: 'var(--text-muted)' },
   historyRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 12px', fontSize: 12, color: 'var(--text-secondary)', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 6 },

@@ -361,3 +361,72 @@ test('undo cleans up the Performology batch', async () => {
   assert.equal(undoRes.status, 200);
   await prisma.office.delete({ where: { id: performologyOfficeId } });
 });
+
+// Regression test for the real production bug: a genuine Excel date-typed
+// cell, read the old way (raw:false), round-trips through SheetJS's own
+// locale-formatted display string before ever reaching parseDateOrNull —
+// exactly the mechanism that silently dropped rows from Tom Paterson's
+// real Performology upload with no visible reason why. Builds a REAL
+// .xlsx buffer (not CSV, which has no cell-type metadata at all) with an
+// actual Date object in the date cell, so this only passes if the fix
+// (raw:true + cellDates:true, using the native Date instance directly)
+// is really in effect.
+let xlsxBatchId;
+
+test('a real .xlsx file with a genuine Excel date cell parses correctly, not silently dropped', async () => {
+  const XLSX = require('xlsx');
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ['Date', 'Name', 'Product', 'Premium'],
+    [new Date(Date.UTC(2026, 5, 15)), 'Real DateCell', 'Auto', 30000],
+  ]);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, 'Sheet1');
+  const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
+  const form = new FormData();
+  form.append('file', new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'realdates.xlsx');
+  form.append('sourceSystem', 'OTHER');
+  const res = await fetch(`${baseUrl}/api/leads/historical-data-import`, { method: 'POST', headers: { Cookie: ownerCookie }, body: form });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.created, 1, 'the real date-typed cell must parse correctly, not be silently skipped');
+  assert.equal(body.skipped, 0);
+  xlsxBatchId = body.batchId;
+
+  const record = await prisma.historicalRecord.findFirst({ where: { importBatchId: xlsxBatchId } });
+  assert.ok(record);
+  assert.equal(record.recordDate.toISOString().slice(0, 10), '2026-06-15');
+});
+
+test('cleanup real .xlsx test batch', async () => {
+  await fetch(`${baseUrl}/api/leads/import-batches/${xlsxBatchId}/undo`, { method: 'POST', headers: { Cookie: ownerCookie } });
+});
+
+// Regression test for the second real bug: a blank row previously vanished
+// with no accounting anywhere (not created, not skipped), so the numbers
+// shown to the user never reconciled against totalRows. Also confirms the
+// new skippedReasons tally the client now reads instead of a hardcoded guess.
+test('blank rows are counted in skipped with a real reason, and created+skipped reconciles against totalRows', async () => {
+  const csv = [
+    'Date,Name,Product,Premium',
+    '2026-01-05,Good Row,Auto,10000',
+    ',,,', // entirely blank
+    ',Missing Date,Auto,20000', // real row, but no date -> different skip reason
+  ].join('\n');
+
+  const form = new FormData();
+  form.append('file', new Blob([csv], { type: 'text/csv' }), 'blanks.csv');
+  form.append('sourceSystem', 'OTHER');
+  const res = await fetch(`${baseUrl}/api/leads/historical-data-import`, { method: 'POST', headers: { Cookie: ownerCookie }, body: form });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+
+  assert.equal(body.totalRows, 3);
+  assert.equal(body.created, 1);
+  assert.equal(body.skipped, 2);
+  assert.equal(body.created + body.skipped, body.totalRows, 'created + skipped must always reconcile against totalRows now');
+  assert.equal(body.skippedReasons['Blank row'], 1);
+  assert.equal(body.skippedReasons['Missing or unparseable date'], 1);
+
+  await fetch(`${baseUrl}/api/leads/import-batches/${body.batchId}/undo`, { method: 'POST', headers: { Cookie: ownerCookie } });
+});

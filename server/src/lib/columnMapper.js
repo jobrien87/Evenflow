@@ -46,7 +46,13 @@ function buildRawRowCapture(headerRow, row) {
   headerRow.forEach((raw, idx) => {
     const key = String(raw || '').trim();
     if (!key) return;
-    const value = String(row[idx] ?? '').trim();
+    const cell = row[idx];
+    // A real Excel date cell (read with raw:true + cellDates:true) arrives
+    // here as a Date instance — stringify it as a plain date, not
+    // Date.prototype.toString()'s locale/timezone-dependent format.
+    const value = cell instanceof Date
+      ? (Number.isNaN(cell.getTime()) ? '' : cell.toISOString().slice(0, 10))
+      : String(cell ?? '').trim();
     if (value === '') return;
     capture[key] = value;
   });
