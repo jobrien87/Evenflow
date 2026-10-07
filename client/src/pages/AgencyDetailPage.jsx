@@ -19,6 +19,20 @@ function statusTone(status) {
   return 'neutral';
 }
 
+const PURGE_BLOCKER_LABELS = {
+  leadNotes: 'lead notes written',
+  leadActivities: 'logged call/email/text activities',
+  calls: 'uploaded call recordings',
+  messages: 'chat messages sent',
+  producerNotesAbout: 'coaching notes about them',
+  producerNotesBy: 'coaching notes they wrote',
+  telemarketerAssignments: 'telemarketer agency assignments',
+  transfersCreated: 'transfers they created',
+  importBatchesUploaded: 'bulk/historical imports they uploaded',
+  announcementsCreated: 'announcements they sent',
+  invitationsSent: 'invitations they sent to others',
+};
+
 const ENTITLEMENT_FIELDS = [
   { key: 'crmEnabled', label: 'CRM' },
   { key: 'transfersEnabled', label: 'Yield Transfers' },
@@ -41,6 +55,13 @@ export default function AgencyDetailPage() {
   const [showInvite, setShowInvite] = useState(false);
   const [showChangePlan, setShowChangePlan] = useState(false);
   const [resetStatus, setResetStatus] = useState('');
+  const [resendingId, setResendingId] = useState('');
+  const [resendStatus, setResendStatus] = useState('');
+  const [purgeTarget, setPurgeTarget] = useState(null);
+  const [purgePreview, setPurgePreview] = useState(null);
+  const [purgeConfirmText, setPurgeConfirmText] = useState('');
+  const [purgeBusy, setPurgeBusy] = useState(false);
+  const [purgeError, setPurgeError] = useState('');
 
   useEffect(() => {
     load();
@@ -96,6 +117,55 @@ export default function AgencyDetailPage() {
       setResetStatus(emailStatusMessage('Password reset sent.', res.emailStatus));
     } catch (err) {
       setResetStatus(err.data?.message || 'Failed to send password reset.');
+    }
+  }
+
+  async function resendInvite(userId) {
+    setResendingId(userId);
+    setResendStatus('Resending…');
+    try {
+      const res = await api.resendUserInvite(userId);
+      setResendStatus(emailStatusMessage('Invitation resent.', res.emailStatus));
+      await load();
+    } catch (err) {
+      setResendStatus(err.data?.message || 'Failed to resend invitation.');
+    } finally {
+      setResendingId('');
+    }
+  }
+
+  async function openPurge(u) {
+    setPurgeTarget(u);
+    setPurgePreview(null);
+    setPurgeConfirmText('');
+    setPurgeError('');
+    try {
+      const data = await api.purgeUserPreview(u.id);
+      setPurgePreview(data);
+    } catch (err) {
+      setPurgeError(err.data?.message || 'Could not load what would be deleted.');
+    }
+  }
+
+  function closePurge() {
+    setPurgeTarget(null);
+    setPurgePreview(null);
+    setPurgeConfirmText('');
+    setPurgeError('');
+  }
+
+  async function confirmPurge() {
+    if (!purgeTarget) return;
+    setPurgeBusy(true);
+    setPurgeError('');
+    try {
+      await api.purgeUser(purgeTarget.id, purgeConfirmText);
+      closePurge();
+      await load();
+    } catch (err) {
+      setPurgeError(err.data?.message || 'Could not delete this account.');
+    } finally {
+      setPurgeBusy(false);
     }
   }
 
@@ -181,11 +251,12 @@ export default function AgencyDetailPage() {
         ROSTER
       </SectionHeader>
       {resetStatus && <div style={s.error}>{resetStatus}</div>}
+      {resendStatus && <div style={s.error}>{resendStatus}</div>}
       <div style={s.rosterGrid}>
-        <RosterSection title="OWNERS" users={roster.owners} onResetPassword={sendReset} />
-        <RosterSection title="MANAGERS" users={roster.managers} onResetPassword={sendReset} />
-        <RosterSection title="PRODUCERS" users={roster.producers} onResetPassword={sendReset} />
-        <RosterSection title="TELEMARKETERS" users={roster.telemarketers} onResetPassword={sendReset} />
+        <RosterSection title="OWNERS" users={roster.owners} onResetPassword={sendReset} onResendInvite={resendInvite} onPurge={openPurge} resendingId={resendingId} />
+        <RosterSection title="MANAGERS" users={roster.managers} onResetPassword={sendReset} onResendInvite={resendInvite} onPurge={openPurge} resendingId={resendingId} />
+        <RosterSection title="PRODUCERS" users={roster.producers} onResetPassword={sendReset} onResendInvite={resendInvite} onPurge={openPurge} resendingId={resendingId} />
+        <RosterSection title="TELEMARKETERS" users={roster.telemarketers} onResetPassword={sendReset} onResendInvite={resendInvite} onPurge={openPurge} resendingId={resendingId} />
       </div>
 
       <SectionHeader
@@ -227,11 +298,61 @@ export default function AgencyDetailPage() {
       {showChangePlan && (
         <ChangePlanModal agencyId={agencyId} plans={plans} onClose={() => setShowChangePlan(false)} onChanged={() => { setShowChangePlan(false); load(); loadActivity(); }} />
       )}
+
+      {purgeTarget && (
+        <Modal title="Delete account permanently" onClose={closePurge}>
+          <p style={s.purgeIntro}>
+            This permanently deletes <b>{purgeTarget.firstName} {purgeTarget.lastName}</b> ({purgeTarget.email})
+            and cannot be undone.
+          </p>
+          {!purgePreview && !purgeError && <div style={s.error}>Checking what's attached to this account…</div>}
+          {purgeError && <div style={s.purgeError}>{purgeError}</div>}
+          {purgePreview && !purgePreview.canPurge && (
+            <div style={s.purgeBlocked}>
+              This account has real recorded history and can't be permanently deleted:
+              <ul style={s.purgeBlockList}>
+                {Object.entries(purgePreview.blockers)
+                  .filter(([, count]) => count > 0)
+                  .map(([key, count]) => (
+                    <li key={key}>{count} {PURGE_BLOCKER_LABELS[key] || key}</li>
+                  ))}
+              </ul>
+              It will stay deactivated (hidden, no login) but its history and everyone else's related records stay intact.
+            </div>
+          )}
+          {purgePreview && purgePreview.canPurge && (
+            <>
+              <p style={s.purgeIntro}>No recorded history is attached — safe to delete. Type their exact email to confirm.</p>
+              <input
+                style={s.input}
+                placeholder={purgeTarget.email}
+                value={purgeConfirmText}
+                onChange={(e) => setPurgeConfirmText(e.target.value)}
+              />
+              <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+                <Button
+                  variant="danger"
+                  disabled={purgeBusy || purgeConfirmText !== purgeTarget.email}
+                  onClick={confirmPurge}
+                >
+                  {purgeBusy ? 'DELETING…' : 'DELETE PERMANENTLY'}
+                </Button>
+                <Button variant="secondary" onClick={closePurge}>CANCEL</Button>
+              </div>
+            </>
+          )}
+          {purgePreview && !purgePreview.canPurge && (
+            <div style={{ marginTop: 12 }}>
+              <Button variant="secondary" onClick={closePurge}>CLOSE</Button>
+            </div>
+          )}
+        </Modal>
+      )}
     </div>
   );
 }
 
-function RosterSection({ title, users, onResetPassword }) {
+function RosterSection({ title, users, onResetPassword, onResendInvite, onPurge, resendingId }) {
   return (
     <Card style={s.rosterCard}>
       <div style={s.sectionTitle}>{title} ({users.length})</div>
@@ -244,10 +365,18 @@ function RosterSection({ title, users, onResetPassword }) {
               <div style={s.rosterName}>{u.firstName} {u.lastName}</div>
               <div style={s.rosterEmail}>{u.email}</div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, flexWrap: 'wrap' }}>
               <Badge tone={statusTone(u.status)} style={s.rosterBadge}>{u.status}</Badge>
               {u.status === 'ACTIVE' && (
                 <Button variant="ghost" size="sm" onClick={() => onResetPassword(u.id)}>RESET PW</Button>
+              )}
+              {(u.status === 'INVITED' || u.status === 'DEACTIVATED') && (
+                <Button variant="ghost" size="sm" disabled={resendingId === u.id} onClick={() => onResendInvite(u.id)}>
+                  {resendingId === u.id ? 'RESENDING…' : u.status === 'DEACTIVATED' ? 'RESEND & REACTIVATE' : 'RESEND'}
+                </Button>
+              )}
+              {u.status === 'DEACTIVATED' && (
+                <Button variant="danger" size="sm" onClick={() => onPurge(u)}>DELETE PERMANENTLY</Button>
               )}
             </div>
           </div>
@@ -361,4 +490,11 @@ const s = {
   form: { display: 'flex', flexDirection: 'column', gap: 10 },
   fieldLabel: { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: 'var(--text-muted)' },
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },
+  purgeIntro: { fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 10 },
+  purgeError: { color: 'var(--danger)', fontSize: 13, marginBottom: 10 },
+  purgeBlocked: {
+    color: 'var(--danger)', fontSize: 13, lineHeight: 1.5, background: 'rgba(255, 77, 94, 0.1)',
+    border: '1px solid rgba(255, 77, 94, 0.4)', borderRadius: 6, padding: 10,
+  },
+  purgeBlockList: { margin: '8px 0', paddingLeft: 20 },
 };
