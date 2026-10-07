@@ -280,3 +280,80 @@ test('Boberdoo not configured at all degrades honestly — no fabricated Partner
   const agency = await prisma.agency.findUnique({ where: { id: agencyId } });
   assert.equal(agency.boberdooPartnerId, null);
 });
+
+// ---- Genuine concurrency (Promise.all, not sequential awaits) ----------
+// The tests above prove idempotency across SEQUENTIAL repeat calls, which
+// a simple "does it already exist" check always passes trivially. These
+// prove the real double-click/race case: two requests landing at the
+// database at the same moment, which a plain check-then-write is NOT safe
+// against without either a DB constraint or (as createOrder now does) a
+// SERIALIZABLE transaction, and which provisionSubscription's atomic
+// claim must be the SOLE gate for (not a secondary status-based check a
+// concurrent winner's own write could falsify).
+
+test('two genuinely simultaneous checkout clicks for the same product create exactly one subscription', async () => {
+  fakeHappyBoberdoo();
+  const template = await loadTemplate(templateId);
+
+  const [a, b] = await Promise.all([
+    provisioning.createOrder({ agencyId, template, dailyVolume: 10, userId: ownerId }),
+    provisioning.createOrder({ agencyId, template, dailyVolume: 10, userId: ownerId }),
+  ]);
+
+  assert.equal(a.subscription.id, b.subscription.id, 'both calls must resolve to the same one real row');
+  assert.equal([a.created, b.created].filter(Boolean).length, 1, 'exactly one of the two calls actually created it');
+
+  const count = await prisma.recordStoreSubscription.count({ where: { agencyId, recordStoreTemplateId: templateId } });
+  assert.equal(count, 1, 'no duplicate row was left behind by the race');
+});
+
+test('two genuinely simultaneous Provision clicks on the same order create exactly one real Partner and Filter Set', async () => {
+  fakeHappyBoberdoo();
+  const template = await loadTemplate(templateId);
+  const { subscription } = await provisioning.createOrder({ agencyId, template, dailyVolume: 10, userId: ownerId });
+
+  const [a, b] = await Promise.all([
+    provisioning.provisionSubscription(subscription.id),
+    provisioning.provisionSubscription(subscription.id),
+  ]);
+
+  assert.ok(a.success || b.success, 'at least one of the two concurrent calls must succeed');
+  assert.equal(partnerCounter, 1, 'a real race must never create two Boberdoo Partners for one order');
+  assert.equal(filterSetCounter, 1, 'a real race must never create two Boberdoo Filter Sets for one order');
+
+  const agency = await prisma.agency.findUnique({ where: { id: agencyId } });
+  assert.ok(agency.boberdooPartnerId, 'the agency must end up with exactly the one real Partner id');
+});
+
+test('billing/delivery never crosses agencies — two different agencies buying the same product get distinct Partners and Filter Sets', async () => {
+  fakeHappyBoberdoo();
+  const otherAgency = await prisma.agency.create({
+    data: { name: `Record Store Cross-Agency Test ${suffix}`, address: '456 Side St', city: 'Dallas', state: 'TX', zip: '75201' },
+  });
+  const otherOwner = await prisma.user.create({
+    data: { email: `rs-owner-other-${suffix}@test.local`, firstName: 'Bea', lastName: 'Owner', role: 'AGENCY_OWNER', status: 'ACTIVE', agencyId: otherAgency.id, phone: '2145550000' },
+  });
+  const template = await loadTemplate(templateId);
+
+  const orderA = await provisioning.createOrder({ agencyId, template, dailyVolume: 10, userId: ownerId });
+  await provisioning.provisionSubscription(orderA.subscription.id);
+  const orderB = await provisioning.createOrder({ agencyId: otherAgency.id, template, dailyVolume: 10, userId: otherOwner.id });
+  await provisioning.provisionSubscription(orderB.subscription.id);
+
+  const [agencyA, agencyB, subA, subB] = await Promise.all([
+    prisma.agency.findUnique({ where: { id: agencyId } }),
+    prisma.agency.findUnique({ where: { id: otherAgency.id } }),
+    prisma.recordStoreSubscription.findUnique({ where: { id: orderA.subscription.id } }),
+    prisma.recordStoreSubscription.findUnique({ where: { id: orderB.subscription.id } }),
+  ]);
+
+  assert.notEqual(agencyA.boberdooPartnerId, agencyB.boberdooPartnerId, 'each agency must get its own real Boberdoo Partner — never shared');
+  assert.notEqual(subA.boberdooFilterSetId, subB.boberdooFilterSetId, 'each agency\'s order must get its own Filter Set — never shared, so leads can never cross-deliver to the wrong agency');
+  assert.equal(subA.boberdooPartnerId, agencyA.boberdooPartnerId);
+  assert.equal(subB.boberdooPartnerId, agencyB.boberdooPartnerId);
+
+  await prisma.recordStoreSubscription.deleteMany({ where: { agencyId: otherAgency.id } });
+  await prisma.auditEvent.deleteMany({ where: { agencyId: otherAgency.id } });
+  await prisma.user.delete({ where: { id: otherOwner.id } });
+  await prisma.agency.delete({ where: { id: otherAgency.id } });
+});

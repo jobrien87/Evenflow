@@ -33,48 +33,77 @@ function isIprTemplate(template) {
 
 // Idempotent against the "buy the same product twice" double-click case —
 // an agency only ever has one non-cancelled subscription per template.
+// The check-then-create below is run inside a SERIALIZABLE transaction
+// specifically because a plain read-then-write is a real race under
+// genuine concurrency (two simultaneous checkout clicks can both pass the
+// "nothing exists yet" check before either row is written) — there is no
+// DB-level unique constraint to fall back on here, since a CANCELLED/ERROR
+// row must be allowed to coexist with a fresh new order for the same
+// product. SERIALIZABLE makes Postgres itself detect the conflict and
+// abort one of the two transactions with a serialization failure, which
+// is retried here rather than surfaced as an error — the caller always
+// gets back the one real row, never a duplicate.
 async function createOrder({ agencyId, template, dailyVolume, userId, ringToPhone, maxConcurrentCalls }) {
   const volume = Math.max(template.minimumDailyVolume, Math.min(template.maximumDailyVolume, Math.round(dailyVolume)));
 
-  const existing = await prisma.recordStoreSubscription.findFirst({
-    where: {
-      agencyId,
-      recordStoreTemplateId: template.id,
-      status: { notIn: ['CANCELLED', 'ERROR'] },
-    },
-  });
-  if (existing) {
-    return { subscription: existing, created: false };
+  let result;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      result = await prisma.$transaction(async (tx) => {
+        const existing = await tx.recordStoreSubscription.findFirst({
+          where: {
+            agencyId,
+            recordStoreTemplateId: template.id,
+            status: { notIn: ['CANCELLED', 'ERROR'] },
+          },
+        });
+        if (existing) {
+          return { subscription: existing, created: false };
+        }
+
+        const subscription = await tx.recordStoreSubscription.create({
+          data: {
+            agencyId,
+            recordStoreTemplateId: template.id,
+            productNameSnapshot: template.displayName,
+            leadType: template.leadType,
+            filterSetType: template.filterSetType,
+            isIpr: template.isIpr,
+            priceSnapshotCents: template.wholesalePriceCents || 0,
+            dailyVolume: volume,
+            ringToPhone: template.isIpr ? ringToPhone || null : null,
+            maxConcurrentCalls: template.isIpr ? maxConcurrentCalls || null : null,
+            status: 'DRAFT',
+            provisioningStatus: 'EVENFLOW_ORDER_CREATED',
+            createdById: userId,
+          },
+        });
+        return { subscription, created: true };
+      }, { isolationLevel: 'Serializable' });
+      break;
+    } catch (err) {
+      // P2034 = Prisma's code for a Postgres serialization failure under
+      // SERIALIZABLE isolation — exactly the "lost the race" case this is
+      // designed to catch. Retrying re-runs the check, which now sees the
+      // winning transaction's row and correctly returns created: false.
+      if (err.code === 'P2034' && attempt < 4) continue;
+      throw err;
+    }
   }
 
-  const subscription = await prisma.recordStoreSubscription.create({
-    data: {
+  if (result.created) {
+    await recordAudit({
+      actorId: userId,
       agencyId,
-      recordStoreTemplateId: template.id,
-      productNameSnapshot: template.displayName,
-      leadType: template.leadType,
-      filterSetType: template.filterSetType,
-      isIpr: template.isIpr,
-      priceSnapshotCents: template.wholesalePriceCents || 0,
-      dailyVolume: volume,
-      ringToPhone: template.isIpr ? ringToPhone || null : null,
-      maxConcurrentCalls: template.isIpr ? maxConcurrentCalls || null : null,
-      status: 'DRAFT',
-      provisioningStatus: 'EVENFLOW_ORDER_CREATED',
-      createdById: userId,
-    },
-  });
+      action: 'RECORD_STORE_ORDER_CREATED',
+      entityType: 'RecordStoreSubscription',
+      entityId: result.subscription.id,
+      after: { templateSlug: template.slug, dailyVolume: volume },
+    });
+  }
 
-  await recordAudit({
-    actorId: userId,
-    agencyId,
-    action: 'RECORD_STORE_ORDER_CREATED',
-    entityType: 'RecordStoreSubscription',
-    entityId: subscription.id,
-    after: { templateSlug: template.slug, dailyVolume: volume },
-  });
-
-  return { subscription, created: true };
+  return result;
 }
 
 // ---- Step 1: Partner (one per Agency, never one per product) ----------
@@ -207,9 +236,17 @@ async function provisionSubscription(subscriptionId, correlationId) {
     include: { template: true, agency: { include: { users: { where: { role: 'AGENCY_OWNER' }, take: 1 } } } },
   });
   if (!subscription) return { success: false, errorCode: 'NOT_FOUND', errorMessage: 'Subscription not found.' };
-  if (claim.count === 0 && !['PENDING_PROVISIONING', 'ERROR'].includes(subscription.status)) {
-    // Already past this stage (or genuinely mid-flight elsewhere) — return
-    // current state rather than restarting work that's already done.
+  if (claim.count === 0) {
+    // This call did not win the atomic claim above — either a concurrent
+    // call is mid-flight right now (status just flipped to
+    // PENDING_PROVISIONING a moment ago), or this subscription is already
+    // past this stage entirely. Either way, THIS call must never go on to
+    // perform the real Boberdoo side effects below — doing so previously
+    // only required the current status to differ from a hardcoded list,
+    // which a concurrent winner's own in-flight write could make true,
+    // letting two calls create two real Partners for one order. Simply
+    // report current state instead; a real retry re-wins the claim on its
+    // own next call once status has genuinely settled on ERROR.
     return { success: subscription.status !== 'ERROR', subscription };
   }
 
