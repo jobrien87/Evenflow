@@ -4,13 +4,11 @@ import { useAuth } from '../lib/AuthContext';
 import { Card, SectionHeader, Badge, Button, EmptyState, Modal } from '../ui';
 import { emailStatusMessage } from '../lib/emailStatus';
 import TimeClockReportPanel from './TimeClockReportPanel';
-import CoursesAdminPanel from './CoursesAdminPanel';
 
 const TABS = [
   { key: 'roster', label: 'ROSTER' },
   { key: 'hours', label: 'HOURS REPORT' },
   { key: 'pto', label: 'PTO' },
-  { key: 'training', label: 'TRAINING' },
   { key: 'breakroom', label: 'BREAK ROOM' },
 ];
 
@@ -348,8 +346,6 @@ export default function RosterSettingsPanel() {
       )}
 
       {tab === 'hours' && <TimeClockReportPanel />}
-
-      {tab === 'training' && <CoursesAdminPanel />}
 
       {tab === 'pto' && (
         <>
