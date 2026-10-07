@@ -9,6 +9,7 @@
 const { prisma } = require('./db');
 const { PRODUCT_LABELS } = require('./products');
 const { historicalLeadLikeRows } = require('./historicalAggregates');
+const { saleLeadLikeRows } = require('./manualSaleAggregates');
 
 const GRANULARITIES = ['day', 'week', 'month', 'year'];
 
@@ -84,7 +85,7 @@ async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
   const g = GRANULARITIES.includes(granularity) ? granularity : 'month';
   const range = from && to ? { from: new Date(from), to: new Date(to) } : defaultRange(g);
 
-  const [realSoldLeads, historicalRows, producers] = await Promise.all([
+  const [realSoldLeads, historicalRows, manualSaleRows, producers] = await Promise.all([
     prisma.lead.findMany({
       where: { agencyId, status: 'SOLD', updatedAt: { gte: range.from, lte: range.to } },
       select: {
@@ -102,12 +103,14 @@ async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
     // Lead rows above — concatenated in so every grouping/series below
     // reuses this one aggregation pass rather than a second copy of it.
     historicalLeadLikeRows({ agencyId, from: range.from, to: range.to }),
+    // Add Closed Sale (standalone, no Lead) rows — same reshape pattern.
+    saleLeadLikeRows({ agencyId, from: range.from, to: range.to }),
     // Same roster query financials.js's /by-agent already uses — every
     // active producer must appear on the leaderboard even with zero sales
     // in range, not just whoever happened to sell something.
     prisma.user.findMany({ where: { agencyId, role: 'PRODUCER', status: 'ACTIVE' }, select: { id: true, firstName: true, lastName: true } }),
   ]);
-  const soldLeads = [...realSoldLeads, ...historicalRows];
+  const soldLeads = [...realSoldLeads, ...historicalRows, ...manualSaleRows];
 
   const byProducerMap = new Map();
   for (const p of producers) {

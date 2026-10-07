@@ -6,6 +6,7 @@ const { recordAudit } = require('../lib/audit');
 const { computeProfitability, computeROI } = require('../lib/financialCalc');
 const { computeBillboard, GRANULARITIES } = require('../lib/billboard');
 const { sumHistoricalPremium, countHistoricalSold, historicalByVendor, historicalByAgent } = require('../lib/historicalAggregates');
+const { countSales, salesByAgent } = require('../lib/manualSaleAggregates');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -35,7 +36,7 @@ router.get('/summary', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req
     // retired the Transfer pipeline) — updatedAt is the real timestamp of
     // that disposition, since a Lead has no separate "soldAt" field and a
     // SOLD lead is not normally touched again afterward.
-    const [revenueAgg, costAgg, salesCount, historicalPremiumCents, historicalSoldCount] = await Promise.all([
+    const [revenueAgg, costAgg, salesCount, historicalPremiumCents, historicalSoldCount, manualSalesCount] = await Promise.all([
       prisma.revenueEvent.aggregate({ where: whereBase, _sum: { amountCents: true } }),
       prisma.costEvent.aggregate({ where: whereBase, _sum: { amountCents: true } }),
       prisma.lead.count({ where: { status: 'SOLD', updatedAt: { gte: from, lte: to }, ...(agencyId ? { agencyId } : {}) } }),
@@ -45,11 +46,16 @@ router.get('/summary', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req
       // shown here, per the agency owner's own requirement.
       sumHistoricalPremium({ agencyId, from, to }),
       countHistoricalSold({ agencyId, from, to }),
+      // Add Closed Sale (standalone) rows DO post a real RevenueEvent on
+      // creation (see financialEvents.js's recordManualSaleRevenue), so
+      // their premium is already inside revenueAgg above — only the COUNT
+      // needs adding here, not the premium a second time.
+      countSales({ agencyId, from, to }),
     ]);
 
     const revenueCents = (revenueAgg._sum.amountCents || 0) + historicalPremiumCents;
     const costCents = costAgg._sum.amountCents || 0;
-    const totalSalesCount = salesCount + historicalSoldCount;
+    const totalSalesCount = salesCount + historicalSoldCount + manualSalesCount;
 
     const profitability = computeProfitability({
       revenueCents, costCents, denominatorCount: totalSalesCount, denominatorLabel: 'sale',
@@ -170,14 +176,16 @@ router.get('/by-agent', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER'
       return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
     }
     const { from, to } = parseDateRange(req);
-    const [producers, historicalRows] = await Promise.all([
+    const [producers, historicalRows, manualSaleRows] = await Promise.all([
       prisma.user.findMany({
         where: { agencyId, role: 'PRODUCER', status: 'ACTIVE' },
         select: { id: true, firstName: true, lastName: true },
       }),
       historicalByAgent({ agencyId, from, to }),
+      salesByAgent({ agencyId, from, to }),
     ]);
     const historicalById = new Map(historicalRows.filter((h) => h.userId).map((h) => [h.userId, h]));
+    const salesById = new Map(manualSaleRows.map((s) => [s.userId, s]));
     const matchedIds = new Set(producers.map((p) => p.id));
 
     const rows = await Promise.all(
@@ -188,13 +196,15 @@ router.get('/by-agent', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER'
         ]);
         const leadCount = leads.length;
         const soldLeads = leads.filter((l) => l.status === 'SOLD');
-        // Historical Data attributed to this producer counts toward their
-        // sold/revenue totals — never leadsAssigned, for the same reason
-        // /by-vendor excludes it from leadsReceived (no real intake rate
-        // to measure for old bulk-imported rows).
+        // Historical Data and Add Closed Sale rows attributed to this
+        // producer count toward their sold/revenue totals — never
+        // leadsAssigned, for the same reason /by-vendor excludes it from
+        // leadsReceived (no real intake rate to measure for a bulk-imported
+        // or standalone-sale row).
         const historical = historicalById.get(p.id);
-        const soldCount = soldLeads.length + (historical?.count || 0);
-        const revenueCents = soldLeads.reduce((sum, l) => sum + (l.salePremiumCents || 0), 0) + (historical?.premiumCents || 0);
+        const manual = salesById.get(p.id);
+        const soldCount = soldLeads.length + (historical?.count || 0) + (manual?.count || 0);
+        const revenueCents = soldLeads.reduce((sum, l) => sum + (l.salePremiumCents || 0), 0) + (historical?.premiumCents || 0) + (manual?.premiumCents || 0);
 
         return {
           userId: p.id,
@@ -222,6 +232,20 @@ router.get('/by-agent', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER'
       rows.push({
         userId: null, firstName: 'Historical', lastName: '(unattributed)',
         leadsAssigned: null, salesCount: unattributedCount, revenue: unattributedPremium / 100,
+        conversionRate: null, flowScore: null,
+      });
+    }
+
+    // A Sale assigned to a producer who's since left/been deactivated —
+    // kept visible so the agency-wide total still reconciles, same
+    // treatment as the historical-unattributed bucket above.
+    const unmatchedSales = manualSaleRows.filter((s) => !matchedIds.has(s.userId));
+    const unattributedSalesCount = unmatchedSales.reduce((sum, s) => sum + s.count, 0);
+    const unattributedSalesPremium = unmatchedSales.reduce((sum, s) => sum + s.premiumCents, 0);
+    if (unattributedSalesCount > 0) {
+      rows.push({
+        userId: null, firstName: 'Manual Sales', lastName: '(unattributed)',
+        leadsAssigned: null, salesCount: unattributedSalesCount, revenue: unattributedSalesPremium / 100,
         conversionRate: null, flowScore: null,
       });
     }

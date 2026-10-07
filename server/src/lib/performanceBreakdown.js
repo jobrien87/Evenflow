@@ -8,6 +8,7 @@
 const { prisma } = require('./db');
 const { computeFunnel, pct } = require('./funnelMetrics');
 const { historicalByProduct } = require('./historicalAggregates');
+const { salesByProduct } = require('./manualSaleAggregates');
 
 const QUOTED_OR_BEYOND = ['QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'];
 
@@ -55,7 +56,7 @@ async function computeVendorBreakdown({ agencyId, userId, from, to }) {
 // { agencyId, userId?, from, to } -> one row per distinct Lead.product
 // this scope received in the period.
 async function computeProductBreakdown({ agencyId, userId, from, to }) {
-  const [leads, historicalProducts] = await Promise.all([
+  const [leads, historicalProducts, manualProducts] = await Promise.all([
     prisma.lead.findMany({
       where: {
         agencyId,
@@ -66,6 +67,7 @@ async function computeProductBreakdown({ agencyId, userId, from, to }) {
       select: { product: true, status: true, firstContactAt: true },
     }),
     historicalByProduct({ agencyId, from, to, assignedToId: userId || undefined }),
+    salesByProduct({ agencyId, from, to, assignedToId: userId || undefined }),
   ]);
 
   const byProduct = new Map();
@@ -75,29 +77,33 @@ async function computeProductBreakdown({ agencyId, userId, from, to }) {
     byProduct.get(key).push(lead);
   }
 
-  // Historical Data adds to salesCount only — never totalLeads/contactRate/
-  // quoteRate/closeRate, since those are pipeline-speed rate metrics that
-  // old bulk-imported rows never had real touchpoints to measure against.
+  // Historical Data and Add Closed Sale rows add to salesCount only — never
+  // totalLeads/contactRate/quoteRate/closeRate, since those are pipeline-
+  // speed rate metrics that old bulk-imported/standalone-entered rows
+  // never had real touchpoints to measure against.
   const rows = [...byProduct.entries()].map(([product, productLeads]) => {
     const total = productLeads.length;
     const contacted = productLeads.filter((l) => l.firstContactAt).length;
     const quotedOrBeyond = productLeads.filter((l) => QUOTED_OR_BEYOND.includes(l.status)).length;
     const sold = productLeads.filter((l) => l.status === 'SOLD').length;
     const historicalSold = historicalProducts[product]?.count || 0;
+    const manualSold = manualProducts[product]?.count || 0;
     return {
       product,
       totalLeads: total,
       contactRate: pct(contacted, total),
       quoteRate: pct(quotedOrBeyond, total),
       closeRate: pct(sold, total),
-      salesCount: sold + historicalSold,
+      salesCount: sold + historicalSold + manualSold,
     };
   });
 
-  // A product with historical sales but zero live leads in this period
-  // still needs a row, so its historical contribution isn't silently lost.
-  for (const [product, { count }] of Object.entries(historicalProducts)) {
+  // A product with historical or manual sales but zero live leads in this
+  // period still needs a row, so its contribution isn't silently lost.
+  const extraProducts = new Set([...Object.keys(historicalProducts), ...Object.keys(manualProducts)]);
+  for (const product of extraProducts) {
     if (!byProduct.has(product)) {
+      const count = (historicalProducts[product]?.count || 0) + (manualProducts[product]?.count || 0);
       rows.push({ product, totalLeads: 0, contactRate: null, quoteRate: null, closeRate: null, salesCount: count });
     }
   }

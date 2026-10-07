@@ -8,6 +8,7 @@ const { prisma } = require('./db');
 const { explainScore } = require('./flowScore');
 const { computeFunnel } = require('./funnelMetrics');
 const { sumHistoricalPremium, countHistoricalSold } = require('./historicalAggregates');
+const { sumSalePremium, countSales } = require('./manualSaleAggregates');
 
 function startOfMonth(d) {
   return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -58,12 +59,13 @@ async function computeGoalActual(goal) {
       const live = await prisma.leadEvent.count({
         where: { type: 'lead.disposition', toStatus: 'SOLD', createdAt: { gte: periodStart, lte: periodEnd }, lead: leadScope },
       });
-      // Historical Data (Back Catalog) rows count toward sold-count goals
-      // too — never toward response-speed/pipeline-stage metrics (quotes,
-      // contacts), since old bulk-imported rows never had those real
-      // touchpoints tracked.
+      // Historical Data (Back Catalog) and Add Closed Sale (standalone)
+      // rows count toward sold-count goals too — never toward response-
+      // speed/pipeline-stage metrics (quotes, contacts), since those rows
+      // never had those real touchpoints tracked.
       const historical = await countHistoricalSold({ agencyId, from: periodStart, to: periodEnd, assignedToId: userId || undefined });
-      return live + historical;
+      const manual = await countSales({ agencyId, from: periodStart, to: periodEnd, assignedToId: userId || undefined });
+      return live + historical + manual;
     }
     case 'quotes':
       return prisma.leadEvent.count({
@@ -87,7 +89,8 @@ async function computeGoalActual(goal) {
         : [];
       const livePremium = leads.reduce((sum, l) => sum + (l.salePremiumCents || 0), 0);
       const historicalPremium = await sumHistoricalPremium({ agencyId, from: periodStart, to: periodEnd, assignedToId: userId || undefined });
-      return livePremium + historicalPremium;
+      const manualPremium = await sumSalePremium({ agencyId, from: periodStart, to: periodEnd, assignedToId: userId || undefined });
+      return livePremium + historicalPremium + manualPremium;
     }
     case 'cross_sells':
     case 'winbacks':

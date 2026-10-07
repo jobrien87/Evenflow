@@ -354,6 +354,8 @@ model User {
   breakRoomJokeHistory      BreakRoomJokeHistory[]
   historicalRecordsAssigned HistoricalRecord[]        @relation("HistoricalRecordAssignedTo")
   officeAlphaAssignments    OfficeAlphaAssignment[]
+  salesAssigned             Sale[]                    @relation("SaleAssignedTo")
+  salesCreated              Sale[]                    @relation("SaleCreatedBy")
 
   @@index([agencyId])
   @@index([role])
@@ -512,6 +514,7 @@ model Agency {
   breakRoomGameSessions    BreakRoomGameSession[]
   breakRoomHighScores      BreakRoomHighScore[]
   breakRoomAchievements    BreakRoomAchievement[]
+  sales                    Sale[]
 }
 
 enum BoberdooSyncStatus {
@@ -566,6 +569,7 @@ model Office {
   users             User[]
   alphaAssignments  OfficeAlphaAssignment[]
   historicalRecords HistoricalRecord[]
+  sales             Sale[]
 
   @@index([agencyId])
 }
@@ -684,63 +688,79 @@ model Customer {
   leads         Lead[]
   transfers     Transfer[]
   opportunities Opportunity[]
+  sales         Sale[]
 
   @@index([phoneNormalized])
   @@index([email])
 }
 
 model Lead {
-  id               String           @id @default(uuid())
-  agencyId         String
-  agency           Agency           @relation(fields: [agencyId], references: [id])
-  customerId       String?
-  customer         Customer?        @relation(fields: [customerId], references: [id])
-  source           String           @default("manual")
-  vendorId         String?
-  vendor           Vendor?          @relation(fields: [vendorId], references: [id])
-  externalLeadId   String?
-  rawPayload       Json?
-  product          String?
-  status           LeadStatus       @default(NEW)
-  priorityScore    Int              @default(0)
-  priorityReason   String?
-  assignedToId     String?
-  assignedTo       User?            @relation("AssignedProducer", fields: [assignedToId], references: [id])
-  createdById      String?
-  createdBy        User?            @relation("LeadCreatedBy", fields: [createdById], references: [id])
-  receivedAt       DateTime         @default(now())
-  assignedAt       DateTime?
-  firstAttemptAt   DateTime?
-  firstContactAt   DateTime?
+  id                   String           @id @default(uuid())
+  agencyId             String
+  agency               Agency           @relation(fields: [agencyId], references: [id])
+  customerId           String?
+  customer             Customer?        @relation(fields: [customerId], references: [id])
+  source               String           @default("manual")
+  vendorId             String?
+  vendor               Vendor?          @relation(fields: [vendorId], references: [id])
+  externalLeadId       String?
+  rawPayload           Json?
+  product              String?
+  status               LeadStatus       @default(NEW)
+  priorityScore        Int              @default(0)
+  priorityReason       String?
+  assignedToId         String?
+  assignedTo           User?            @relation("AssignedProducer", fields: [assignedToId], references: [id])
+  createdById          String?
+  createdBy            User?            @relation("LeadCreatedBy", fields: [createdById], references: [id])
+  receivedAt           DateTime         @default(now())
+  assignedAt           DateTime?
+  firstAttemptAt       DateTime?
+  firstContactAt       DateTime?
   // Real outbound dials logged via POST /:leadId/activities — a count, not
   // a status change, so it stays accurate no matter how status is set.
-  attemptCount     Int              @default(0)
+  attemptCount         Int              @default(0)
   // Derived automatically at creation (isLiveTransfer -> TRANSFER;
   // vendor-sourced -> the vendor's category; else MANUAL) — drives the
   // configurable priority engine's type-rank component. See
   // Agency.priorityRules and lib/priority.js.
-  leadType         LeadType         @default(MANUAL)
-  customFields     Json?
+  leadType             LeadType         @default(MANUAL)
+  customFields         Json?
   // The full original spreadsheet row from a bulk/back-catalog import,
   // keyed by its own literal header text — populated ONLY by those two
   // import paths (never manual creation, vendor API, or telemarketer
   // intake), and deliberately separate from customFields above (a hand-
   // entered/vendor-named value this would otherwise risk colliding with,
   // e.g. a column literally named "Current Carrier").
-  rawImportFields  Json?
+  rawImportFields      Json?
   // Set only for a row created by POST /leads/bulk-import — lets the
   // whole batch be found again for the undo action below. Null for every
   // other creation path (manual, vendor API, telemarketer intake).
-  importBatchId    String?
-  importBatch      LeadImportBatch? @relation(fields: [importBatchId], references: [id])
+  importBatchId        String?
+  importBatch          LeadImportBatch? @relation(fields: [importBatchId], references: [id])
   // Captured when a producer dispositions this lead as SOLD — real, entered
   // data (not a fabricated commission calculation), which is what makes it
   // legitimate to feed straight into the Financial Ledger as revenue.
-  saleProduct      String?
-  salePremiumCents Int?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  archivedAt       DateTime?
+  saleProduct          String?
+  salePremiumCents     Int?
+  // Additive policy-detail fields for the Add Closed Sale form's
+  // "linked lead" path — captured alongside saleProduct/salePremiumCents
+  // when a lead is dispositioned SOLD, but never required and never read
+  // by any pre-existing report. saleProduct keeps its original meaning
+  // (the canonical product family from lib/products.js) untouched;
+  // salePolicyTypeDetail is the carrier-specific detailed type instead.
+  policyNumber         String?
+  saleIssuedDate       DateTime?
+  saleEffectiveDate    DateTime?
+  saleExpirationDate   DateTime?
+  saleCarrier          String?
+  salePolicyTypeDetail String?
+  salePriorCarrier     String?
+  saleReason           String?
+  saleItems            Int?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  archivedAt           DateTime?
 
   // Set the moment a stale-lead reminder notification is sent (Part 4);
   // read back on the next check so the same lead isn't re-notified until
@@ -949,6 +969,94 @@ model LeadProductQuote {
 
   @@unique([leadId, product])
   @@index([leadId])
+}
+
+// A manually-entered closed sale with NO originating Lead in Evenflow —
+// "Add Closed Sale." A Lead-linked sale is NOT recorded here; it stays
+// the Lead's own existing disposition-to-SOLD flow (Lead.salePremiumCents/
+// saleProduct + the richer salePolicyTypeDetail/policyNumber/etc. fields
+// added alongside this model), since that's already the one real
+// revenue/cross-sell/audit pipeline for a sale with a Lead behind it —
+// recording a second Sale row for the same event would double the credit
+// the user explicitly warned against. This model exists only for the real
+// gap: a policy that was never a Lead in this app at all.
+//
+// Feeds Billboard/Financials/Running Report/product breakdowns the exact
+// same way HistoricalRecord already does (see lib/manualSaleAggregates.js)
+// — reshaped into the same {updatedAt, salePremiumCents, saleProduct,
+// assignedToId, vendorId: null, zip}-shaped rows and merged into the
+// existing aggregation, never a second parallel report surface.
+model Sale {
+  id             String   @id @default(uuid())
+  agencyId       String
+  agency         Agency   @relation(fields: [agencyId], references: [id])
+  customerId     String
+  customer       Customer @relation(fields: [customerId], references: [id])
+  firstName      String
+  lastName       String
+  businessName   String?
+  customerTitle  String?
+  customerSuffix String?
+  zip            String?
+  state          String?
+
+  // Date-only, business sale date (not createdAt, which is pure audit
+  // info) — what every report buckets/filters this sale by.
+  saleDate       DateTime
+  issuedDate     DateTime?
+  effectiveDate  DateTime?
+  expirationDate DateTime?
+
+  carrier       String
+  // Carrier-specific detailed type (e.g. "Auto-Standard") — distinct from
+  // productFamily, the canonical rollup every existing report already
+  // groups on.
+  policyType    String
+  productFamily String
+  // Never numeric — preserves leading zeroes/hyphens/suffixes exactly as
+  // entered.
+  policyNumber  String?
+
+  // Null = unknown, kept distinct from an explicit, valid zero. Revenue is
+  // stored for audit/future use only — never aggregated into any report
+  // until its own business definition is confirmed (see Billboard/
+  // Financials integration notes).
+  premiumCents Int?
+  revenueCents Int?
+  // Defaults to 1, matching the reference form's own default; an explicit
+  // 0 (a zero-item product) is preserved, never coerced.
+  items        Int  @default(1)
+
+  leadSource   String?
+  priorCarrier String?
+  reason       String?
+  notes        String?
+
+  officeId     String?
+  office       Office? @relation(fields: [officeId], references: [id])
+  assignedToId String
+  assignedTo   User    @relation("SaleAssignedTo", fields: [assignedToId], references: [id])
+  createdById  String
+  createdBy    User    @relation("SaleCreatedBy", fields: [createdById], references: [id])
+
+  // Client-generated UUID, sent on every POST /sales call — a retried or
+  // double-clicked submit with the same id returns the existing row
+  // instead of creating a second one.
+  clientRequestId String? @unique
+
+  // Reversible correction, never a hard delete — a voided sale is excluded
+  // from every aggregate from that point on, but the record (and why it
+  // was voided) stays.
+  voidedAt   DateTime?
+  voidedById String?
+  voidReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([agencyId, saleDate])
+  @@index([assignedToId])
+  @@index([customerId])
 }
 
 model LeadEvent {

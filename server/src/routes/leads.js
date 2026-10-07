@@ -1482,6 +1482,19 @@ const dispositionSchema = z.object({
   note: z.string().optional(),
   saleProduct: z.string().optional(),
   salePremiumCents: z.number().int().positive().optional(),
+  // Additive policy-detail fields — the "linked lead" path of the Add
+  // Closed Sale form, optional and never required for an ordinary
+  // disposition. See schema.prisma's Sale model comment for why a
+  // Lead-linked sale stays on the Lead itself rather than a second row.
+  policyNumber: z.string().optional(),
+  saleIssuedDate: z.string().optional(),
+  saleEffectiveDate: z.string().optional(),
+  saleExpirationDate: z.string().optional(),
+  saleCarrier: z.string().optional(),
+  salePolicyTypeDetail: z.string().optional(),
+  salePriorCarrier: z.string().optional(),
+  saleReason: z.string().optional(),
+  saleItems: z.number().int().nonnegative().optional(),
 });
 
 // Disposition a lead — records status HISTORY, never overwrites it.
@@ -1512,6 +1525,15 @@ router.post('/:leadId/disposition', async (req, res, next) => {
     if (parsed.data.status === 'SOLD') {
       patch.saleProduct = parsed.data.saleProduct || null;
       patch.salePremiumCents = parsed.data.salePremiumCents || null;
+      patch.policyNumber = parsed.data.policyNumber || null;
+      patch.saleIssuedDate = parsed.data.saleIssuedDate ? new Date(parsed.data.saleIssuedDate) : null;
+      patch.saleEffectiveDate = parsed.data.saleEffectiveDate ? new Date(parsed.data.saleEffectiveDate) : null;
+      patch.saleExpirationDate = parsed.data.saleExpirationDate ? new Date(parsed.data.saleExpirationDate) : null;
+      patch.saleCarrier = parsed.data.saleCarrier || null;
+      patch.salePolicyTypeDetail = parsed.data.salePolicyTypeDetail || null;
+      patch.salePriorCarrier = parsed.data.salePriorCarrier || null;
+      patch.saleReason = parsed.data.saleReason || null;
+      patch.saleItems = parsed.data.saleItems ?? null;
     }
     // Duplicate/Archived both mean "hide from active views" — same real
     // archivedAt field GET /leads and other agency-wide counts already
@@ -1552,8 +1574,13 @@ router.post('/:leadId/disposition', async (req, res, next) => {
       correlationId: req.correlationId,
     });
 
-    // Real, entered sale premium feeds the Financial Ledger directly.
-    if (parsed.data.status === 'SOLD' && parsed.data.salePremiumCents) {
+    // Real, entered sale premium feeds the Financial Ledger directly --
+    // but only the FIRST time this lead transitions into SOLD. Without the
+    // fromStatus !== 'SOLD' guard, re-dispositioning an already-sold lead
+    // (e.g. a correction, or the Add Closed Sale form's "linked lead" path
+    // retried against a lead that's already recorded) would post a second,
+    // duplicate RevenueEvent for the same real-world sale.
+    if (parsed.data.status === 'SOLD' && fromStatus !== 'SOLD' && parsed.data.salePremiumCents) {
       await recordLeadSaleRevenue(updated);
     }
 

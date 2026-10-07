@@ -46,8 +46,24 @@ async function recordLeadProductSaleRevenue({ agencyId, leadId, productLabel, pr
   });
 }
 
+// Called when a standalone Sale (Add Closed Sale, no originating Lead) is
+// created with a real entered premium — same real-money-only convention
+// as recordLeadSaleRevenue, just for a sale that never had a Lead row.
+async function recordManualSaleRevenue(sale) {
+  if (!sale.agencyId || !sale.premiumCents) return null;
+  return prisma.revenueEvent.create({
+    data: {
+      agencyId: sale.agencyId,
+      category: 'LEAD_REVENUE',
+      amountCents: sale.premiumCents,
+      notes: `Manual closed-sale entry: ${sale.carrier} ${sale.policyType} for ${sale.firstName} ${sale.lastName} (sale ${sale.id})`,
+    },
+  });
+}
+
 module.exports = {
   recordVendorLeadCost,
   recordLeadSaleRevenue,
   recordLeadProductSaleRevenue,
+  recordManualSaleRevenue,
 };
