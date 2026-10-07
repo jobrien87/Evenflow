@@ -186,6 +186,8 @@ export const api = {
   updateUser: (userId, payload) => request(`/users/${userId}`, { method: 'PATCH', body: payload }),
   deactivateUser: (userId) => request(`/users/${userId}/deactivate`, { method: 'POST' }),
   resendUserInvite: (userId) => request(`/users/${userId}/resend-invite`, { method: 'POST' }),
+  purgeUserPreview: (userId) => request(`/users/${userId}/purge-preview`),
+  purgeUser: (userId, confirmText) => request(`/users/${userId}`, { method: 'DELETE', body: { confirmText } }),
   sendPasswordReset: (userId) => request(`/users/${userId}/send-password-reset`, { method: 'POST' }),
   userPerformance: (userId, params = '') => request(`/users/${userId}/performance${params}`),
   producerNotes: (userId) => request(`/users/${userId}/notes`),

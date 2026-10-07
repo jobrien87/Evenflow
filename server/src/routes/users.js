@@ -567,6 +567,177 @@ router.post('/:userId/deactivate', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER',
   }
 });
 
+// Permanently delete a deactivated user. Modeled on Factory Reset's own
+// preview+confirm, ordered-transaction pattern (agencies.js). Every
+// User-related table in this schema falls into one of three buckets:
+//   - BLOCKING: a required FK on content other people/the agency still
+//     depend on (a note they left on a lead, a call they uploaded, a
+//     chat message, etc.) — if any exist, the purge is refused outright
+//     rather than guessing whether to delete someone else's visible
+//     history. The caller sees exactly what's blocking it.
+//   - optional FK: nulled out, the referencing row (a Lead, a Task...)
+//     stays intact — same precedent AuditEvent.actorId already uses
+//     (it's deliberately nullable for exactly this reason).
+//   - the user's own personal/login records: deleted outright.
+// Three further references are NOT real Prisma relations at all (this
+// schema has zero `onDelete` clauses anywhere, and these three have no
+// `@relation` on the field) — Postgres won't block a user delete over
+// them, but they'd silently orphan if not cleaned up here too:
+// Notification.userId, FlowScoreSnapshot.subjectId, TelemarketerProfile.userId.
+async function countPurgeBlockers(userId) {
+  const [
+    leadNotes, leadActivities, calls, messages, producerNotesAbout, producerNotesBy,
+    telemarketerAssignments, transfersCreated, importBatchesUploaded, announcementsCreated,
+    invitationsSent,
+  ] = await Promise.all([
+    prisma.leadNote.count({ where: { authorId: userId } }),
+    prisma.leadActivity.count({ where: { createdById: userId } }),
+    prisma.call.count({ where: { uploadedById: userId } }),
+    prisma.message.count({ where: { authorId: userId } }),
+    prisma.producerNote.count({ where: { producerId: userId } }),
+    prisma.producerNote.count({ where: { authorId: userId } }),
+    prisma.telemarketerAssignment.count({ where: { telemarketerId: userId } }),
+    prisma.transfer.count({ where: { createdByTMId: userId } }),
+    prisma.leadImportBatch.count({ where: { uploadedById: userId } }),
+    prisma.announcement.count({ where: { createdById: userId } }),
+    prisma.invitation.count({ where: { invitedById: userId } }),
+  ]);
+  return {
+    leadNotes, leadActivities, calls, messages,
+    producerNotesAbout, producerNotesBy, telemarketerAssignments,
+    transfersCreated, importBatchesUploaded, announcementsCreated, invitationsSent,
+  };
+}
+
+function blockerTotal(blockers) {
+  return Object.values(blockers).reduce((sum, n) => sum + n, 0);
+}
+
+router.get('/:userId/purge-preview', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const target = await prisma.user.findUnique({ where: { id: req.params.userId } });
+    if (!target) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (req.user.role !== 'PLATFORM_OWNER' && target.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    if (!canActOnUser(req.user.role, target.role)) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'You do not have permission to manage this user.' });
+    }
+    if (target.status !== 'DEACTIVATED') {
+      return res.status(400).json({ success: false, error: 'NOT_DEACTIVATED', message: 'Only a deactivated account can be permanently deleted. Deactivate it first.' });
+    }
+    const blockers = await countPurgeBlockers(target.id);
+    return res.json({
+      success: true,
+      user: { id: target.id, email: target.email, firstName: target.firstName, lastName: target.lastName },
+      blockers,
+      canPurge: blockerTotal(blockers) === 0,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/:userId', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const target = await prisma.user.findUnique({ where: { id: req.params.userId } });
+    if (!target) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (req.user.role !== 'PLATFORM_OWNER' && target.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    if (target.id === req.user.id) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'You cannot delete your own account.' });
+    }
+    if (!canActOnUser(req.user.role, target.role)) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'You do not have permission to manage this user.' });
+    }
+    if (target.status !== 'DEACTIVATED') {
+      return res.status(400).json({ success: false, error: 'NOT_DEACTIVATED', message: 'Only a deactivated account can be permanently deleted. Deactivate it first.' });
+    }
+    if (req.body?.confirmText !== target.email) {
+      return res.status(400).json({ success: false, error: 'CONFIRMATION_MISMATCH', message: "Type the user's exact email to confirm." });
+    }
+    // Never trust a stale preview — re-check right before the irreversible part.
+    const blockers = await countPurgeBlockers(target.id);
+    if (blockerTotal(blockers) > 0) {
+      return res.status(409).json({
+        success: false, error: 'HAS_RECORDED_HISTORY',
+        message: 'This account has real recorded history and cannot be permanently deleted.',
+        blockers,
+      });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      // Sever optional FKs, preserving the referencing row.
+      await Promise.all([
+        tx.lead.updateMany({ where: { assignedToId: target.id }, data: { assignedToId: null } }),
+        tx.lead.updateMany({ where: { createdById: target.id }, data: { createdById: null } }),
+        tx.auditEvent.updateMany({ where: { actorId: target.id }, data: { actorId: null } }),
+        tx.task.updateMany({ where: { assignedToId: target.id }, data: { assignedToId: null } }),
+        tx.task.updateMany({ where: { createdById: target.id }, data: { createdById: null } }),
+        tx.announcement.updateMany({ where: { targetUserId: target.id }, data: { targetUserId: null } }),
+        tx.userBadge.updateMany({ where: { awardedById: target.id }, data: { awardedById: null } }),
+        tx.ptoRequest.updateMany({ where: { reviewedById: target.id }, data: { reviewedById: null } }),
+        tx.historicalRecord.updateMany({ where: { assignedToId: target.id }, data: { assignedToId: null } }),
+        tx.leadImportBatch.updateMany({ where: { undoneById: target.id }, data: { undoneById: null } }),
+        tx.leadProductQuote.updateMany({ where: { createdById: target.id }, data: { createdById: null } }),
+        tx.transfer.updateMany({ where: { acceptedById: target.id }, data: { acceptedById: null } }),
+      ]);
+
+      // Delete the user's own personal/login rows outright — child rows
+      // first where a real FK sits underneath (LessonCompletion before
+      // TrainingAssignment; BreakRoomAchievement before GameSession
+      // before TimeClockEntry).
+      await tx.lessonCompletion.deleteMany({ where: { assignment: { userId: target.id } } });
+      await tx.trainingAssignment.deleteMany({ where: { userId: target.id } });
+      await tx.breakRoomAchievement.deleteMany({ where: { userId: target.id } });
+      await tx.breakRoomGameSession.deleteMany({ where: { userId: target.id } });
+      await tx.timeClockEntry.deleteMany({ where: { userId: target.id } });
+      await Promise.all([
+        tx.session.deleteMany({ where: { userId: target.id } }),
+        tx.passwordResetToken.deleteMany({ where: { userId: target.id } }),
+        tx.invitation.deleteMany({ where: { userId: target.id } }),
+        tx.userBadge.deleteMany({ where: { userId: target.id } }),
+        tx.ptoRequest.deleteMany({ where: { userId: target.id } }),
+        tx.conversationParticipant.deleteMany({ where: { userId: target.id } }),
+        tx.breakRoomHighScore.deleteMany({ where: { userId: target.id } }),
+        tx.breakRoomJokeHistory.deleteMany({ where: { userId: target.id } }),
+        tx.officeAlphaAssignment.deleteMany({ where: { userId: target.id } }),
+        tx.notificationPreference.deleteMany({ where: { userId: target.id } }),
+        tx.announcementAck.deleteMany({ where: { userId: target.id } }),
+      ]);
+
+      // Unenforced references (no real FK constraint, but would silently
+      // orphan if left behind) — same subjectType/subjectId pattern
+      // Factory Reset already uses for FlowScoreSnapshot.
+      await Promise.all([
+        tx.notification.deleteMany({ where: { userId: target.id } }),
+        tx.flowScoreSnapshot.deleteMany({ where: { subjectType: 'USER', subjectId: target.id } }),
+        tx.telemarketerProfile.deleteMany({ where: { userId: target.id } }),
+      ]);
+
+      await tx.user.delete({ where: { id: target.id } });
+    });
+
+    await recordAudit({
+      actorId: req.user.id,
+      actorRole: req.user.role,
+      agencyId: target.agencyId,
+      action: 'user.purged',
+      entityType: 'User',
+      entityId: target.id,
+      before: { email: target.email, firstName: target.firstName, lastName: target.lastName, role: target.role },
+      correlationId: req.correlationId,
+    });
+
+    // No syncSeatCountForAgency call — the seat was already freed when
+    // this account was deactivated.
+    return res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Full KPI breakdown for one Producer/Telemarketer — Flow Score + why,
 // funnel, per-vendor and per-lead-type numbers, all for one date range.
 // Used both by "My Leads" (a producer viewing their own id) and the

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { Card, SectionHeader, Badge, Button, EmptyState } from '../ui';
+import { Card, SectionHeader, Badge, Button, EmptyState, Modal } from '../ui';
 import { emailStatusMessage } from '../lib/emailStatus';
 import TimeClockReportPanel from './TimeClockReportPanel';
 import CoursesAdminPanel from './CoursesAdminPanel';
@@ -35,6 +35,20 @@ function badgeLabel(type) {
   return found ? found.label : type;
 }
 
+const PURGE_BLOCKER_LABELS = {
+  leadNotes: 'lead notes written',
+  leadActivities: 'logged call/email/text activities',
+  calls: 'uploaded call recordings',
+  messages: 'chat messages sent',
+  producerNotesAbout: 'coaching notes about them',
+  producerNotesBy: 'coaching notes they wrote',
+  telemarketerAssignments: 'telemarketer agency assignments',
+  transfersCreated: 'transfers they created',
+  importBatchesUploaded: 'bulk/historical imports they uploaded',
+  announcementsCreated: 'announcements they sent',
+  invitationsSent: 'invitations they sent to others',
+};
+
 // Roster Settings — the consolidated hub: team roster (invite/deactivate,
 // already-real actions pulled together here), badges, upcoming birthdays,
 // the hours report (reused as-is, not rebuilt), and the PTO queue.
@@ -62,6 +76,11 @@ export default function RosterSettingsPanel() {
   const [breakRoomSettings, setBreakRoomSettings] = useState(null);
   const [breakRoomStatus, setBreakRoomStatus] = useState('');
   const [breakRoomBusy, setBreakRoomBusy] = useState(false);
+  const [purgeTarget, setPurgeTarget] = useState(null);
+  const [purgePreview, setPurgePreview] = useState(null);
+  const [purgeConfirmText, setPurgeConfirmText] = useState('');
+  const [purgeBusy, setPurgeBusy] = useState(false);
+  const [purgeError, setPurgeError] = useState('');
 
   useEffect(() => {
     load();
@@ -155,6 +174,41 @@ export default function RosterSettingsPanel() {
     if (!confirm('Deactivate this user? Their history stays intact, but they will not be able to log in.')) return;
     await api.deactivateUser(userId);
     await load();
+  }
+
+  async function openPurge(u) {
+    setPurgeTarget(u);
+    setPurgePreview(null);
+    setPurgeConfirmText('');
+    setPurgeError('');
+    try {
+      const data = await api.purgeUserPreview(u.id);
+      setPurgePreview(data);
+    } catch (err) {
+      setPurgeError(err.data?.message || 'Could not load what would be deleted.');
+    }
+  }
+
+  function closePurge() {
+    setPurgeTarget(null);
+    setPurgePreview(null);
+    setPurgeConfirmText('');
+    setPurgeError('');
+  }
+
+  async function confirmPurge() {
+    if (!purgeTarget) return;
+    setPurgeBusy(true);
+    setPurgeError('');
+    try {
+      await api.purgeUser(purgeTarget.id, purgeConfirmText);
+      closePurge();
+      await load();
+    } catch (err) {
+      setPurgeError(err.data?.message || 'Could not delete this account.');
+    } finally {
+      setPurgeBusy(false);
+    }
   }
 
   async function awardBadge(e) {
@@ -264,12 +318,13 @@ export default function RosterSettingsPanel() {
                       {BADGE_TYPES.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
                     </select>
                     {awardForUserId === u.id && <button style={s.smallButton} onClick={awardBadge}>AWARD</button>}
-                    {u.status === 'INVITED' && (
+                    {(u.status === 'INVITED' || u.status === 'DEACTIVATED') && (
                       <button style={s.linkButton} disabled={resendingId === u.id} onClick={() => resendInvite(u.id)}>
-                        {resendingId === u.id ? 'RESENDING…' : 'RESEND'}
+                        {resendingId === u.id ? 'RESENDING…' : u.status === 'DEACTIVATED' ? 'RESEND & REACTIVATE' : 'RESEND'}
                       </button>
                     )}
                     {u.status === 'ACTIVE' && u.id !== user?.id && <button style={s.deactivateButton} onClick={() => deactivate(u.id)}>DEACTIVATE</button>}
+                    {u.status === 'DEACTIVATED' && u.id !== user?.id && <button style={s.deactivateButton} onClick={() => openPurge(u)}>DELETE PERMANENTLY</button>}
                   </div>
                 )}
               </div>
@@ -407,6 +462,56 @@ export default function RosterSettingsPanel() {
           )}
         </Card>
       )}
+
+      {purgeTarget && (
+        <Modal title="Delete account permanently" onClose={closePurge}>
+          <p style={s.purgeIntro}>
+            This permanently deletes <b>{purgeTarget.firstName} {purgeTarget.lastName}</b> ({purgeTarget.email})
+            and cannot be undone.
+          </p>
+          {!purgePreview && !purgeError && <div style={s.status}>Checking what's attached to this account…</div>}
+          {purgeError && <div style={s.purgeError}>{purgeError}</div>}
+          {purgePreview && !purgePreview.canPurge && (
+            <div style={s.purgeBlocked}>
+              This account has real recorded history and can't be permanently deleted:
+              <ul style={s.purgeBlockList}>
+                {Object.entries(purgePreview.blockers)
+                  .filter(([, count]) => count > 0)
+                  .map(([key, count]) => (
+                    <li key={key}>{count} {PURGE_BLOCKER_LABELS[key] || key}</li>
+                  ))}
+              </ul>
+              It will stay deactivated (hidden, no login) but its history and everyone else's related records stay intact.
+            </div>
+          )}
+          {purgePreview && purgePreview.canPurge && (
+            <>
+              <p style={s.purgeIntro}>No recorded history is attached — safe to delete. Type their exact email to confirm.</p>
+              <input
+                style={s.input}
+                placeholder={purgeTarget.email}
+                value={purgeConfirmText}
+                onChange={(e) => setPurgeConfirmText(e.target.value)}
+              />
+              <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+                <Button
+                  variant="danger"
+                  disabled={purgeBusy || purgeConfirmText !== purgeTarget.email}
+                  onClick={confirmPurge}
+                >
+                  {purgeBusy ? 'DELETING…' : 'DELETE PERMANENTLY'}
+                </Button>
+                <Button variant="secondary" onClick={closePurge}>CANCEL</Button>
+              </div>
+            </>
+          )}
+          {purgePreview && !purgePreview.canPurge && (
+            <div style={{ marginTop: 12 }}>
+              <Button variant="secondary" onClick={closePurge}>CLOSE</Button>
+            </div>
+          )}
+        </Modal>
+      )}
     </div>
   );
 }
@@ -437,4 +542,11 @@ const s = {
   breakRoomSection: { marginTop: 16, marginBottom: 8 },
   breakRoomSectionLabel: { fontSize: 10, letterSpacing: 1.5, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase' },
   checkboxRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-secondary)', padding: '6px 0', cursor: 'pointer' },
+  purgeIntro: { fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 10 },
+  purgeError: { color: 'var(--danger)', fontSize: 13, marginBottom: 10 },
+  purgeBlocked: {
+    color: 'var(--danger)', fontSize: 13, lineHeight: 1.5, background: 'rgba(255, 77, 94, 0.1)',
+    border: '1px solid rgba(255, 77, 94, 0.4)', borderRadius: 6, padding: 10,
+  },
+  purgeBlockList: { margin: '8px 0', paddingLeft: 20 },
 };

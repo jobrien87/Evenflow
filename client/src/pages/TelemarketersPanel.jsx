@@ -180,8 +180,10 @@ export default function TelemarketersPanel() {
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Badge tone={statusTone(tm.status)}>{tm.status}</Badge>
-                {tm.status === 'INVITED' && (
-                  <Button variant="secondary" size="sm" onClick={() => resendTm(tm.id)}>RESEND INVITE</Button>
+                {(tm.status === 'INVITED' || tm.status === 'DEACTIVATED') && (
+                  <Button variant="secondary" size="sm" onClick={() => resendTm(tm.id)}>
+                    {tm.status === 'DEACTIVATED' ? 'RESEND & REACTIVATE' : 'RESEND INVITE'}
+                  </Button>
                 )}
                 {tm.status === 'ACTIVE' && (
                   <Button variant="secondary" size="sm" onClick={() => sendReset(tm.id)}>RESET PASSWORD</Button>

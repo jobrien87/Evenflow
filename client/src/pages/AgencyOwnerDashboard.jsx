@@ -322,8 +322,10 @@ export default function AgencyOwnerDashboard() {
                   </>
                 )}
                 <button style={s.resendButton} onClick={() => startEditUser(u)}>EDIT</button>
-                {u.status === 'INVITED' && (
-                  <button style={s.resendButton} onClick={() => resendUser(u.id)}>RESEND INVITE</button>
+                {(u.status === 'INVITED' || u.status === 'DEACTIVATED') && (
+                  <button style={s.resendButton} onClick={() => resendUser(u.id)}>
+                    {u.status === 'DEACTIVATED' ? 'RESEND & REACTIVATE' : 'RESEND INVITE'}
+                  </button>
                 )}
                 {u.status === 'ACTIVE' && (
                   <button style={s.resendButton} onClick={() => sendReset(u.id)}>RESET PASSWORD</button>
