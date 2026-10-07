@@ -8,7 +8,7 @@
 // Stripe id, a checkout URL, or a subscription status when the key is unset.
 const { prisma } = require('./db');
 
-const SEAT_PRICE_CENTS = 3500; // $35/user/month — the one number the user gave us.
+const SEAT_PRICE_CENTS = 3495; // $34.95/user/month — the confirmed launch price.
 const SEAT_PLAN_NAME = 'Standard (self-serve)';
 
 let stripeClient = null;
