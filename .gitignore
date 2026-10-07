@@ -6,3 +6,5 @@ build/
 *.log
 .DS_Store
 uploads/
+test-results/
+playwright-report/
