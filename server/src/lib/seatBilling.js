@@ -14,6 +14,24 @@ async function countActiveSeats(agencyId) {
   return prisma.user.count({ where: { agencyId, status: 'ACTIVE' } });
 }
 
+// Seats already spoken for, including a still-pending invite (an INVITED
+// user will become ACTIVE the moment they accept, so it must count against
+// the cap now — otherwise an owner could send far more invites than seats
+// they're paying for, all racing to accept).
+async function countOccupiedSeats(agencyId) {
+  return prisma.user.count({ where: { agencyId, status: { in: ['ACTIVE', 'INVITED'] } } });
+}
+
+// The agency's current self-serve, per-seat Stripe subscription, if any —
+// null for an agency on a manually-assigned flat Platform Owner plan (or
+// with no billing at all), which is never seat-capped by this mechanism.
+async function findActiveSeatSubscription(agencyId) {
+  return prisma.agencySubscription.findFirst({
+    where: { agencyId, status: { in: ['ACTIVE', 'TRIALING', 'PAST_DUE'] }, stripeSubscriptionId: { not: null } },
+    orderBy: { createdAt: 'desc' },
+  });
+}
+
 async function syncSeatCountForAgency(agencyId) {
   try {
     const subscription = await prisma.agencySubscription.findFirst({
@@ -34,4 +52,4 @@ async function syncSeatCountForAgency(agencyId) {
   }
 }
 
-module.exports = { countActiveSeats, syncSeatCountForAgency };
+module.exports = { countActiveSeats, countOccupiedSeats, findActiveSeatSubscription, syncSeatCountForAgency };

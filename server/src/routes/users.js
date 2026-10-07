@@ -8,7 +8,7 @@ const { recordAudit } = require('../lib/audit');
 const { sendInvitationEmail } = require('../lib/email');
 const { issuePasswordResetEmail } = require('../lib/auth');
 const { reissueInvitation } = require('../lib/invitations');
-const { syncSeatCountForAgency } = require('../lib/seatBilling');
+const { syncSeatCountForAgency, countOccupiedSeats, findActiveSeatSubscription } = require('../lib/seatBilling');
 const { explainScore, componentPlaceholders } = require('../lib/flowScore');
 const { computeFunnel } = require('../lib/funnelMetrics');
 const { computeVendorBreakdown, computeProductBreakdown } = require('../lib/performanceBreakdown');
@@ -162,6 +162,25 @@ async function inviteOneUser({ actor, agencyId, agency, data, correlationId }) {
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
     return { success: false, email, error: 'EMAIL_IN_USE', message: 'A user with that email already exists.' };
+  }
+
+  // A real seat cap, not just a billing number: an agency on self-serve
+  // per-seat billing can only have as many Producers (active + already-
+  // invited) as the seats it's actually paying for. An agency with no
+  // self-serve subscription (a manually-assigned flat Platform Owner plan,
+  // or no billing at all) is never capped by this — that's a different
+  // pricing model with no per-seat quantity to compare against.
+  if (data.role === 'PRODUCER') {
+    const subscription = await findActiveSeatSubscription(agencyId);
+    if (subscription && subscription.seatCount != null) {
+      const occupied = await countOccupiedSeats(agencyId);
+      if (occupied >= subscription.seatCount) {
+        return {
+          success: false, email, error: 'SEAT_LIMIT_REACHED',
+          message: `This agency has ${occupied} of ${subscription.seatCount} paid seat(s) filled. Buy more seats to invite another producer.`,
+        };
+      }
+    }
   }
 
   const { user, rawToken } = await prisma.$transaction(async (tx) => {

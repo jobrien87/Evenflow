@@ -446,6 +446,15 @@ model Agency {
   // subscription (routes/billing.js's self-serve section). Null until the
   // agency's owner starts a checkout — never fabricated.
   stripeCustomerId       String?
+  // Set once, the first time this agency's one-time $250 setup fee is
+  // actually charged (webhook-confirmed) — never charged a second time on
+  // a later resubscribe/plan-change. Null = never charged.
+  setupFeeChargedAt      DateTime?
+  // Set once, the first time this agency's one-time $950 Sales Studio
+  // unlock is actually paid for (webhook-confirmed) — a real purchase
+  // record distinct from coachingEnabled, which a Platform Owner can also
+  // flip manually (comp/grant) without a real charge. Null = never bought.
+  salesStudioPurchasedAt DateTime?
 
   // ======================================================================
   // RECORD STORE — Boberdoo/LeadPortal wholesale lead marketplace
@@ -1638,6 +1647,11 @@ model Plan {
   // rather than a flat fee — used by the Agency Owner self-serve Stripe
   // checkout flow, not the Platform-Owner-assigned flat plans.
   perSeat          Boolean      @default(false)
+  // One-time fee charged alongside the first checkout for this plan only
+  // (never on a later seat-count change or renewal) — see
+  // Agency.setupFeeChargedAt, which is the real "was it actually charged"
+  // record. Null = no setup fee for this plan.
+  setupFeeCents    Int?
   // The Stripe Price object this plan's self-serve checkout sells. Null
   // until Stripe is configured and the price is created (see lib/stripe.js
   // ensureSeatPriceId) — never fabricated.
@@ -1646,6 +1660,19 @@ model Plan {
   updatedAt        DateTime     @updatedAt
 
   subscriptions AgencySubscription[]
+}
+
+// Idempotency ledger for Stripe webhook events — a Stripe event id is
+// recorded here exactly once, inside the same transaction as the real
+// work that event triggers. A retried delivery (Stripe's own retry-on-
+// non-2xx behavior, or a duplicate send) hits the unique constraint on
+// `id` and is recognized as already-processed rather than redone, so a
+// checkout is never double-fulfilled and a seat subscription is never
+// created twice from one real payment.
+model StripeEvent {
+  id          String   @id
+  type        String
+  processedAt DateTime @default(now())
 }
 
 model AgencySubscription {
