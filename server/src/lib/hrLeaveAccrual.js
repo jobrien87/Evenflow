@@ -97,6 +97,12 @@ async function postCarryoverExpirationIfNeeded(tx, { assignment, policy, now }) 
       minutes: -excess,
       reason: `Carryover cap (${policy.carryoverCapMinutes}m) applied at the ${year} rollover`,
       idempotencyKey,
+      // Explicit, not the column default — this must be the job's own
+      // logical `now`, never the real wall-clock instant, so a reprocess
+      // or backfill run with a historical `now` stays internally
+      // consistent with its own year-boundary/annual-cap math instead of
+      // silently drifting to whenever the job actually executed.
+      createdAt: now,
     },
   });
 }
@@ -150,6 +156,7 @@ async function postAccrualForAssignment(assignment, now) {
           minutes: amount,
           reason: `${policy.accrualMethod} accrual for ${periodKey}`,
           idempotencyKey,
+          createdAt: now, // see postCarryoverExpirationIfNeeded's own comment on why this is explicit
         },
       });
     } catch (err) {
