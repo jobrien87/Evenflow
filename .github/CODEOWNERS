@@ -1,0 +1,5 @@
+# Default owner for everything in the repo — required so PR review has a
+# real accountable reviewer once branch protection requires it (SOC 2 CC8.1
+# change-management evidence). Update this if ownership changes; a single
+# entry is a placeholder for this account-sized repo, not a scaling design.
+*       @jobrien87

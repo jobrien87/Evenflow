@@ -62,12 +62,27 @@ router.post('/login', loginLimiter, async (req, res, next) => {
     const email = parsed.data.email.trim().toLowerCase();
     const user = await prisma.user.findUnique({ where: { email } });
 
-    // Constant-shape response whether user exists or not, to avoid user enumeration.
-    const genericFail = () =>
-      res.status(401).json({ success: false, error: 'INVALID_CREDENTIALS', message: 'Incorrect email or password.' });
+    // A failed-login audit trail is the one real signal for detecting a
+    // credential-stuffing/brute-force pattern after the fact — recorded
+    // for every failure reason, not just wrong-password, same real
+    // forensic value regardless of which check rejected it.
+    const auditFailedLogin = (reason) =>
+      recordAudit({
+        actorId: user?.id || null, actorRole: user?.role || null, agencyId: user?.agencyId || null,
+        action: 'auth.login_failed', entityType: 'User', entityId: user?.id || null,
+        metadata: { email, reason, ipAddress: req.ip, userAgent: req.headers['user-agent'] },
+        correlationId: req.correlationId,
+      });
 
-    if (!user) return genericFail();
+    // Constant-shape response whether user exists or not, to avoid user enumeration.
+    const genericFail = async (reason) => {
+      await auditFailedLogin(reason);
+      return res.status(401).json({ success: false, error: 'INVALID_CREDENTIALS', message: 'Incorrect email or password.' });
+    };
+
+    if (!user) return genericFail('no_such_user');
     if (user.status !== 'ACTIVE') {
+      await auditFailedLogin('account_not_active');
       return res.status(403).json({
         success: false,
         error: 'ACCOUNT_NOT_ACTIVE',
@@ -75,7 +90,7 @@ router.post('/login', loginLimiter, async (req, res, next) => {
       });
     }
     const ok = await verifyPassword(parsed.data.password, user.passwordHash);
-    if (!ok) return genericFail();
+    if (!ok) return genericFail('wrong_password');
 
     const { rawToken, expiresAt } = await createSession(user.id, {
       userAgent: req.headers['user-agent'],
