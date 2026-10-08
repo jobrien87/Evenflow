@@ -12,6 +12,8 @@ const suffix = Date.now();
 let agencyId;
 let userId;
 let leadIds = [];
+let importBatchId;
+let historicalRecordIds = [];
 const periodStart = new Date(Date.now() - 60 * 60 * 1000);
 const periodEnd = new Date(Date.now() + 60 * 60 * 1000);
 
@@ -31,8 +33,12 @@ before(async () => {
   });
   userId = user.id;
 
-  // 2 SOLD, 1 QUOTED, 1 with no disposition event at all.
-  const dispositions = ['SOLD', 'SOLD', 'QUOTED', null];
+  // A Lead reaching SOLD (via disposition or otherwise) is a queue/pipeline
+  // event only now — it must never count toward a sales goal. Keep one
+  // SOLD disposition as a negative-control regression guard, alongside the
+  // real QUOTED one (still pipeline-based, unaffected) and one lead with no
+  // event at all.
+  const dispositions = ['SOLD', 'QUOTED', null];
   for (const toStatus of dispositions) {
     const lead = await prisma.lead.create({ data: { agencyId, assignedToId: userId } });
     leadIds.push(lead.id);
@@ -40,9 +46,24 @@ before(async () => {
       await prisma.leadEvent.create({ data: { leadId: lead.id, type: 'lead.disposition', toStatus } });
     }
   }
+
+  // The real production source for the 'sales'/'premium_cents' goal
+  // metrics now: 2 HistoricalRecord rows attributed to this producer.
+  const batch = await prisma.leadImportBatch.create({
+    data: { agencyId, uploadedById: userId, isHistorical: true, totalRows: 2, created: 2, skipped: 0 },
+  });
+  importBatchId = batch.id;
+  for (let i = 0; i < 2; i++) {
+    const record = await prisma.historicalRecord.create({
+      data: { agencyId, importBatchId, assignedToId: userId, premiumCents: 10000, recordDate: new Date(), isSold: true, sourceSystem: 'OTHER' },
+    });
+    historicalRecordIds.push(record.id);
+  }
 });
 
 after(async () => {
+  await prisma.historicalRecord.deleteMany({ where: { id: { in: historicalRecordIds } } });
+  await prisma.leadImportBatch.delete({ where: { id: importBatchId } });
   await prisma.leadEvent.deleteMany({ where: { leadId: { in: leadIds } } });
   await prisma.goal.deleteMany({ where: { agencyId } });
   await prisma.lead.deleteMany({ where: { id: { in: leadIds } } });
@@ -51,9 +72,9 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-test('computeGoalActual counts real SOLD dispositions for the sales metric', async () => {
+test('computeGoalActual counts real production (Historical Data/Add Closed Sale) for the sales metric, never a live Lead-SOLD disposition', async () => {
   const actual = await computeGoalActual({ metric: 'sales', userId, agencyId, periodStart, periodEnd });
-  assert.equal(actual, 2);
+  assert.equal(actual, 2, 'the 2 HistoricalRecord rows count; the live SOLD disposition does not');
 });
 
 test('computeGoalActual counts real QUOTED dispositions for the quotes metric', async () => {

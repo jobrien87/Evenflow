@@ -8,6 +8,7 @@ const { computeBillboard, computeBillboardPeriod, GRANULARITIES } = require('../
 const { PERIODS: BILLBOARD_PERIODS } = require('../lib/billboardPeriods');
 const { sumHistoricalPremium, countHistoricalSold, historicalByVendor, historicalByAgent } = require('../lib/historicalAggregates');
 const { countSales, salesByAgent } = require('../lib/manualSaleAggregates');
+const { eligibleProducersWhere } = require('../lib/eligibleProducersQuery');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -33,14 +34,13 @@ router.get('/summary', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req
 
     const whereBase = { occurredAt: { gte: from, lte: to }, ...(agencyId ? { agencyId } : {}) };
 
-    // Sales are now recorded via Lead disposition (Yield Transfers rebuild
-    // retired the Transfer pipeline) — updatedAt is the real timestamp of
-    // that disposition, since a Lead has no separate "soldAt" field and a
-    // SOLD lead is not normally touched again afterward.
-    const [revenueAgg, costAgg, salesCount, historicalPremiumCents, historicalSoldCount, manualSalesCount] = await Promise.all([
+    // Lead reaching SOLD (whole-lead or per-product) is a queue/pipeline
+    // disposition only and is never counted here — the real production
+    // entry is Add Closed Sale (Sale), same production-counting rule as
+    // Billboard.
+    const [revenueAgg, costAgg, historicalPremiumCents, historicalSoldCount, manualSalesCount] = await Promise.all([
       prisma.revenueEvent.aggregate({ where: whereBase, _sum: { amountCents: true } }),
       prisma.costEvent.aggregate({ where: whereBase, _sum: { amountCents: true } }),
-      prisma.lead.count({ where: { status: 'SOLD', salePremiumCents: { gt: 0 }, updatedAt: { gte: from, lte: to }, ...(agencyId ? { agencyId } : {}) } }),
       // Historical Data (Back Catalog) rows aren't Leads and have no
       // RevenueEvent of their own — this is the actual integration point
       // that makes their premium count toward the SAME revenue total
@@ -56,7 +56,7 @@ router.get('/summary', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req
 
     const revenueCents = (revenueAgg._sum.amountCents || 0) + historicalPremiumCents;
     const costCents = costAgg._sum.amountCents || 0;
-    const totalSalesCount = salesCount + historicalSoldCount + manualSalesCount;
+    const totalSalesCount = historicalSoldCount + manualSalesCount;
 
     const profitability = computeProfitability({
       revenueCents, costCents, denominatorCount: totalSalesCount, denominatorLabel: 'sale',
@@ -114,20 +114,21 @@ router.get('/by-vendor', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (r
       vendors.map(async (v) => {
         const [costAgg, leads] = await Promise.all([
           prisma.costEvent.aggregate({ where: { vendorId: v.id, occurredAt: { gte: from, lte: to } }, _sum: { amountCents: true } }),
-          prisma.lead.findMany({ where: { vendorId: v.id, createdAt: { gte: from, lte: to } }, select: { status: true, salePremiumCents: true } }),
+          prisma.lead.findMany({ where: { vendorId: v.id, createdAt: { gte: from, lte: to } }, select: { status: true } }),
         ]);
         const costCents = costAgg._sum.amountCents || 0;
         const leadCount = leads.length;
         const quotedCount = leads.filter((l) => QUOTED_OR_BEYOND_STATUSES.includes(l.status)).length;
-        // A zero/null-premium SOLD lead must never count as sold production.
-        const soldLeads = leads.filter((l) => l.status === 'SOLD' && l.salePremiumCents > 0);
-        // Historical Data rows for this vendor count toward sold/revenue —
-        // never toward leadsReceived/quotesReceived, since historical
-        // backfill never had a real intake/quote pipeline to measure rates
-        // against (that would artificially distort cost-per-lead/-quote).
+        // A Lead reaching SOLD is a pipeline disposition only, never a
+        // production/revenue count here — the real sale unit is a Sale row
+        // (Add Closed Sale), same as Billboard. Historical Data rows for
+        // this vendor count toward sold/revenue — never toward
+        // leadsReceived/quotesReceived, since historical backfill never had
+        // a real intake/quote pipeline to measure rates against (that would
+        // artificially distort cost-per-lead/-quote).
         const historical = historicalById.get(v.id);
-        const soldCount = soldLeads.length + (historical?.count || 0);
-        const revenueCents = soldLeads.reduce((sum, l) => sum + (l.salePremiumCents || 0), 0) + (historical?.premiumCents || 0);
+        const soldCount = historical?.count || 0;
+        const revenueCents = historical?.premiumCents || 0;
 
         return {
           vendorId: v.id,
@@ -179,8 +180,11 @@ router.get('/by-agent', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER'
     }
     const { from, to } = parseDateRange(req);
     const [producers, historicalRows, manualSaleRows] = await Promise.all([
+      // Active PRODUCER or selling AGENCY_MANAGER — an eligible manager
+      // (e.g. one who carries her own book of business) must retain her
+      // own production credit, not fall into the unattributed bucket.
       prisma.user.findMany({
-        where: { agencyId, role: 'PRODUCER', status: 'ACTIVE' },
+        where: eligibleProducersWhere(agencyId),
         select: { id: true, firstName: true, lastName: true },
       }),
       historicalByAgent({ agencyId, from, to }),
@@ -193,21 +197,21 @@ router.get('/by-agent', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER'
     const rows = await Promise.all(
       producers.map(async (p) => {
         const [leads, scoreSnapshot] = await Promise.all([
-          prisma.lead.findMany({ where: { assignedToId: p.id, receivedAt: { gte: from, lte: to } }, select: { status: true, salePremiumCents: true } }),
+          prisma.lead.findMany({ where: { assignedToId: p.id, receivedAt: { gte: from, lte: to } }, select: { status: true } }),
           prisma.flowScoreSnapshot.findFirst({ where: { subjectType: 'USER', subjectId: p.id }, orderBy: { computedAt: 'desc' }, select: { score: true } }),
         ]);
         const leadCount = leads.length;
-        // A zero/null-premium SOLD lead must never count as sold production.
-        const soldLeads = leads.filter((l) => l.status === 'SOLD' && l.salePremiumCents > 0);
-        // Historical Data and Add Closed Sale rows attributed to this
-        // producer count toward their sold/revenue totals — never
-        // leadsAssigned, for the same reason /by-vendor excludes it from
-        // leadsReceived (no real intake rate to measure for a bulk-imported
-        // or standalone-sale row).
+        // A Lead reaching SOLD is a pipeline disposition only, never a
+        // production/revenue count here — the real sale unit is a Sale row
+        // (Add Closed Sale). Historical Data and Add Closed Sale rows
+        // attributed to this producer count toward their sold/revenue
+        // totals — never leadsAssigned, for the same reason /by-vendor
+        // excludes it from leadsReceived (no real intake rate to measure
+        // for a bulk-imported or standalone-sale row).
         const historical = historicalById.get(p.id);
         const manual = salesById.get(p.id);
-        const soldCount = soldLeads.length + (historical?.count || 0) + (manual?.count || 0);
-        const revenueCents = soldLeads.reduce((sum, l) => sum + (l.salePremiumCents || 0), 0) + (historical?.premiumCents || 0) + (manual?.premiumCents || 0);
+        const soldCount = (historical?.count || 0) + (manual?.count || 0);
+        const revenueCents = (historical?.premiumCents || 0) + (manual?.premiumCents || 0);
 
         return {
           userId: p.id,

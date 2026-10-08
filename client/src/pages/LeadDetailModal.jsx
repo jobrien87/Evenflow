@@ -1,9 +1,63 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { Modal, Badge, Button, Icon, LeadTypeIcon, StatTile, MicButton } from '../ui';
 import { PRODUCTS, PRODUCT_META } from '../lib/productMeta';
 import { fireCelebration } from '../lib/celebrations';
+import AddClosedSaleModal from './AddClosedSaleModal';
+
+// Lead disposition-to-SOLD (whole-lead or per-product) is a queue/pipeline
+// status only now — it posts no revenue. Pre-fills what's actually real
+// and already on the Lead (customer contact info, premium/product only
+// when exactly one product was sold, so nothing is guessed), so logging
+// the real production entry is one click away instead of a silent gap.
+function buildSalePrefillFromLead(lead) {
+  const c = lead.customer || {};
+  const soldQuotes = (lead.productQuotes || []).filter((q) => q.status === 'SOLD');
+  const singleSoldProduct = soldQuotes.length === 1 ? soldQuotes[0].product : undefined;
+  return {
+    firstName: c.firstName || '',
+    lastName: c.lastName || '',
+    phone: c.phone || '',
+    email: c.email || '',
+    zip: lead.zip || c.zip || '',
+    state: lead.state || c.state || '',
+    ...(singleSoldProduct && PRODUCTS.includes(singleSoldProduct) ? { productFamily: singleSoldProduct } : {}),
+    premiumCents: lead.salePremiumCents != null ? (lead.salePremiumCents / 100).toFixed(2) : '',
+    assignedToId: lead.assignedToId || '',
+  };
+}
+
+// One-time, dismissible prompt shown the moment a lead's status transitions
+// into SOLD (whichever path caused it) — disposition succeeds regardless
+// of what the producer picks here; this never blocks it.
+function SaleLogNudge({ lead, onDismiss, onLogged }) {
+  const [open, setOpen] = useState(false);
+  if (open) {
+    return (
+      <AddClosedSaleModal
+        leadId={lead.id}
+        prefill={buildSalePrefillFromLead(lead)}
+        onClose={onDismiss}
+        onSaved={onLogged}
+      />
+    );
+  }
+  return (
+    <div style={s.confirmOverlay}>
+      <div style={s.confirmBox}>
+        <div style={s.confirmTitle}>Log this as a Closed Sale?</div>
+        <div style={s.confirmBody}>
+          Marking a lead SOLD no longer records production on its own — an explicit Closed Sale entry is what actually credits it. Want to log one now?
+        </div>
+        <div style={s.confirmActions}>
+          <Button variant="secondary" size="sm" onClick={onDismiss}>NOT NOW</Button>
+          <Button variant="primary" size="sm" onClick={() => setOpen(true)}>LOG CLOSED SALE</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const LEAD_STATUSES = [
   'NEW', 'CONTACTED', 'LEFT_VM', 'APPOINTMENT',
@@ -110,6 +164,11 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
   // actually happened.
   const [bareCallLogged, setBareCallLogged] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
+  const [showSaleNudge, setShowSaleNudge] = useState(false);
+  // null until the first real load resolves — guards against firing the
+  // nudge just because a lead that was ALREADY sold happens to be opened,
+  // rather than a genuine transition into SOLD this session.
+  const prevStatusRef = useRef(null);
 
   useEffect(() => {
     load();
@@ -119,6 +178,11 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
     setError('');
     try {
       const data = await api.leadDetail(leadId);
+      const prevStatus = prevStatusRef.current;
+      if (prevStatus !== null && prevStatus !== 'SOLD' && data.lead.status === 'SOLD') {
+        setShowSaleNudge(true);
+      }
+      prevStatusRef.current = data.lead.status;
       setLead(data.lead);
     } catch (err) {
       setError(err.data?.message || 'Could not load this lead.');
@@ -214,6 +278,13 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
             </div>
           </div>
         </div>
+      )}
+      {showSaleNudge && (
+        <SaleLogNudge
+          lead={lead}
+          onDismiss={() => setShowSaleNudge(false)}
+          onLogged={() => setShowSaleNudge(false)}
+        />
       )}
       <div style={s.header}>
         <div style={s.headerAvatar}>

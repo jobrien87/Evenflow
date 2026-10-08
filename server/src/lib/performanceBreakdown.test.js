@@ -127,7 +127,11 @@ test('computeProductBreakdown groups producer1\'s leads by product', async () =>
   const auto = rows.find((r) => r.product === 'Auto');
   const home = rows.find((r) => r.product === 'Home');
   assert.equal(auto.totalLeads, 2);
-  assert.equal(auto.salesCount, 1);
+  // A live Lead reaching SOLD is a pipeline disposition only now, never a
+  // production/revenue count — salesCount only ever comes from Historical
+  // Data/Add Closed Sale rows, of which this fixture has none.
+  assert.equal(auto.salesCount, 0);
+  assert.equal(auto.closeRate, 50, 'closeRate stays a pipeline-conversion rate, unaffected by the salesCount change');
   assert.equal(home.totalLeads, 1);
   assert.equal(home.salesCount, 0);
 });

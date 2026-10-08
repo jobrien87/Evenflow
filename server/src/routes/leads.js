@@ -7,7 +7,6 @@ const { recordAudit } = require('../lib/audit');
 const { scoreLead } = require('../lib/priority');
 const { deriveLeadType, BULK_UPLOAD_CATEGORIES, applyBulkUploadCategory } = require('../lib/leadType');
 const { normalizePhone, normalizeEmail } = require('../lib/normalize');
-const { recordLeadSaleRevenue, recordLeadProductSaleRevenue } = require('../lib/financialEvents');
 const { PRODUCTS, PRODUCT_LABELS } = require('../lib/products');
 const { autoAdvanceLeadStatus } = require('../lib/leadStatusAuto');
 const { notifyUser, notifyUsers, notifyAgencyOwners } = require('../lib/notifications');
@@ -45,6 +44,23 @@ router.get('/', async (req, res, next) => {
     const agencyId = isTelemarketer ? null : scopeAgencyId(req);
     if (!isTelemarketer && req.user.role !== 'PLATFORM_OWNER' && !agencyId) {
       return res.json({ success: true, leads: [], page: 1, pageSize: 0, total: 0 });
+    }
+
+    // Live/Yield Transfers (telemarketer-sourced leads) is a gated module —
+    // POST already blocks a telemarketer's submission outright when it's
+    // off; this is the matching GET-side check so an Agency Owner/Manager/
+    // Producer viewing the Yield Transfers screen for a not-entitled
+    // agency sees a real, honest reason instead of a silent, unexplained
+    // empty list indistinguishable from "entitled but no leads yet."
+    if (req.query.source === 'telemarketer' && !isTelemarketer && req.user.role !== 'PLATFORM_OWNER') {
+      const agency = await prisma.agency.findUnique({ where: { id: agencyId }, select: { transfersEnabled: true, name: true } });
+      if (agency && !agency.transfersEnabled) {
+        return res.status(403).json({
+          success: false,
+          error: 'MODULE_NOT_ENTITLED',
+          message: `${agency.name} does not currently have Yield Transfers enabled on its plan.`,
+        });
+      }
     }
 
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
@@ -1447,18 +1463,16 @@ router.post('/:leadId/products', async (req, res, next) => {
       },
     });
 
-    // Real, entered sale premium feeds the Financial Ledger — only on the
-    // first time this product is marked SOLD, so re-saving/correcting an
-    // already-sold product's premium never double-books revenue.
-    if (status === 'SOLD' && !wasSold && premiumCents) {
-      await recordLeadProductSaleRevenue({
-        agencyId: lead.agencyId, leadId: lead.id, productLabel: PRODUCT_LABELS[product], premiumCents,
+    // A product SOLD here is a queue/pipeline disposition, not a
+    // production entry — no revenue is posted from this path. Real
+    // production/revenue only ever comes from an explicit Add Closed
+    // Sale entry (routes/sales.js). Cross-sell detection still runs on
+    // the first time this product is marked SOLD — that's a product-
+    // ownership signal, unrelated to revenue.
+    if (status === 'SOLD' && !wasSold && lead.customerId) {
+      await updateCustomerProductsAndDetectCrossSells({
+        customerId: lead.customerId, agencyId: lead.agencyId, soldProduct: PRODUCT_LABELS[product],
       });
-      if (lead.customerId) {
-        await updateCustomerProductsAndDetectCrossSells({
-          customerId: lead.customerId, agencyId: lead.agencyId, soldProduct: PRODUCT_LABELS[product],
-        });
-      }
     }
 
     await syncLeadSaleFieldsFromProductQuotes(lead.id);
@@ -1613,15 +1627,11 @@ router.post('/:leadId/disposition', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER'
       correlationId: req.correlationId,
     });
 
-    // Real, entered sale premium feeds the Financial Ledger directly --
-    // but only the FIRST time this lead transitions into SOLD. Without the
-    // fromStatus !== 'SOLD' guard, re-dispositioning an already-sold lead
-    // (e.g. a correction, or the Add Closed Sale form's "linked lead" path
-    // retried against a lead that's already recorded) would post a second,
-    // duplicate RevenueEvent for the same real-world sale.
-    if (parsed.data.status === 'SOLD' && fromStatus !== 'SOLD' && parsed.data.salePremiumCents) {
-      await recordLeadSaleRevenue(updated);
-    }
+    // A SOLD disposition is a queue/pipeline status change only — it never
+    // posts revenue or production credit. The lead's sale-detail fields
+    // above are preserved for history/audit (and to pre-fill the Add
+    // Closed Sale nudge below), but the one real production entry is an
+    // explicit Add Closed Sale (routes/sales.js), counted once there.
 
     // Phone-number-level suppression (TCPA) — a DO_NOT_CONTACT disposition
     // marks the underlying Customer, not just this one Lead row, so the

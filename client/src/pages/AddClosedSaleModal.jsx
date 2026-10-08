@@ -11,11 +11,15 @@ function emptyForm(keep = {}) {
   return {
     firstName: '', lastName: '', businessName: '', customerTitle: '', customerSuffix: '',
     phone: '', email: '', zip: '', state: '',
-    saleDate: keep.saleDate || todayISO(), issuedDate: '', effectiveDate: '', expirationDate: '',
+    saleDate: todayISO(), issuedDate: '', effectiveDate: '', expirationDate: '',
     carrier: '', policyType: '', productFamily: PRODUCTS[0], policyNumber: '',
     premiumCents: '', revenueCents: '', items: '1',
     leadSource: '', priorCarrier: '', reason: '', notes: '',
-    officeId: keep.officeId || '', assignedToId: keep.assignedToId || '',
+    officeId: '', assignedToId: '',
+    // Any field in `keep` (a "Save & Add Another" carry-forward, or a
+    // disposition-nudge prefill from a real Lead) overrides the blank
+    // default above.
+    ...keep,
   };
 }
 
@@ -26,15 +30,18 @@ function toCents(value) {
   return Math.round(n * 100);
 }
 
-// Add Closed Sale — standalone sale entry with no originating Lead in
-// Evenflow. Single-producer entry only this round (split credit/points/
-// onboarding side effects are explicitly out of scope, per the spec).
-export default function AddClosedSaleModal({ onClose, onSaved }) {
+// Add Closed Sale — the one real production/revenue entry, standalone or
+// linked back to a real Lead via `leadId` (set by the post-disposition
+// "log as Closed Sale" nudge in LeadDetailModal.jsx, which also supplies
+// `prefill` from that Lead's own rich sale-detail fields). Single-producer
+// entry only this round (split credit/points/onboarding side effects are
+// explicitly out of scope, per the spec).
+export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill }) {
   const { user } = useAuth();
   const isProducer = user?.role === 'PRODUCER';
   const [producers, setProducers] = useState([]);
   const [offices, setOffices] = useState([]);
-  const [form, setForm] = useState(emptyForm());
+  const [form, setForm] = useState(emptyForm(prefill));
   const [clientRequestId, setClientRequestId] = useState(crypto.randomUUID());
   const [duplicates, setDuplicates] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -56,6 +63,7 @@ export default function AddClosedSaleModal({ onClose, onSaved }) {
     const revenueCents = toCents(form.revenueCents);
     return {
       clientRequestId,
+      leadId: leadId || undefined,
       firstName: form.firstName,
       lastName: form.lastName,
       businessName: form.businessName || undefined,

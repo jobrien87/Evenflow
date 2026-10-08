@@ -77,10 +77,12 @@ async function computeProductBreakdown({ agencyId, userId, from, to }) {
     byProduct.get(key).push(lead);
   }
 
-  // Historical Data and Add Closed Sale rows add to salesCount only — never
-  // totalLeads/contactRate/quoteRate/closeRate, since those are pipeline-
-  // speed rate metrics that old bulk-imported/standalone-entered rows
-  // never had real touchpoints to measure against.
+  // closeRate is a pipeline-conversion rate (a Lead reaching SOLD is a
+  // real, countable pipeline event for this purpose, same as funnelMetrics
+  // .js's own closeRate) — distinct from salesCount, which is a real
+  // production/revenue count and only ever comes from Historical Data and
+  // Add Closed Sale rows now; a live Lead reaching SOLD is a queue
+  // disposition only and is never counted toward salesCount.
   const rows = [...byProduct.entries()].map(([product, productLeads]) => {
     const total = productLeads.length;
     const contacted = productLeads.filter((l) => l.firstContactAt).length;
@@ -94,7 +96,7 @@ async function computeProductBreakdown({ agencyId, userId, from, to }) {
       contactRate: pct(contacted, total),
       quoteRate: pct(quotedOrBeyond, total),
       closeRate: pct(sold, total),
-      salesCount: sold + historicalSold + manualSold,
+      salesCount: historicalSold + manualSold,
     };
   });
 

@@ -31,11 +31,16 @@ async function computeFunnel({ agencyId, userId, vendorId, product, from, to }) 
   };
   const leads = await prisma.lead.findMany({
     where,
-    select: { status: true, assignedAt: true, firstAttemptAt: true, firstContactAt: true },
+    select: { status: true, assignedAt: true, firstAttemptAt: true, firstContactAt: true, vendorId: true },
   });
 
   const total = leads.length;
-  const attempted = leads.filter((l) => l.assignedAt && l.firstAttemptAt);
+  // Speed-to-first-attempt is a real-time-vendor-intake SLA — only leads
+  // that actually came through the authenticated vendor API (Lead.vendorId
+  // set) carry a receipt timestamp worth measuring response speed
+  // against. contactRate/quoteRate/closeRate below stay unfiltered —
+  // ordinary CRM pipeline activity from any intake source.
+  const attempted = leads.filter((l) => l.vendorId && l.assignedAt && l.firstAttemptAt);
   const contacted = leads.filter((l) => l.firstContactAt);
   const quotedOrBeyond = leads.filter((l) =>
     ['QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'].includes(l.status)

@@ -15,46 +15,20 @@ async function recordVendorLeadCost(lead, vendor) {
   });
 }
 
-// Called when a lead (any source, including a telemarketer submission) is
-// dispositioned SOLD with a real entered premium — only real, entered
-// numbers, never a fabricated commission rate.
-async function recordLeadSaleRevenue(lead) {
-  if (!lead.agencyId || !lead.salePremiumCents) return null;
-  return prisma.revenueEvent.create({
-    data: {
-      agencyId: lead.agencyId,
-      category: 'LEAD_REVENUE',
-      amountCents: lead.salePremiumCents,
-      notes: `Sale premium recorded for lead ${lead.id} (${lead.saleProduct || 'product not specified'})`,
-    },
-  });
-}
-
-// Called when a single product on a lead (see LeadProductQuote) is marked
-// SOLD with a real entered premium — the per-product analog of
-// recordLeadSaleRevenue, since one lead can now sell several products at
-// different premiums instead of exactly one.
-async function recordLeadProductSaleRevenue({ agencyId, leadId, productLabel, premiumCents }) {
-  if (!agencyId || !premiumCents) return null;
-  return prisma.revenueEvent.create({
-    data: {
-      agencyId,
-      category: 'LEAD_REVENUE',
-      amountCents: premiumCents,
-      notes: `Sale premium recorded for lead ${leadId} (${productLabel})`,
-    },
-  });
-}
-
-// Called when a standalone Sale (Add Closed Sale, no originating Lead) is
-// created with a real entered premium — same real-money-only convention
-// as recordLeadSaleRevenue, just for a sale that never had a Lead row.
+// Called when a standalone Sale (Add Closed Sale) is created with a real
+// entered premium — the one and only production-crediting path. A Lead
+// reaching SOLD (whole-lead disposition or a per-product quote) and an
+// Opportunity reaching WON are queue/pipeline dispositions only now —
+// neither posts revenue directly; an actual closed sale always goes
+// through here, counted once, real-money-only (never a fabricated
+// commission rate).
 async function recordManualSaleRevenue(sale) {
   if (!sale.agencyId || !sale.premiumCents) return null;
   return prisma.revenueEvent.create({
     data: {
       agencyId: sale.agencyId,
       category: 'LEAD_REVENUE',
+      sourceType: 'SALE',
       amountCents: sale.premiumCents,
       notes: `Manual closed-sale entry: ${sale.carrier} ${sale.policyType} for ${sale.firstName} ${sale.lastName} (sale ${sale.id})`,
     },
@@ -63,7 +37,5 @@ async function recordManualSaleRevenue(sale) {
 
 module.exports = {
   recordVendorLeadCost,
-  recordLeadSaleRevenue,
-  recordLeadProductSaleRevenue,
   recordManualSaleRevenue,
 };

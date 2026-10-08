@@ -174,18 +174,18 @@ test('GET /leads/import-batches?kind=historical_data lists the batch; the defaul
   assert.equal(defaultBody.batches.find((b) => b.id === batchId), undefined, 'a historical batch must never appear in the ordinary lead-upload history');
 });
 
-test('financials /summary includes historical premium/sold-count for the range, added to live', async () => {
+test('financials /summary includes historical premium/sold-count for the range; a live Lead reaching SOLD contributes nothing', async () => {
   const qs = `from=${rangeFrom.toISOString()}&to=${rangeTo.toISOString()}&agencyId=${agencyId}`;
   const res = await fetch(`${baseUrl}/api/financials/summary?${qs}`, { headers: { Cookie: ownerCookie } });
   const body = await res.json();
   assert.equal(res.status, 200);
-  // /summary's revenue comes from RevenueEvent rows, not Lead.salePremiumCents
-  // directly — the seed lead was created pre-SOLD (not via the disposition
-  // route), so it never produced a RevenueEvent and contributes $0 revenue
-  // here (it still counts toward salesRecorded via the real Lead.count).
+  // A Lead reaching SOLD is a queue disposition only now, never a revenue/
+  // production source — the seed lead (created directly with status:
+  // 'SOLD', never via the disposition route) correctly produced no
+  // RevenueEvent and must not count toward salesRecorded either.
   // historical $500 + $300 (row 3 unsold, row 4 out of range excluded)
   assert.equal(body.revenue, (50000 + 30000) / 100);
-  assert.equal(body.salesRecorded, 1 + 2);
+  assert.equal(body.salesRecorded, 2, 'historical sold count only — the live SOLD lead is a pipeline disposition, not a production record');
   assert.equal(body.historicalRecordsIncluded, 2);
 });
 
@@ -195,8 +195,10 @@ test('financials /by-vendor merges matched historical premium into Vendor A, and
   const body = await res.json();
   const vendorARow = body.vendors.find((v) => v.vendorId === vendorAId);
   assert.ok(vendorARow);
-  assert.equal(vendorARow.salesCount, 1 + 1, 'live sale + the matched historical row');
-  assert.equal(vendorARow.revenue, (100000 + 50000) / 100);
+  // Only the matched historical row counts now — the live SOLD lead
+  // assigned to this vendor is a pipeline disposition, not production.
+  assert.equal(vendorARow.salesCount, 1);
+  assert.equal(vendorARow.revenue, 500);
 
   const unmatchedRow = body.vendors.find((v) => v.vendorId === null);
   assert.ok(unmatchedRow, 'an unmatched-vendor historical bucket must be visible, not silently dropped');
@@ -210,8 +212,10 @@ test('financials /by-agent merges matched historical premium into Prod X, and bu
   const body = await res.json();
   const prodXRow = body.agents.find((a) => a.userId === producerXId);
   assert.ok(prodXRow);
-  assert.equal(prodXRow.salesCount, 1 + 1);
-  assert.equal(prodXRow.revenue, (100000 + 50000) / 100);
+  // Only the matched historical row counts — the live SOLD lead assigned
+  // to this producer is a pipeline disposition, not production.
+  assert.equal(prodXRow.salesCount, 1);
+  assert.equal(prodXRow.revenue, 500);
 
   const unattributedRow = body.agents.find((a) => a.userId === null);
   assert.ok(unattributedRow);
@@ -219,13 +223,13 @@ test('financials /by-agent merges matched historical premium into Prod X, and bu
   assert.equal(unattributedRow.revenue, 300);
 });
 
-test('computeBillboard merges historical sold rows into the same totals/byVendor/byProducer aggregation as live leads', async () => {
+test('computeBillboard merges historical sold rows into totals/byVendor; a live Lead reaching SOLD contributes nothing', async () => {
   const result = await computeBillboard({ agencyId, granularity: 'month', from: rangeFrom, to: rangeTo });
-  assert.equal(result.totals.soldCount, 3);
-  assert.equal(result.totals.premiumCents, 100000 + 50000 + 30000);
+  assert.equal(result.totals.soldCount, 2);
+  assert.equal(result.totals.premiumCents, 50000 + 30000);
 
   const vendorARow = result.byVendor.find((v) => v.vendorId === vendorAId);
-  assert.equal(vendorARow.soldCount, 2);
+  assert.equal(vendorARow.soldCount, 1);
   // The unmatched-vendor historical row buckets under Billboard's own
   // existing "Direct / No Vendor" convention — no new bucket type needed.
   const directRow = result.byVendor.find((v) => v.vendorId === null);
@@ -251,7 +255,9 @@ test('computeProductBreakdown: historical sold-count is added to salesCount, nev
   // totalLeads only counts the one real live Lead (receivedAt in range) —
   // the historical row never touches this pipeline-count field.
   assert.equal(autoRow.totalLeads, 1);
-  assert.equal(autoRow.salesCount, 1 + 1, 'live sold + the matched historical Auto row');
+  // salesCount is historical + manual only now — the live Lead reaching
+  // SOLD is a pipeline disposition, not a production record.
+  assert.equal(autoRow.salesCount, 1, 'only the matched historical Auto row — the live SOLD lead is a pipeline disposition');
 
   // Home has zero live leads but one historical sale — must still appear.
   const homeRow = rows.find((r) => r.product === 'Home');

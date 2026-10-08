@@ -140,9 +140,14 @@ async function saveSnapshot({ subjectType, subjectId, role, rawComponents }) {
 async function computeProducerScore(userId) {
   const leads = await prisma.lead.findMany({
     where: { assignedToId: userId },
-    select: { status: true, assignedAt: true, firstAttemptAt: true },
+    select: { status: true, assignedAt: true, firstAttemptAt: true, vendorId: true },
   });
-  const attemptedLeads = leads.filter((l) => l.assignedAt && l.firstAttemptAt);
+  // Speed-to-first-attempt is a real-time-vendor-intake SLA — only leads
+  // that actually came through the authenticated vendor API carry a
+  // reliable, non-user-editable receipt timestamp worth measuring
+  // response speed against. Conversion/other components below stay
+  // unfiltered (ordinary CRM activity, from any intake source).
+  const attemptedLeads = leads.filter((l) => l.vendorId && l.assignedAt && l.firstAttemptAt);
   const fastAttempts = attemptedLeads.filter(
     (l) => l.firstAttemptAt.getTime() - l.assignedAt.getTime() <= 60 * 60 * 1000
   );
@@ -226,9 +231,12 @@ async function computeTelemarketerScore(userId) {
 async function computeAgencyScore(agencyId) {
   const leads = await prisma.lead.findMany({
     where: { agencyId },
-    select: { status: true, assignedAt: true, firstAttemptAt: true },
+    select: { status: true, assignedAt: true, firstAttemptAt: true, vendorId: true },
   });
-  const attemptedLeads = leads.filter((l) => l.assignedAt && l.firstAttemptAt);
+  // Same vendor-API-only gate as computeProducerScore's responsiveness
+  // component — team speed-to-first-attempt only measures real vendor
+  // intake, not bulk-upload/manual/telemarketer leads.
+  const attemptedLeads = leads.filter((l) => l.vendorId && l.assignedAt && l.firstAttemptAt);
   const fastAttempts = attemptedLeads.filter(
     (l) => l.firstAttemptAt.getTime() - l.assignedAt.getTime() <= 60 * 60 * 1000
   );

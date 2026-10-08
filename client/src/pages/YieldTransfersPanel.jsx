@@ -55,9 +55,11 @@ function tmInitials(user) {
 // (split out per the user's request); a focused per-lead DISCUSS
 // thread is kept here, opened in its own modal.
 export default function YieldTransfersPanel() {
-  const [leads, setLeads] = useState([]);
+  // null = still loading (never fetched yet); [] = fetched, genuinely empty.
+  const [leads, setLeads] = useState(null);
   const [leadTotal, setLeadTotal] = useState(0);
   const [error, setError] = useState('');
+  const [notEntitled, setNotEntitled] = useState(false);
   const [discussLead, setDiscussLead] = useState(null);
   const [tmFilter, setTmFilter] = useState(null);
   const [selectedIds, setSelectedIds] = useState([]);
@@ -98,9 +100,15 @@ export default function YieldTransfersPanel() {
       const data = await api.leads('?source=telemarketer');
       setLeads(data.leads);
       setLeadTotal(data.total ?? data.leads.length);
+      setNotEntitled(false);
       setError('');
     } catch (err) {
-      setError(err.data?.message || 'Could not load leads.');
+      if (err.data?.error === 'MODULE_NOT_ENTITLED') {
+        setNotEntitled(true);
+        setLeads([]);
+      } else {
+        setError(err.data?.message || 'Could not load leads.');
+      }
     }
   }
 
@@ -137,17 +145,23 @@ export default function YieldTransfersPanel() {
     ]);
   }
 
+  // leads is null only during the very first in-flight fetch — every
+  // memo below runs on every render regardless of which loading/error/
+  // not-entitled branch is about to be shown, so default to [] rather
+  // than guard each call site separately.
+  const safeLeads = leads || [];
+
   const telemarketers = useMemo(() => {
     const byId = new Map();
-    for (const lead of leads) {
+    for (const lead of safeLeads) {
       if (lead.createdBy && !byId.has(lead.createdBy.id)) byId.set(lead.createdBy.id, lead.createdBy);
     }
     return [...byId.values()];
-  }, [leads]);
+  }, [safeLeads]);
 
   const visibleLeads = useMemo(
-    () => (tmFilter ? leads.filter((l) => l.createdBy?.id === tmFilter) : leads),
-    [leads, tmFilter]
+    () => (tmFilter ? safeLeads.filter((l) => l.createdBy?.id === tmFilter) : safeLeads),
+    [safeLeads, tmFilter]
   );
 
   // At-a-glance summary, computed client-side from the same leads this
@@ -155,9 +169,9 @@ export default function YieldTransfersPanel() {
   // full loaded set (not the TM filter), so switching filters below
   // doesn't make these headline numbers jump around.
   const leadStats = useMemo(() => {
-    const total = leads.length;
+    const total = safeLeads.length;
     const byStatus = new Map();
-    for (const lead of leads) {
+    for (const lead of safeLeads) {
       byStatus.set(lead.status, (byStatus.get(lead.status) || 0) + 1);
     }
     const sold = byStatus.get('SOLD') || 0;
@@ -166,8 +180,8 @@ export default function YieldTransfersPanel() {
       .map(([status, count]) => ({ status, count }))
       .sort((a, b) => b.count - a.count);
     return { total, sold, closeRate, breakdown };
-  }, [leads]);
-  const leadsFullyLoaded = leads.length === leadTotal;
+  }, [safeLeads]);
+  const leadsFullyLoaded = safeLeads.length === leadTotal;
 
   function toggleSelected(leadId) {
     setSelectedIds((prev) => (prev.includes(leadId) ? prev.filter((id) => id !== leadId) : [...prev, leadId]));
@@ -197,7 +211,7 @@ export default function YieldTransfersPanel() {
 
   return (
     <div style={s.wrap}>
-      <SectionHeader right={view === 'live' && leads.length > 0 && <ExportButton onExport={exportAllLeads} />}>TRANSFERS</SectionHeader>
+      <SectionHeader right={view === 'live' && safeLeads.length > 0 && <ExportButton onExport={exportAllLeads} />}>TRANSFERS</SectionHeader>
 
       <div style={s.viewTabRow}>
         <button type="button" style={s.viewTab(view === 'live')} onClick={() => setView('live')}>LIVE</button>
@@ -206,6 +220,18 @@ export default function YieldTransfersPanel() {
 
       {view === 'history' ? (
         <TransferHistoryPanel />
+      ) : notEntitled ? (
+        <EmptyState
+          title="Yield Transfers isn't enabled on this plan"
+          description="This agency doesn't currently have Yield Transfers enabled. Contact your Platform Owner to turn it on."
+        />
+      ) : leads === null && error ? (
+        <div style={s.loadErrorBlock}>
+          <div style={s.error}>{error}</div>
+          <Button variant="secondary" size="sm" onClick={load}>RETRY</Button>
+        </div>
+      ) : leads === null ? (
+        <EmptyState title="Loading…" description="Fetching telemarketer-submitted leads." />
       ) : (
         <>
       {error && <div style={s.error}>{error}</div>}
@@ -250,7 +276,7 @@ export default function YieldTransfersPanel() {
         )}
       </section>
 
-      {leads.length > 0 && (
+      {safeLeads.length > 0 && (
         <>
           <div style={s.statsRow}>
             <StatTile
@@ -446,6 +472,7 @@ function DispositionControl({ lead, onDone }) {
 const s = {
   wrap: {},
   error: { color: 'var(--danger)', marginBottom: 12, fontSize: 13 },
+  loadErrorBlock: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 10, padding: '24px 0' },
   viewTabRow: { display: 'flex', gap: 6, marginBottom: 20 },
   viewTab: (active) => ({
     padding: '8px 18px', borderRadius: 6, fontSize: 12, fontWeight: 700, letterSpacing: 0.5, cursor: 'pointer', border: 'none',

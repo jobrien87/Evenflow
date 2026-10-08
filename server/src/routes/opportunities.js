@@ -5,7 +5,6 @@ const { prisma } = require('../lib/db');
 const { requireAuth, requireRole, scopeAgencyId } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { canTransition } = require('../lib/opportunityStateMachine');
-const { recordLeadSaleRevenue } = require('../lib/financialEvents');
 const { parseCrossSellFile, importCrossSellContacts } = require('../lib/crossSellBulkImport');
 
 const router = express.Router();
@@ -195,14 +194,11 @@ router.post('/:id/disposition', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'P
       before: { status: opportunity.status }, after: { status: parsed.data.status }, correlationId: req.correlationId,
     });
 
-    if (parsed.data.status === 'WON' && parsed.data.wonPremiumCents) {
-      await recordLeadSaleRevenue({
-        id: updated.id,
-        agencyId: updated.agencyId,
-        salePremiumCents: parsed.data.wonPremiumCents,
-        saleProduct: updated.product,
-      });
-    }
+    // WON is a pipeline disposition only, same as Lead SOLD — it never
+    // posts revenue directly. wonPremiumCents is preserved on the row for
+    // history; the one real production entry for an actually-closed sale
+    // (including one originating from a won Winback/Cross-Sell
+    // opportunity) is an explicit Add Closed Sale (routes/sales.js).
 
     return res.json({ success: true, opportunity: updated });
   } catch (err) {

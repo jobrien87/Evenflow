@@ -1,8 +1,9 @@
-// Add Closed Sale — manual, standalone sale entry (no originating Lead in
-// Evenflow). See schema.prisma's Sale model comment: a Lead-linked sale
-// stays on the Lead's own disposition flow (POST /leads/:leadId/disposition),
-// never a second row here. This route is the real new gap: a policy that
-// was never a Lead at all.
+// Add Closed Sale — the one real production/revenue entry, standalone or
+// linked back to a real Lead via the optional leadId (set when this sale
+// originates from the post-disposition "log as Closed Sale" nudge — see
+// routes/leads.js). Lead disposition-to-SOLD never posts revenue on its
+// own anymore (see schema.prisma's Sale model comment), so a Lead-linked
+// sale needs a real Sale row here too, not a parallel bookkeeping path.
 const express = require('express');
 const { z } = require('zod');
 const { prisma } = require('../lib/db');
@@ -25,19 +26,23 @@ const CREATE_ROLES = ['AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER', 'PLATFORM_OW
 // spec). Also a loose cross-check against HistoricalRecord (same customer
 // name + product within a few days of the sale date), the closest fields
 // that model actually has.
-async function findPossibleDuplicates({ agencyId, excludeSaleId, policyNumber, carrier, policyType, saleDate, firstName, lastName, zip }) {
+async function findPossibleDuplicates({ agencyId, excludeSaleId, leadId, policyNumber, carrier, policyType, saleDate, firstName, lastName, zip }) {
   const saleWhere = {
     agencyId,
     voidedAt: null,
     ...(excludeSaleId ? { id: { not: excludeSaleId } } : {}),
     OR: [
+      // A non-voided Sale already linked to this same Lead is the clearest
+      // possible duplicate signal there is — an already-SOLD lead must
+      // never generate a second production credit.
+      ...(leadId ? [{ leadId }] : []),
       ...(policyNumber ? [{ policyNumber }] : []),
       { carrier, policyType, saleDate },
     ],
   };
   const saleMatches = await prisma.sale.findMany({
     where: saleWhere,
-    select: { id: true, firstName: true, lastName: true, carrier: true, policyType: true, policyNumber: true, saleDate: true, premiumCents: true },
+    select: { id: true, leadId: true, firstName: true, lastName: true, carrier: true, policyType: true, policyNumber: true, saleDate: true, premiumCents: true },
     take: 10,
   });
 
@@ -66,11 +71,11 @@ router.post('/check-duplicate', requireRole(...CREATE_ROLES), async (req, res, n
   try {
     const agencyId = scopeAgencyId(req);
     if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
-    const { policyNumber, carrier, policyType, saleDate, firstName, lastName, zip } = req.body || {};
+    const { leadId, policyNumber, carrier, policyType, saleDate, firstName, lastName, zip } = req.body || {};
     if (!carrier || !policyType || !saleDate || !firstName || !lastName) {
       return res.status(400).json({ success: false, error: 'VALIDATION', message: 'carrier, policyType, saleDate, firstName, lastName are required to check for duplicates.' });
     }
-    const matches = await findPossibleDuplicates({ agencyId, policyNumber, carrier, policyType, saleDate: new Date(saleDate), firstName, lastName, zip });
+    const matches = await findPossibleDuplicates({ agencyId, leadId, policyNumber, carrier, policyType, saleDate: new Date(saleDate), firstName, lastName, zip });
     return res.json({ success: true, ...matches });
   } catch (err) {
     next(err);
@@ -79,6 +84,10 @@ router.post('/check-duplicate', requireRole(...CREATE_ROLES), async (req, res, n
 
 const createSaleSchema = z.object({
   clientRequestId: z.string().min(1),
+  // Optional provenance link back to the Lead this sale originated from
+  // (set by the post-disposition "log as Closed Sale" nudge) — never
+  // required, since a fully standalone sale has no Lead at all.
+  leadId: z.string().uuid().optional(),
   firstName: z.string().min(1),
   lastName: z.string().min(1),
   businessName: z.string().optional(),
@@ -151,6 +160,15 @@ router.post('/', requireRole(...CREATE_ROLES), async (req, res, next) => {
       }
     }
 
+    // Never trust a client-supplied leadId blindly — it must be a real
+    // Lead in this same agency.
+    if (data.leadId) {
+      const lead = await prisma.lead.findUnique({ where: { id: data.leadId } });
+      if (!lead || lead.agencyId !== agencyId) {
+        return res.status(400).json({ success: false, error: 'INVALID_LEAD', message: 'leadId must be a real lead in this agency.' });
+      }
+    }
+
     const saleDate = new Date(data.saleDate);
     if (Number.isNaN(saleDate.getTime())) {
       return res.status(400).json({ success: false, error: 'VALIDATION', message: 'saleDate is not a valid date.' });
@@ -160,7 +178,7 @@ router.post('/', requireRole(...CREATE_ROLES), async (req, res, next) => {
     // already showed the user — never trust a client-side-only check for
     // something this consequential. A match requires explicit confirmation.
     const duplicates = await findPossibleDuplicates({
-      agencyId, policyNumber: data.policyNumber, carrier: data.carrier, policyType: data.policyType,
+      agencyId, leadId: data.leadId, policyNumber: data.policyNumber, carrier: data.carrier, policyType: data.policyType,
       saleDate, firstName: data.firstName, lastName: data.lastName, zip: data.zip,
     });
     const hasDuplicates = duplicates.sales.length > 0 || duplicates.historicalRecords.length > 0;
@@ -189,6 +207,7 @@ router.post('/', requireRole(...CREATE_ROLES), async (req, res, next) => {
       data: {
         agencyId,
         customerId: customer.id,
+        leadId: data.leadId || null,
         firstName: data.firstName,
         lastName: data.lastName,
         businessName: data.businessName || null,

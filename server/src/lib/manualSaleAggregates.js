@@ -11,39 +11,65 @@
 // exports. These feed INTO existing report computations — never a second,
 // parallel report surface. A voided Sale is excluded from everything here.
 const { prisma } = require('./db');
+const { zonedYearMonthDay } = require('./timezone');
 
-function dateRangeWhere(agencyId, from, to, extra = {}) {
+// Same opt-in Eastern-calendar-day boundary conversion as
+// historicalAggregates.js's dateRangeWhere — saleDate is stored as
+// UTC-midnight-of-calendar-date (routes/sales.js's `new Date(data.saleDate)`
+// on a plain "YYYY-MM-DD" input parses as UTC midnight, same encoding as
+// HistoricalRecord.recordDate). Only applied when timeZone is explicitly
+// passed (computeBillboardPeriod's real Eastern period boundaries) —
+// billboard.js's legacy computeBillboard rolling-range callers keep the
+// raw instant comparison unchanged.
+function toCalendarUtcMidnight(instant, timeZone) {
+  const { year, month, day } = zonedYearMonthDay(instant, timeZone);
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function dateRangeWhere(agencyId, from, to, extra = {}, timeZone) {
+  const [gteBound, ltBound] = timeZone
+    ? [toCalendarUtcMidnight(from, timeZone), toCalendarUtcMidnight(to, timeZone)]
+    : [from, to];
   return {
     agencyId,
-    saleDate: { gte: from, lte: to },
+    // Exclusive upper bound, matching billboardPeriods.js's own
+    // already-exclusive `to` convention and billboard.js's bucketBySpans.
+    saleDate: { gte: gteBound, lt: ltBound },
     voidedAt: null,
+    // A zero/null-premium Sale must never inflate sold production —
+    // explicit user override of this model's earlier "null = unknown,
+    // entered later" aggregation stance. The row itself is still stored
+    // and editable (PATCH can fill in the real premium later); it just
+    // doesn't count toward soldCount/itemCount/revenue until it does,
+    // same floor historicalAggregates.js already applies.
+    premiumCents: { gt: 0 },
     ...extra,
   };
 }
 
-async function sumSalePremium({ agencyId, from, to, assignedToId, productFamily }) {
+async function sumSalePremium({ agencyId, from, to, assignedToId, productFamily, timeZone }) {
   const where = dateRangeWhere(agencyId, from, to, {
     ...(assignedToId !== undefined ? { assignedToId } : {}),
     ...(productFamily ? { productFamily } : {}),
-  });
+  }, timeZone);
   const result = await prisma.sale.aggregate({ where, _sum: { premiumCents: true } });
   return result._sum.premiumCents || 0;
 }
 
-async function countSales({ agencyId, from, to, assignedToId, productFamily }) {
+async function countSales({ agencyId, from, to, assignedToId, productFamily, timeZone }) {
   const where = dateRangeWhere(agencyId, from, to, {
     ...(assignedToId !== undefined ? { assignedToId } : {}),
     ...(productFamily ? { productFamily } : {}),
-  });
+  }, timeZone);
   return prisma.sale.count({ where });
 }
 
 // {userId, premiumCents, count}[] — a Sale always has a real assignedToId
 // (required field), so unlike historicalByAgent there's no "unmatched"
 // bucket needed here.
-async function salesByAgent({ agencyId, from, to }) {
+async function salesByAgent({ agencyId, from, to, timeZone }) {
   const rows = await prisma.sale.findMany({
-    where: dateRangeWhere(agencyId, from, to),
+    where: dateRangeWhere(agencyId, from, to, {}, timeZone),
     select: { assignedToId: true, premiumCents: true },
   });
   const byAgent = new Map();
@@ -58,9 +84,9 @@ async function salesByAgent({ agencyId, from, to }) {
 
 // {[productFamily]: {premiumCents, count}} — matches
 // performanceBreakdown.js's own grouping-key convention.
-async function salesByProduct({ agencyId, from, to, assignedToId }) {
+async function salesByProduct({ agencyId, from, to, assignedToId, timeZone }) {
   const rows = await prisma.sale.findMany({
-    where: dateRangeWhere(agencyId, from, to, assignedToId !== undefined ? { assignedToId } : {}),
+    where: dateRangeWhere(agencyId, from, to, assignedToId !== undefined ? { assignedToId } : {}, timeZone),
     select: { productFamily: true, premiumCents: true },
   });
   const byProduct = {};
@@ -79,9 +105,9 @@ async function salesByProduct({ agencyId, from, to, assignedToId }) {
 // was never bought from a lead vendor by definition, so it naturally lands
 // in Billboard's existing "Direct / No Vendor" fallback bucket, which is
 // exactly right.
-async function saleLeadLikeRows({ agencyId, from, to }) {
+async function saleLeadLikeRows({ agencyId, from, to, timeZone }) {
   const rows = await prisma.sale.findMany({
-    where: dateRangeWhere(agencyId, from, to),
+    where: dateRangeWhere(agencyId, from, to, {}, timeZone),
     select: {
       saleDate: true,
       premiumCents: true,
@@ -89,6 +115,7 @@ async function saleLeadLikeRows({ agencyId, from, to }) {
       assignedToId: true,
       assignedTo: { select: { id: true, firstName: true, lastName: true } },
       zip: true,
+      items: true,
     },
   });
   return rows.map((r) => ({
@@ -100,6 +127,7 @@ async function saleLeadLikeRows({ agencyId, from, to }) {
     vendorId: null,
     vendor: null,
     zip: r.zip,
+    items: r.items,
   }));
 }
 

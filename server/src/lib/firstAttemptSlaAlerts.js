@@ -29,6 +29,13 @@ async function checkFirstAttemptSla() {
 
   const candidates = await prisma.lead.findMany({
     where: {
+      // Speed-to-lead is a real-time-vendor-intake SLA, not a general
+      // CRM-activity metric — vendorId is only ever set by the
+      // authenticated vendor-API intake path (vendorApi.js), never by
+      // createLeadRecord (manual/bulk-import/back-catalog/telemarketer),
+      // so it's a reliable, non-user-editable gate on which leads this
+      // alert applies to.
+      vendorId: { not: null },
       assignedToId: { not: null },
       firstAttemptAt: null,
       status: { notIn: TERMINAL_STATUSES },

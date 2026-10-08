@@ -221,6 +221,19 @@ enum RevenueCategory {
   OTHER
 }
 
+// Traceability for RevenueEvent rows written from this point forward —
+// null on every pre-existing row (both legacy Lead-SOLD paths wrote
+// identical category:LEAD_REVENUE with no way to distinguish them after
+// the fact; see scripts/report-legacy-lead-revenue-events.js for how
+// those are classified instead). SALE is the only value a real write
+// path sets today, since Add Closed Sale is now the sole production-
+// crediting mechanism.
+enum RevenueSourceType {
+  SALE
+  LEAD_SOLD_LEGACY
+  LEAD_PRODUCT_QUOTE_LEGACY
+}
+
 enum CostCategory {
   VENDOR_LEAD_COST
   TELEMARKETER_COST
@@ -848,6 +861,7 @@ model Lead {
   calls         Call[]
   activities    LeadActivity[]
   productQuotes LeadProductQuote[]
+  sales         Sale[]
 
   @@unique([vendorId, externalLeadId])
   @@index([agencyId])
@@ -952,6 +966,13 @@ model HistoricalRecord {
   premiumCents Int?
   outcome      String?
 
+  // Null = not yet recovered/classified — never silently defaulted to 1.
+  // Populated at import time when the source file has a recognized items
+  // column (see historicalDataImport.js's HEADER_SYNONYMS), or via the
+  // separate, reviewable backfill script for already-imported rows.
+  items       Int?
+  itemsSource String? // 'explicit' | null
+
   sourceSystem String
   // The full parsed row, beyond the structured fields above — fuel for
   // future pattern-learning/Ed use that doesn't fit a fixed column yet.
@@ -1000,13 +1021,14 @@ model LeadProductQuote {
 
 // A manually-entered closed sale with NO originating Lead in Evenflow —
 // "Add Closed Sale." A Lead-linked sale is NOT recorded here; it stays
-// the Lead's own existing disposition-to-SOLD flow (Lead.salePremiumCents/
-// saleProduct + the richer salePolicyTypeDetail/policyNumber/etc. fields
-// added alongside this model), since that's already the one real
-// revenue/cross-sell/audit pipeline for a sale with a Lead behind it —
-// recording a second Sale row for the same event would double the credit
-// the user explicitly warned against. This model exists only for the real
-// gap: a policy that was never a Lead in this app at all.
+// Lead disposition-to-SOLD and the per-product SOLD path (leadId optional,
+// set when this Sale originated from a real Lead's disposition nudge —
+// see routes/leads.js). Neither Lead path posts revenue on its own
+// anymore: Lead.status reaching SOLD is a queue/pipeline disposition
+// only, and this Sale row (counted exactly once, checked for an existing
+// non-voided Sale against the same leadId before creating a second one)
+// is the one real production/revenue entry, whether or not a Lead exists
+// behind it.
 //
 // Feeds Billboard/Financials/Running Report/product breakdowns the exact
 // same way HistoricalRecord already does (see lib/manualSaleAggregates.js)
@@ -1019,6 +1041,14 @@ model Sale {
   agency         Agency   @relation(fields: [agencyId], references: [id])
   customerId     String
   customer       Customer @relation(fields: [customerId], references: [id])
+  // Optional provenance link back to the originating Lead — set only when
+  // this Sale was created via the post-disposition "log as Closed Sale"
+  // nudge, never required (a fully standalone sale has no Lead at all).
+  // Not unique: a lead could in principle generate more than one Sale line
+  // (e.g. a correction), but POST /sales/check-duplicate flags an existing
+  // non-voided Sale against the same leadId before a second one is created.
+  leadId         String?
+  lead           Lead?    @relation(fields: [leadId], references: [id])
   firstName      String
   lastName       String
   businessName   String?
@@ -1084,6 +1114,7 @@ model Sale {
   @@index([agencyId, saleDate])
   @@index([assignedToId])
   @@index([customerId])
+  @@index([leadId])
 }
 
 model LeadEvent {
@@ -1490,6 +1521,7 @@ model RevenueEvent {
   transferId  String?
   transfer    Transfer?       @relation(fields: [transferId], references: [id])
   category    RevenueCategory
+  sourceType  RevenueSourceType?
   amountCents Int
   currency    String          @default("USD")
   occurredAt  DateTime        @default(now())

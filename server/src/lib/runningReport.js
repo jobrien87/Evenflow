@@ -56,16 +56,13 @@ async function computeGoalActual(goal) {
 
   switch (metric) {
     case 'sales': {
-      const live = await prisma.leadEvent.count({
-        where: { type: 'lead.disposition', toStatus: 'SOLD', createdAt: { gte: periodStart, lte: periodEnd }, lead: leadScope },
-      });
-      // Historical Data (Back Catalog) and Add Closed Sale (standalone)
-      // rows count toward sold-count goals too — never toward response-
-      // speed/pipeline-stage metrics (quotes, contacts), since those rows
-      // never had those real touchpoints tracked.
+      // A Lead reaching SOLD is a queue/pipeline disposition only and is
+      // never counted toward a sales goal — the real production entry is
+      // Historical Data (Back Catalog) or Add Closed Sale (standalone),
+      // same production-counting rule as Billboard/financials.js.
       const historical = await countHistoricalSold({ agencyId, from: periodStart, to: periodEnd, assignedToId: userId || undefined });
       const manual = await countSales({ agencyId, from: periodStart, to: periodEnd, assignedToId: userId || undefined });
-      return live + historical + manual;
+      return historical + manual;
     }
     case 'quotes':
       return prisma.leadEvent.count({
@@ -80,17 +77,12 @@ async function computeGoalActual(goal) {
         where: { agencyId, ...(userId ? { uploadedById: userId } : {}), createdAt: { gte: periodStart, lte: periodEnd } },
       });
     case 'premium_cents': {
-      const soldEvents = await prisma.leadEvent.findMany({
-        where: { type: 'lead.disposition', toStatus: 'SOLD', createdAt: { gte: periodStart, lte: periodEnd }, lead: leadScope },
-        select: { leadId: true },
-      });
-      const leads = soldEvents.length
-        ? await prisma.lead.findMany({ where: { id: { in: soldEvents.map((e) => e.leadId) } }, select: { salePremiumCents: true } })
-        : [];
-      const livePremium = leads.reduce((sum, l) => sum + (l.salePremiumCents || 0), 0);
+      // Same rule as 'sales' above — a Lead reaching SOLD posts no revenue
+      // and contributes nothing here; the real premium total is Historical
+      // Data + Add Closed Sale.
       const historicalPremium = await sumHistoricalPremium({ agencyId, from: periodStart, to: periodEnd, assignedToId: userId || undefined });
       const manualPremium = await sumSalePremium({ agencyId, from: periodStart, to: periodEnd, assignedToId: userId || undefined });
-      return livePremium + historicalPremium + manualPremium;
+      return historicalPremium + manualPremium;
     }
     case 'cross_sells':
     case 'winbacks':

@@ -1,15 +1,16 @@
-// The Billboard — a real leaderboard of SOLD leads by producer and by
+// The Billboard — a real leaderboard of closed sales by producer and by
 // product line, plus a real time-series trend line, for an arbitrary
-// granularity (day/week/month/year). Reuses the exact same "SOLD lead +
-// its entered salePremiumCents" unit financials.js's /summary and
-// /by-agent already treat as a real sale — never the separate
-// LeadProductQuote per-product tracker, so there's one definition of "a
-// sale" across the whole app, not two.
+// granularity (day/week/month/year). A Lead reaching SOLD status is a
+// queue/pipeline disposition only and is never read here for production —
+// the one real sale unit is a Sale row (Add Closed Sale) or a historical
+// import record, reshaped identically via manualSaleAggregates.js/
+// historicalAggregates.js and merged into the one aggregation pass below.
 
 const { prisma } = require('./db');
 const { PRODUCT_LABELS } = require('./products');
 const { historicalLeadLikeRows } = require('./historicalAggregates');
 const { saleLeadLikeRows } = require('./manualSaleAggregates');
+const { eligibleProducersWhere } = require('./eligibleProducersQuery');
 const {
   PERIODS: BILLBOARD_PERIODS,
   mostRecentCompletedWorkWeek,
@@ -90,57 +91,56 @@ function buildSeries(soldLeads, granularity, from, to) {
   return Array.from(buckets.values());
 }
 
-// Real-Lead query shared by both computeBillboard (legacy rolling range)
-// and computeBillboardPeriod (new fixed-calendar periods) — a SOLD lead
-// with null/zero salePremiumCents must never count as sold production,
-// so the premium floor lives here, once, protecting both callers.
-function soldLeadsQuery(agencyId, from, to) {
-  return prisma.lead.findMany({
-    where: { agencyId, status: 'SOLD', salePremiumCents: { gt: 0 }, updatedAt: { gte: from, lte: to } },
-    select: {
-      updatedAt: true,
-      salePremiumCents: true,
-      saleProduct: true,
-      assignedToId: true,
-      assignedTo: { select: { id: true, firstName: true, lastName: true } },
-      vendorId: true,
-      vendor: { select: { id: true, name: true } },
-      zip: true,
-    },
-  });
-}
-
 // The real producer/product/vendor/zip grouping pass — pure, given an
 // already-fetched soldLeads array and a producer roster to zero-fill.
 // Shared by both computeBillboard and computeBillboardPeriod so this
 // logic (and its zero-premium protection, applied upstream in
-// soldLeadsQuery/historicalAggregates/manualSaleAggregates) is written
-// exactly once.
+// historicalAggregates.js/manualSaleAggregates.js) is written exactly
+// once. soldCount is a policy/row count; itemCount (sum of Sale.items/
+// HistoricalRecord.items) and unknownItemsCount (rows with no recoverable
+// items figure) are tracked as distinct numbers — a policy with 3 items
+// shows 3 items and its premium once, never conflated with row count.
 function aggregateSoldRows(soldLeads, producers) {
   const byProducerMap = new Map();
   for (const p of producers) {
-    byProducerMap.set(p.id, { userId: p.id, firstName: p.firstName, lastName: p.lastName, soldCount: 0, premiumCents: 0 });
+    byProducerMap.set(p.id, { userId: p.id, firstName: p.firstName, lastName: p.lastName, soldCount: 0, itemCount: 0, unknownItemsCount: 0, premiumCents: 0 });
   }
   const byProductMap = new Map();
   const byVendorMap = new Map();
   const byZipMap = new Map();
+
+  function itemContribution(lead) {
+    return lead.items === null || lead.items === undefined ? 0 : lead.items;
+  }
+  function isUnknownItems(lead) {
+    return lead.items === null || lead.items === undefined ? 1 : 0;
+  }
+
   for (const lead of soldLeads) {
     const premium = lead.salePremiumCents || 0;
+    const items = itemContribution(lead);
+    const unknownItems = isUnknownItems(lead);
     if (lead.assignedToId) {
       const row = byProducerMap.get(lead.assignedToId) || {
         userId: lead.assignedToId,
         firstName: lead.assignedTo?.firstName || '',
         lastName: lead.assignedTo?.lastName || '',
         soldCount: 0,
+        itemCount: 0,
+        unknownItemsCount: 0,
         premiumCents: 0,
       };
       row.soldCount += 1;
+      row.itemCount += items;
+      row.unknownItemsCount += unknownItems;
       row.premiumCents += premium;
       byProducerMap.set(lead.assignedToId, row);
     }
     const product = lead.saleProduct || 'Unspecified';
-    const prow = byProductMap.get(product) || { product, label: PRODUCT_LABELS[product] || product, soldCount: 0, premiumCents: 0 };
+    const prow = byProductMap.get(product) || { product, label: PRODUCT_LABELS[product] || product, soldCount: 0, itemCount: 0, unknownItemsCount: 0, premiumCents: 0 };
     prow.soldCount += 1;
+    prow.itemCount += items;
+    prow.unknownItemsCount += unknownItems;
     prow.premiumCents += premium;
     byProductMap.set(product, prow);
 
@@ -152,9 +152,13 @@ function aggregateSoldRows(soldLeads, producers) {
       vendorId: lead.vendorId || null,
       vendorName: lead.vendor?.name || 'Direct / No Vendor',
       soldCount: 0,
+      itemCount: 0,
+      unknownItemsCount: 0,
       premiumCents: 0,
     };
     vrow.soldCount += 1;
+    vrow.itemCount += items;
+    vrow.unknownItemsCount += unknownItems;
     vrow.premiumCents += premium;
     byVendorMap.set(vendorKey, vrow);
 
@@ -162,8 +166,10 @@ function aggregateSoldRows(soldLeads, producers) {
     // sale from any other source buckets under an honest "Unknown" row
     // rather than being dropped or fabricated.
     const zipKey = lead.zip || 'Unknown';
-    const zrow = byZipMap.get(zipKey) || { zip: zipKey, soldCount: 0, premiumCents: 0 };
+    const zrow = byZipMap.get(zipKey) || { zip: zipKey, soldCount: 0, itemCount: 0, unknownItemsCount: 0, premiumCents: 0 };
     zrow.soldCount += 1;
+    zrow.itemCount += items;
+    zrow.unknownItemsCount += unknownItems;
     zrow.premiumCents += premium;
     byZipMap.set(zipKey, zrow);
   }
@@ -178,6 +184,8 @@ function aggregateSoldRows(soldLeads, producers) {
   return {
     totals: {
       soldCount: soldLeads.length,
+      itemCount: soldLeads.reduce((sum, l) => sum + itemContribution(l), 0),
+      unknownItemsCount: soldLeads.reduce((sum, l) => sum + isUnknownItems(l), 0),
       premiumCents: soldLeads.reduce((sum, l) => sum + (l.salePremiumCents || 0), 0),
     },
     byProducer,
@@ -187,29 +195,29 @@ function aggregateSoldRows(soldLeads, producers) {
   };
 }
 
-// Same real active-producer roster query financials.js's /by-agent
-// already uses — every active producer must appear on the leaderboard
-// even with zero sales in range, not just whoever happened to sell
-// something.
+// Same real active-producer-and-manager roster query financials.js's
+// /by-agent already uses — every active producer or selling manager must
+// appear on the leaderboard even with zero sales in range, not just
+// whoever happened to sell something.
 function activeProducersQuery(agencyId) {
-  return prisma.user.findMany({ where: { agencyId, role: 'PRODUCER', status: 'ACTIVE' }, select: { id: true, firstName: true, lastName: true } });
+  return prisma.user.findMany({ where: eligibleProducersWhere(agencyId), select: { id: true, firstName: true, lastName: true } });
 }
 
 async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
   const g = GRANULARITIES.includes(granularity) ? granularity : 'month';
   const range = from && to ? { from: new Date(from), to: new Date(to) } : defaultRange(g);
 
-  const [realSoldLeads, historicalRows, manualSaleRows, producers] = await Promise.all([
-    soldLeadsQuery(agencyId, range.from, range.to),
-    // Historical Data (Back Catalog) rows, shaped identically to the real
-    // Lead rows above — concatenated in so every grouping/series below
-    // reuses this one aggregation pass rather than a second copy of it.
+  const [historicalRows, manualSaleRows, producers] = await Promise.all([
+    // Historical Data (Back Catalog) rows — concatenated in so every
+    // grouping/series below reuses this one aggregation pass rather than
+    // a second copy of it.
     historicalLeadLikeRows({ agencyId, from: range.from, to: range.to }),
-    // Add Closed Sale (standalone, no Lead) rows — same reshape pattern.
+    // Add Closed Sale rows — the one real production entry (standalone or
+    // linked back to a Lead via Sale.leadId) — same reshape pattern.
     saleLeadLikeRows({ agencyId, from: range.from, to: range.to }),
     activeProducersQuery(agencyId),
   ]);
-  const soldLeads = [...realSoldLeads, ...historicalRows, ...manualSaleRows];
+  const soldLeads = [...historicalRows, ...manualSaleRows];
   const aggregated = aggregateSoldRows(soldLeads, producers);
   const series = buildSeries(soldLeads, g, range.from, range.to);
 
@@ -229,27 +237,46 @@ async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
 // {key, label, from, to} windows (the Week view's 5 daily buckets, the
 // Year view's 12 month buckets, or All Years' N year buckets) — distinct
 // from buildSeries, which only ever walks fixed-size granularity steps.
-function bucketBySpans(soldLeads, spans) {
-  return spans.map((span) => {
+// Every row bucketBySpans receives (historicalLeadLikeRows/saleLeadLikeRows
+// — computeBillboardPeriod never reads live Lead rows) has `updatedAt`
+// stored as UTC-midnight-of-calendar-date, not a real instant. Comparing
+// that raw value directly against span.from/to (real Eastern-zoned
+// instants, e.g. Eastern Wed 00:00 = 04:00Z) misreads which day a row
+// belongs to — the same root cause the aggregate WHERE clauses already
+// fix via toCalendarUtcMidnight, applied here too so the series and the
+// totals never disagree about which bucket a row falls in.
+function bucketBySpans(soldLeads, spans, timeZone) {
+  function calendarUtcMidnight(instant) {
+    const { year, month, day } = zonedYearMonthDay(instant, timeZone);
+    return Date.UTC(year, month - 1, day);
+  }
+  const spanBounds = spans.map((span) => ({
+    span,
+    from: calendarUtcMidnight(span.from),
+    to: calendarUtcMidnight(span.to),
+  }));
+  return spanBounds.map(({ span, from, to }) => {
     let soldCount = 0;
+    let itemCount = 0;
     let premiumCents = 0;
     for (const lead of soldLeads) {
       const t = new Date(lead.updatedAt).getTime();
-      if (t >= span.from.getTime() && t < span.to.getTime()) {
+      if (t >= from && t < to) {
         soldCount += 1;
+        itemCount += lead.items === null || lead.items === undefined ? 0 : lead.items;
         premiumCents += lead.salePremiumCents || 0;
       }
     }
-    return { date: span.key, label: span.label, soldCount, premiumCents };
+    return { date: span.key, label: span.label, soldCount, itemCount, premiumCents };
   });
 }
 
 // The new Eastern-time fixed-calendar-period entry point — Week/Month/
 // Year/All Years, as distinct from computeBillboard's existing rolling
 // day/week/month/year granularities, which stay completely unchanged
-// above. Shares soldLeadsQuery/aggregateSoldRows/activeProducersQuery
-// with computeBillboard, so the zero-premium protection and grouping
-// logic are identical between the two entry points.
+// above. Shares aggregateSoldRows/activeProducersQuery with
+// computeBillboard, so the zero-premium protection and grouping logic are
+// identical between the two entry points.
 async function computeBillboardPeriod({ agencyId, period, month, year, now = new Date() }) {
   const p = BILLBOARD_PERIODS.includes(period) ? period : 'month';
 
@@ -301,21 +328,20 @@ async function computeBillboardPeriod({ agencyId, period, month, year, now = new
     extra.yearBuckets = yearBounds;
   }
 
-  const [realSoldLeads, historicalRows, manualSaleRows, producers] = await Promise.all([
-    soldLeadsQuery(agencyId, range.from, range.to),
-    historicalLeadLikeRows({ agencyId, from: range.from, to: range.to }),
-    saleLeadLikeRows({ agencyId, from: range.from, to: range.to }),
+  const [historicalRows, manualSaleRows, producers] = await Promise.all([
+    historicalLeadLikeRows({ agencyId, from: range.from, to: range.to, timeZone }),
+    saleLeadLikeRows({ agencyId, from: range.from, to: range.to, timeZone }),
     activeProducersQuery(agencyId),
   ]);
-  const soldLeads = [...realSoldLeads, ...historicalRows, ...manualSaleRows];
+  const soldLeads = [...historicalRows, ...manualSaleRows];
   const aggregated = aggregateSoldRows(soldLeads, producers);
 
   if (p === 'week') {
-    series = bucketBySpans(soldLeads, extra.weekBuckets);
+    series = bucketBySpans(soldLeads, extra.weekBuckets, timeZone);
   } else if (p === 'year') {
-    series = bucketBySpans(soldLeads, extra.monthBuckets);
+    series = bucketBySpans(soldLeads, extra.monthBuckets, timeZone);
   } else if (p === 'all_years') {
-    series = bucketBySpans(soldLeads, extra.yearBuckets);
+    series = bucketBySpans(soldLeads, extra.yearBuckets, timeZone);
   }
   // Month period intentionally has no series — only a single total.
 
