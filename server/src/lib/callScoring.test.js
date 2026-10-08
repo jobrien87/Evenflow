@@ -51,6 +51,7 @@ test('computeDrillScore skips a category with no matching dimension data present
 const suffix = Date.now();
 let agencyId;
 let producerId;
+let trainingCourseId;
 let callIds = [];
 
 before(async () => {
@@ -61,6 +62,21 @@ before(async () => {
     data: { email: `producer-cs-${suffix}@test.local`, firstName: 'Test', lastName: 'Producer', role: 'PRODUCER', status: 'ACTIVE', agencyId },
   });
   producerId = producer.id;
+
+  // computeCoachingBreakdown links a coaching opportunity to a real
+  // TrainingCourse via an exact title match against the category name
+  // (callScoring.js's findFirst({ where: { title: c.category } })). That
+  // row is normally created once by scripts/import-training-drills.js —
+  // never by this test — so this test must create its own, self-contained
+  // like drillRetrieval.test.js, rather than silently depend on that
+  // import having already run against whatever database is running these
+  // tests. Tracked by id and deleted by that id only (never by title),
+  // since TrainingCourse.title has no unique constraint and a real
+  // pre-existing "Objection Handling" course may already exist locally.
+  const trainingCourse = await prisma.trainingCourse.create({
+    data: { title: 'Objection Handling', isActive: true },
+  });
+  trainingCourseId = trainingCourse.id;
 
   // Two analyzed calls, both weak on Objection Handling, strong elsewhere —
   // the coaching breakdown should surface Objection Handling as the real
@@ -93,6 +109,7 @@ after(async () => {
   await prisma.call.deleteMany({ where: { id: { in: callIds } } });
   await prisma.user.delete({ where: { id: producerId } });
   await prisma.agency.delete({ where: { id: agencyId } });
+  await prisma.trainingCourse.delete({ where: { id: trainingCourseId } });
   await prisma.$disconnect();
 });
 
