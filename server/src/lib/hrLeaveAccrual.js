@@ -64,13 +64,25 @@ async function accruedSoFarThisYear(tx, { employeeProfileId, leaveTypeId, year }
 // Trims any balance above the policy's carryoverCapMinutes once per
 // (assignment, calendar year) — the only place a balance is ever reduced
 // by something other than the employee's own approved USE. Posts an
-// EXPIRATION entry for exactly the excess, idempotently.
+// EXPIRATION entry for exactly the excess, idempotently. Only a genuine
+// year-boundary rollover does this: if nothing was ever posted before
+// the current calendar year (a brand new assignment's first year), there
+// is no prior-year balance to carry over FROM, so this is a deliberate
+// no-op — otherwise a policy's very first FRONT_LOADED grant would be
+// immediately trimmed down to the carryover cap on day one.
 async function postCarryoverExpirationIfNeeded(tx, { assignment, policy, now }) {
   if (policy.carryoverCapMinutes == null) return;
   const year = now.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(year, 0, 1));
   const idempotencyKey = `${assignment.id}:carryover-expiration:${year}`;
   const already = await tx.hrLeaveLedgerEntry.findUnique({ where: { idempotencyKey } });
   if (already) return;
+
+  const priorYearEntry = await tx.hrLeaveLedgerEntry.findFirst({
+    where: { employeeProfileId: assignment.employeeProfileId, leaveTypeId: policy.leaveTypeId, createdAt: { lt: yearStart } },
+    select: { id: true },
+  });
+  if (!priorYearEntry) return;
 
   const balance = await getBalanceMinutes(tx, { employeeProfileId: assignment.employeeProfileId, leaveTypeId: policy.leaveTypeId });
   const excess = balance - policy.carryoverCapMinutes;
