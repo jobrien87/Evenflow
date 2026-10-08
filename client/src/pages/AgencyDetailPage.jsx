@@ -39,6 +39,7 @@ const ENTITLEMENT_FIELDS = [
   { key: 'coachingEnabled', label: 'Sales Studio (unlocked)' },
   { key: 'salesStudioGateEnabled', label: 'Sales Studio gate enforced (off = always open)' },
   { key: 'breakRoomEnabled', label: 'Break Room Arcade' },
+  { key: 'hrEnabled', label: 'Backstage HR' },
 ];
 
 export default function AgencyDetailPage() {

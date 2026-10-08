@@ -577,6 +577,9 @@ const entitlementsSchema = z.object({
   // Break Room master on/off — reuses requireModuleEnabled('breakRoomEnabled')
   // directly, zero new gating code needed.
   breakRoomEnabled: z.boolean().optional(),
+  // Backstage HR master on/off — reuses requireModuleEnabled('hrEnabled')
+  // directly (server/src/routes/hr/index.js), zero new gating code needed.
+  hrEnabled: z.boolean().optional(),
 });
 
 // A direct Platform-Owner override of module access, independent of
@@ -597,7 +600,7 @@ router.patch('/:agencyId/entitlements', requireRole('PLATFORM_OWNER'), async (re
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role, agencyId: before.id,
       action: 'agency.entitlements_overridden', entityType: 'Agency', entityId: before.id,
-      before: { crmEnabled: before.crmEnabled, transfersEnabled: before.transfersEnabled, coachingEnabled: before.coachingEnabled, salesStudioGateEnabled: before.salesStudioGateEnabled, breakRoomEnabled: before.breakRoomEnabled },
+      before: { crmEnabled: before.crmEnabled, transfersEnabled: before.transfersEnabled, coachingEnabled: before.coachingEnabled, salesStudioGateEnabled: before.salesStudioGateEnabled, breakRoomEnabled: before.breakRoomEnabled, hrEnabled: before.hrEnabled },
       after: parsed.data, correlationId: req.correlationId,
     });
 

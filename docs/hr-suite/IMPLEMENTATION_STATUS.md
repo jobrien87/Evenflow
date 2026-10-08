@@ -16,9 +16,9 @@ deployment has occurred or is authorized by this work.
 
 - [x] **Phase 0 — Discovery**: existing-system audit, branch, baseline,
   this tracker. See `docs/hr-suite/EXISTING_SYSTEM_AUDIT.md`.
-- [ ] **Phase 1 — Foundation, Time & Attendance, Scheduling, Leave**
-  (Parts A/B/C all built, tested, and committed — only Phase 1's own
-  final combined verification pass remains; see below)
+- [x] **Phase 1 — Foundation, Time & Attendance, Scheduling, Leave**
+  (Parts A/B/C built, tested, committed; final combined verification
+  pass complete — see "Phase 1 final verification pass" below)
 - [ ] **Payroll** (directive's Phase 4) — not started. Blocked on a
   payroll provider sandbox/credentials from the user.
 - [ ] **Employee lifecycle** (directive's Phase 5) — not started. Blocked
@@ -409,32 +409,111 @@ of recording what was caught, not just what shipped clean):
   pre-existing overlap. Flagged here for a future phase to actually
   decide whether/how to consolidate them.
 
+## Phase 1 final verification pass — COMPLETE
+
+Run against this exact commit, real local Postgres, real HTTP (no
+mocking), real browser (Playwright/Chromium). Two real, previously-
+undiscovered gaps were found and fixed as part of this pass — both
+fixed and verified before the pass was considered clean:
+
+1. **`Agency.hrEnabled` was never exposed anywhere** — `requireModuleEnabled
+   ('hrEnabled')` gates every HR route (by design, same pattern as
+   `crmEnabled`/`transfersEnabled`/etc.), but no route or UI control ever
+   let anyone actually turn it on for a real agency. The entire three-part
+   HR suite was unreachable by any real agency until this was closed.
+   Fixed additively, following the exact pattern the five sibling
+   entitlement flags already use: `hrEnabled` added to
+   `entitlementsSchema`/the audit `before` snapshot in `PATCH
+   /:agencyId/entitlements` (`server/src/routes/agencies.js`), and to
+   `ENTITLEMENT_FIELDS` in `client/src/pages/AgencyDetailPage.jsx`
+   (Platform Owner's per-agency "MODULE ACCESS" checkbox list — fully
+   generic rendering, no new code needed beyond the one array entry).
+2. **A Manager granted `HR_AUDITOR` (read-only) couldn't load the
+   dashboard at all** — `GET /hr/role-grants` required `HR_ADMIN`
+   specifically, so the one parallel request for it inside
+   `HrDashboardPage.jsx`'s `Promise.all` 403'd and crashed the entire
+   page load for a legitimate read-only viewer. Fixed by broadening that
+   route to `requireHrRole('HR_ADMIN', 'HR_AUDITOR')`, matching every
+   other HR route's own read-access convention. (This and the related
+   client-side read/write-tier gating — `GET /hr/overview`'s new
+   `access` block, write controls hidden for a non-`HR_ADMIN` viewer,
+   grant/revoke restricted to real Owners/Platform Owners — were fixed
+   earlier in this same session and are included in this pass's own
+   re-verification, not newly found here.)
+
+**Automated**: `npm test` 391/391 passing (373 baseline + 18 Part C
+cases, re-confirmed fresh on this commit after the two fixes above);
+`npm run build` (client) clean.
+
+**Real end-to-end HTTP walkthrough** (two isolated test agencies, a
+Platform Owner, an Agency Owner, a Manager, and a Producer, all real
+accounts against real local Postgres):
+- Confirmed `GET /hr/overview` 403s before `hrEnabled` is turned on, and
+  the real `PATCH /agencies/:id/entitlements` call turns it on and
+  persists (re-read after the call, not just echoed).
+- Confirmed the HR_AUDITOR tier live (not just via the earlier unit
+  test): no access before any grant, read access immediately after a
+  real `POST /hr/role-grants` call, the `access` block correctly reports
+  `hrRole: 'HR_AUDITOR'`/`canWrite: false`, a write 403s, and an
+  HR_AUDITOR cannot mint further grants.
+- Real time-clock cycle (clock-in → lunch-start/end → break-start/end →
+  clock-out) through the untouched `timeClock.js` routes, then Part B's
+  `POST /hr/timesheets/compute` derived a real `HrTimesheet` whose
+  `regularMinutes` was hand-checked against the real elapsed clock
+  window (never fabricated); submit → approve round-tripped correctly;
+  `GET /timeclock/status` confirmed unchanged throughout.
+- Real PTO cycle: a `FRONT_LOADED` leave type/policy/assignment, the
+  real `postAccrualsForOpenPolicies()` accrual function (the same code
+  the in-process interval calls) posted exactly the configured grant: a
+  request under the balance succeeded, one exceeding it was rejected
+  (400), approval posted exactly one ledger movement and the balance
+  decreased by exactly the approved amount.
+- A protected (`isProtected: true`) leave type was never auto-denied by
+  the balance check even when requesting far more than the real balance,
+  and the team calendar correctly showed its real category to an
+  HR_ADMIN viewer (Owner) and "Approved time off" to a non-admin viewer
+  (Producer).
+- Cross-agency denial re-confirmed live across Part A/B/C endpoints: a
+  non-platform-owner's `?agencyId=` query override is silently ignored
+  (locked to their own agency's real, scoped data — confirmed by
+  payload inspection, not just status code), and resource-by-id lookups
+  (timesheet, leave-request approve) 404 across agencies.
+
+**Real-browser Playwright pass** (separate browser contexts per
+simulated user, zero uncaught `pageerror`s and zero unexpected console
+errors across all four):
+- Platform Owner: the new "Backstage HR" entitlement checkbox on
+  `AgencyDetailPage` renders, and a full on → off → on cycle through
+  real clicks persists correctly across page reloads (not just local
+  React state).
+- Agency Owner: the `BACKSTAGE HR` quick-action button renders above
+  the Agency Flow Score card on Main Stage (per this session's earlier
+  placement request), navigates to `/agency/hr`, and all 9 tabs
+  (Overview/Employees/Departments/Attendance/Timesheets/Schedule/Leave
+  Policies/Leave Calendar/Settings) render with no thrown error; the
+  real HR Role Grants write form is visible (full access).
+- Manager with an `HR_AUDITOR` grant: a `READ-ONLY` badge replaces
+  write controls on the Employees tab, the `+ ADD EMPLOYEE PROFILE`
+  button is entirely absent, and the Settings tab's grant form is
+  entirely absent (`canManageGrants: false`).
+- Producer: reaches `/producer/my-hr` (My HR), with the My Time Off
+  section present and rendering.
+
+All seeded test fixtures (2 agencies, 5 users, their sessions/grants/
+timesheets/leave data) were deleted after the pass completed.
+
 ## Next required action
 
-Parts A, B, and C are all complete and verified (391/391 server tests,
-clean client build, real-browser checks of all three). The next step is
-Phase 1's own final, full-suite verification pass — not more building:
-re-run `npm test`/`npm run build` one more time fresh on this exact
-commit; do a real local time-clock walkthrough (clock in, lunch, break,
-clock out) confirming Break Room eligibility and `GET /timeclock/status`
-behave byte-for-byte unchanged, and that Part B's derived
-`HrTimesheet`/`HrTimesheetSegment` rows match by hand-calculation; do a
-real end-to-end PTO walkthrough through the actual UI (not just the API
-tests) — request leave, approve it, confirm the balance and exactly one
-`USE` entry, request more than the balance allows and confirm rejection,
-schedule a shift overlapping an approved leave request and confirm the
-warning; confirm cross-agency denial end-to-end across every Part
-A/B/C endpoint with two isolated test agencies; a combined real-browser
-Playwright pass confirming Backstage HR's full nav (Overview/Employees/
-Departments/Settings/Attendance/Timesheets/Schedule/Leave Policies/
-Leave Calendar) for Owner/Manager/Platform Owner, and My HR's full set
-(My Dashboard/My Time/My Schedule/My Time Off) for Producer/
-Telemarketer; then update both tracker docs and commit/push the final
-state to `hr-suite/phase-1-foundation`, per the plan's own Phase 0+1
-Verification section. No merge to the main development branch or
-production deployment without separate explicit authorization, per the
-directive's own Part 27 rule. Once that full pass is clean, Part B's
-`HrAttendanceException` detection job can be extended to use the now-real
-`HrShiftAssignment` data as an expected-schedule baseline (LATE_ARRIVAL/
-EARLY_DEPARTURE/NO_CALL_NO_SHOW_CANDIDATE) — a natural follow-up, not a
+Phase 1 (Parts A, B, C, and this final verification pass) is complete.
+The next real step is starting **Payroll** (directive's Phase 4) or
+**Employee lifecycle** (directive's Phase 5) — both blocked on the user
+supplying a real provider sandbox/credentials (a payroll processor, an
+e-signature vendor) before any real implementation work can begin, per
+the directive's own rule against fabricating a provider integration.
+Until one of those is supplied, there is no further Phase 1 work
+outstanding. One natural, non-blocking follow-up once a new session
+picks this back up: Part B's `HrAttendanceException` detection job can
+be extended to use the now-real `HrShiftAssignment` data as an
+expected-schedule baseline (LATE_ARRIVAL/EARLY_DEPARTURE/
+NO_CALL_NO_SHOW_CANDIDATE) — a natural follow-up, not a
 blocker for closing out Phase 1.
