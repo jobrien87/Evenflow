@@ -29,6 +29,10 @@ export const api = {
   acceptInvitation: (token, password) => request('/auth/accept-invitation', { method: 'POST', body: { token, password } }),
   forgotPassword: (email) => request('/auth/forgot-password', { method: 'POST', body: { email } }),
   resetPassword: (token, password) => request('/auth/reset-password', { method: 'POST', body: { token, password } }),
+  mfaVerifyLogin: (challengeToken, code) => request('/auth/mfa/verify', { method: 'POST', body: { challengeToken, code } }),
+  mfaEnroll: () => request('/auth/mfa/enroll', { method: 'POST' }),
+  mfaConfirm: (code) => request('/auth/mfa/confirm', { method: 'POST', body: { code } }),
+  mfaDisable: (password, code) => request('/auth/mfa/disable', { method: 'POST', body: { password, code } }),
 
   workQueue: () => request('/work-queue'),
   startMyDay: () => request('/start-my-day'),

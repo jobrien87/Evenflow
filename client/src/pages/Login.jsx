@@ -5,26 +5,47 @@ import { api } from '../lib/api';
 import { Button, Logo } from '../ui';
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, completeMfaLogin } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [mode, setMode] = useState('login'); // 'login' | 'forgot'
+  const [mode, setMode] = useState('login'); // 'login' | 'forgot' | 'mfa'
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotMessage, setForgotMessage] = useState('');
   const [forgotBusy, setForgotBusy] = useState(false);
+  const [challengeToken, setChallengeToken] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
 
   async function onSubmit(e) {
     e.preventDefault();
     setError('');
     setBusy(true);
     try {
-      await login(email, password);
+      const result = await login(email, password);
+      if (result.mfaRequired) {
+        setChallengeToken(result.challengeToken);
+        setMode('mfa');
+        return;
+      }
       navigate('/');
     } catch (err) {
       setError(err.data?.message || 'Incorrect email or password.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onMfaSubmit(e) {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    try {
+      await completeMfaLogin(challengeToken, mfaCode);
+      navigate('/');
+    } catch (err) {
+      setError(err.data?.message || 'Invalid or expired code.');
     } finally {
       setBusy(false);
     }
@@ -51,7 +72,7 @@ export default function Login() {
         <Logo variant="hero" size="lg" tagline="THE SUPER INTELLIGENCE POWERED ECOSYSTEM FOR INSURANCE AGENCIES" />
       </div>
       <div style={styles.card}>
-        {mode === 'login' ? (
+        {mode === 'login' && (
           <form onSubmit={onSubmit}>
             <label style={styles.label}>Email</label>
             <input style={styles.input} type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
@@ -65,7 +86,8 @@ export default function Login() {
               Forgot password?
             </button>
           </form>
-        ) : (
+        )}
+        {mode === 'forgot' && (
           <form onSubmit={onForgotSubmit}>
             <label style={styles.label}>Email</label>
             <input style={styles.input} type="email" value={forgotEmail} onChange={(e) => setForgotEmail(e.target.value)} required />
@@ -74,6 +96,33 @@ export default function Login() {
               {forgotBusy ? 'Sending…' : 'Send Reset Link'}
             </Button>
             <button type="button" style={styles.linkButton} onClick={() => { setMode('login'); setForgotMessage(''); }}>
+              Back to sign in
+            </button>
+          </form>
+        )}
+        {mode === 'mfa' && (
+          <form onSubmit={onMfaSubmit}>
+            <label style={styles.label}>Verification code</label>
+            <div style={styles.hint}>Enter the 6-digit code from your authenticator app, or a backup code.</div>
+            <input
+              style={styles.input}
+              type="text"
+              inputMode="numeric"
+              autoFocus
+              autoComplete="one-time-code"
+              value={mfaCode}
+              onChange={(e) => setMfaCode(e.target.value)}
+              required
+            />
+            {error && <div style={styles.error}>{error}</div>}
+            <Button style={{ width: '100%', marginTop: 24, textTransform: 'uppercase', letterSpacing: 0.5 }} disabled={busy} type="submit">
+              {busy ? 'Verifying…' : 'Verify'}
+            </Button>
+            <button
+              type="button"
+              style={styles.linkButton}
+              onClick={() => { setMode('login'); setMfaCode(''); setChallengeToken(''); setError(''); }}
+            >
               Back to sign in
             </button>
           </form>
@@ -104,5 +153,6 @@ const styles = {
   input: { width: '100%', padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 14 },
   error: { color: 'var(--danger)', fontSize: 13, marginTop: 12 },
   message: { color: 'var(--accent)', fontSize: 13, marginTop: 12 },
+  hint: { color: 'var(--text-secondary)', fontSize: 12, marginBottom: 10 },
   linkButton: { width: '100%', marginTop: 14, background: 'none', border: 'none', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer', textAlign: 'center' },
 };

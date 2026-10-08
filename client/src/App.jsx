@@ -41,6 +41,7 @@ import BillingPanel from './pages/BillingPanel';
 
 import TelemarketerDashboard from './pages/TelemarketerDashboard';
 import PersonalizePage from './pages/PersonalizePage';
+import SecurityPage from './pages/SecurityPage';
 import BreakRoomPanel from './pages/BreakRoomPanel';
 import BreakRoomPlayPage from './pages/BreakRoomPlayPage';
 import BreakRoomAdminPanel from './pages/BreakRoomAdminPanel';
@@ -81,6 +82,7 @@ export default function App() {
       <Route element={<RequireAuth />}>
         <Route index element={<RoleRedirect />} />
         <Route path="personalize" element={<PersonalizePage />} />
+        <Route path="security" element={<SecurityPage />} />
 
         <Route element={<RoleGate allow={['PRODUCER']} />}>
           <Route path="producer" element={<ProducerDashboard />} />

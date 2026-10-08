@@ -66,6 +66,15 @@ export default function MobileDrawer({ open, onClose, onTakeTour }) {
             variant="secondary"
             size="sm"
             style={{ width: '100%' }}
+            onClick={() => { onClose(); navigate('/security'); }}
+          >
+            <Icon name="lock" size={14} style={{ marginRight: 6 }} />
+            Security
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            style={{ width: '100%' }}
             onClick={async () => {
               await logout();
               navigate('/login');

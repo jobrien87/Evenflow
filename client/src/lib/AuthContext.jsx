@@ -15,8 +15,22 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false));
   }, []);
 
+  // A password-verified login for an MFA-enrolled account doesn't set a
+  // user or session yet — it returns a challengeToken instead, which the
+  // caller must pass to completeMfaLogin with a real code before any
+  // session exists. Login.jsx is the one caller; it inspects the shape
+  // of what's returned to decide whether to show the second-factor step.
   async function login(email, password) {
     const data = await api.login(email, password);
+    if (data.mfaRequired) {
+      return { mfaRequired: true, challengeToken: data.challengeToken };
+    }
+    setUser(data.user);
+    return { user: data.user };
+  }
+
+  async function completeMfaLogin(challengeToken, code) {
+    const data = await api.mfaVerifyLogin(challengeToken, code);
     setUser(data.user);
     return data.user;
   }

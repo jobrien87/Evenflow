@@ -329,6 +329,20 @@ model User {
   // (confetti) has been shown — mirrors tourCompletedAt's exact pattern,
   // just for a one-time celebratory moment instead of the product tour.
   firstLoginCelebratedAt    DateTime?
+  // TOTP multi-factor authentication (SOC 2 Tier 1 compliance). Available
+  // to every role, but specifically required to be usable by the two
+  // highest-privilege roles, PLATFORM_OWNER and AGENCY_OWNER.
+  mfaEnabled                Boolean        @default(false)
+  // Only ever set once mfaEnabled is true — the confirmed, active secret.
+  mfaSecret                 String?
+  // Set during enrollment before the user confirms with a real code;
+  // promoted to mfaSecret (and cleared) on a successful confirm, discarded
+  // on a fresh enroll call or left to be overwritten by the next one.
+  mfaPendingSecret          String?
+  // SHA-256 hashes of one-time recovery codes — each is removed from the
+  // array the moment it's consumed, never reused.
+  mfaBackupCodes            String[]       @default([])
+  mfaEnrolledAt             DateTime?
 
   invitations               Invitation[]              @relation("InvitationsSent")
   ownInvitation             Invitation?               @relation("InvitationForUser")
@@ -349,6 +363,7 @@ model User {
   conversationParticipants  ConversationParticipant[]
   messagesAuthored          Message[]
   passwordResetTokens       PasswordResetToken[]
+  mfaChallenges             MfaChallenge[]
   timeClockEntries          TimeClockEntry[]
   announcementsCreated      Announcement[]            @relation("AnnouncementCreatedBy")
   announcementsTargeted     Announcement[]            @relation("AnnouncementTargetUser")
@@ -375,6 +390,24 @@ model User {
 }
 
 model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// The short-lived second-factor step between a correct password and a real
+// session — created once password verification succeeds for a user with
+// mfaEnabled, consumed (or expires) within minutes. Mirrors
+// PasswordResetToken's exact shape/discipline (hashed token, single use,
+// short expiry) rather than a signed/stateless token, consistent with this
+// codebase's established pattern for every other short-lived credential.
+model MfaChallenge {
   id        String    @id @default(uuid())
   userId    String
   user      User      @relation(fields: [userId], references: [id])

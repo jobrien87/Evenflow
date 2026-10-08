@@ -1,8 +1,10 @@
 const express = require('express');
 const { z } = require('zod');
 const rateLimit = require('express-rate-limit');
+const QRCode = require('qrcode');
 const { prisma } = require('../lib/db');
-const { hashPassword, verifyPassword, createSession, revokeSession, revokeAllSessionsForUser, hashToken, issuePasswordResetEmail, SESSION_COOKIE } = require('../lib/auth');
+const { hashPassword, verifyPassword, createSession, revokeSession, revokeAllSessionsForUser, generateRawToken, hashToken, issuePasswordResetEmail, SESSION_COOKIE } = require('../lib/auth');
+const { generateSecret, buildOtpauthUri, verifyTotpToken, generateBackupCodes, hashBackupCode, matchBackupCode } = require('../lib/mfa');
 const { recordAudit } = require('../lib/audit');
 const { syncSeatCountForAgency } = require('../lib/seatBilling');
 
@@ -48,6 +50,22 @@ const resetPasswordLimiter = rateLimit({
   message: { success: false, error: 'RATE_LIMITED', message: 'Too many attempts. Try again later.' },
 });
 
+// Covers both halves of an MFA-protected login (the public /mfa/verify
+// step) and the authenticated enroll-confirm/disable actions — a 6-digit
+// TOTP code is a real brute-force surface even behind a login, so this
+// gets its own modest budget rather than relying on loginLimiter alone.
+const mfaLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'RATE_LIMITED', message: 'Too many attempts. Try again later.' },
+});
+
+// How long a password-verified login has to complete its second factor
+// before the challenge token expires and the user must log in again.
+const MFA_CHALLENGE_MINUTES = 5;
+
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
@@ -92,6 +110,21 @@ router.post('/login', loginLimiter, async (req, res, next) => {
     const ok = await verifyPassword(parsed.data.password, user.passwordHash);
     if (!ok) return genericFail('wrong_password');
 
+    // Password confirmed, but a second factor is still required — not a
+    // failure (never audited as one), and no session/cookie is issued
+    // until the real code lands at POST /auth/mfa/verify.
+    if (user.mfaEnabled) {
+      const rawChallengeToken = generateRawToken();
+      await prisma.mfaChallenge.create({
+        data: {
+          userId: user.id,
+          tokenHash: hashToken(rawChallengeToken),
+          expiresAt: new Date(Date.now() + MFA_CHALLENGE_MINUTES * 60 * 1000),
+        },
+      });
+      return res.json({ success: true, mfaRequired: true, challengeToken: rawChallengeToken });
+    }
+
     const { rawToken, expiresAt } = await createSession(user.id, {
       userAgent: req.headers['user-agent'],
       ipAddress: req.ip,
@@ -127,6 +160,91 @@ router.post('/login', loginLimiter, async (req, res, next) => {
   }
 });
 
+const mfaVerifySchema = z.object({
+  challengeToken: z.string().min(10),
+  code: z.string().min(6).max(20),
+});
+
+// The second half of login for an mfaEnabled user — completes the session
+// a password-only /login deliberately withheld. Accepts either a live TOTP
+// code or an unused backup code; either way this is exactly as sensitive
+// as a successful login and gets the same real session/cookie/audit
+// treatment.
+router.post('/mfa/verify', mfaLimiter, async (req, res, next) => {
+  try {
+    const parsed = mfaVerifySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+
+    const challenge = await prisma.mfaChallenge.findUnique({
+      where: { tokenHash: hashToken(parsed.data.challengeToken) },
+      include: { user: true },
+    });
+
+    const genericMfaFail = async (reason, user) => {
+      await recordAudit({
+        actorId: user?.id || null, actorRole: user?.role || null, agencyId: user?.agencyId || null,
+        action: 'auth.login_failed', entityType: 'User', entityId: user?.id || null,
+        metadata: { reason, ipAddress: req.ip, userAgent: req.headers['user-agent'] },
+        correlationId: req.correlationId,
+      });
+      return res.status(401).json({ success: false, error: 'INVALID_MFA_CODE', message: 'Invalid or expired code.' });
+    };
+
+    if (!challenge || challenge.usedAt || challenge.expiresAt < new Date()) {
+      return genericMfaFail('mfa_challenge_invalid', challenge?.user);
+    }
+    const user = challenge.user;
+    if (user.status !== 'ACTIVE' || !user.mfaEnabled) {
+      return genericMfaFail('mfa_challenge_invalid', user);
+    }
+
+    let consumedBackupHash = null;
+    let ok = await verifyTotpToken(user.mfaSecret, parsed.data.code);
+    if (!ok) {
+      consumedBackupHash = matchBackupCode(user.mfaBackupCodes, parsed.data.code);
+      ok = !!consumedBackupHash;
+    }
+    if (!ok) return genericMfaFail('mfa_invalid_code', user);
+
+    await prisma.mfaChallenge.update({ where: { id: challenge.id }, data: { usedAt: new Date() } });
+    if (consumedBackupHash) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { mfaBackupCodes: user.mfaBackupCodes.filter((h) => h !== consumedBackupHash) },
+      });
+    }
+
+    const { rawToken, expiresAt } = await createSession(user.id, {
+      userAgent: req.headers['user-agent'],
+      ipAddress: req.ip,
+    });
+    const isProd = process.env.NODE_ENV === 'production';
+    res.cookie(SESSION_COOKIE, rawToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      expires: expiresAt,
+    });
+
+    await recordAudit({
+      actorId: user.id,
+      actorRole: user.role,
+      agencyId: user.agencyId,
+      action: 'user.login',
+      entityType: 'User',
+      entityId: user.id,
+      metadata: { via: consumedBackupHash ? 'mfa_backup_code' : 'mfa_totp' },
+      correlationId: req.correlationId,
+    });
+
+    return res.json({ success: true, user: publicUser(user) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/logout', async (req, res, next) => {
   try {
     const rawToken = req.cookies ? req.cookies[SESSION_COOKIE] : null;
@@ -142,6 +260,118 @@ router.post('/logout', async (req, res, next) => {
 router.get('/me', async (req, res) => {
   if (!req.user) return res.status(401).json({ success: false, error: 'UNAUTHENTICATED' });
   return res.json({ success: true, user: publicUser(req.user) });
+});
+
+// Starts (or restarts) TOTP enrollment — generates a fresh secret and
+// stores it as "pending" (never mfaEnabled) until confirmed with a real
+// code from the authenticator app below. Safe to call again before
+// confirming: the previous pending secret is simply replaced.
+router.post('/mfa/enroll', async (req, res, next) => {
+  if (!req.user) return res.status(401).json({ success: false, error: 'UNAUTHENTICATED' });
+  try {
+    const secret = generateSecret();
+    await prisma.user.update({ where: { id: req.user.id }, data: { mfaPendingSecret: secret } });
+    const otpauthUrl = buildOtpauthUri(req.user.email, secret);
+    const qrDataUrl = await QRCode.toDataURL(otpauthUrl);
+    return res.json({ success: true, secret, otpauthUrl, qrDataUrl });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const mfaConfirmSchema = z.object({ code: z.string().min(6).max(6) });
+
+// Proves the user actually has the pending secret loaded in a real
+// authenticator app before turning MFA on — never enabled on the enroll
+// call alone. Returns the one-time plaintext backup codes; only their
+// hashes are ever persisted.
+router.post('/mfa/confirm', mfaLimiter, async (req, res, next) => {
+  if (!req.user) return res.status(401).json({ success: false, error: 'UNAUTHENTICATED' });
+  try {
+    const parsed = mfaConfirmSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+    const freshUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (!freshUser.mfaPendingSecret) {
+      return res.status(400).json({
+        success: false, error: 'NO_PENDING_ENROLLMENT',
+        message: 'Start enrollment again before confirming a code.',
+      });
+    }
+    const ok = await verifyTotpToken(freshUser.mfaPendingSecret, parsed.data.code);
+    if (!ok) {
+      return res.status(400).json({
+        success: false, error: 'INVALID_CODE',
+        message: 'That code is incorrect or expired. Try the latest code from your authenticator app.',
+      });
+    }
+
+    const backupCodes = generateBackupCodes();
+    const updated = await prisma.user.update({
+      where: { id: req.user.id },
+      data: {
+        mfaEnabled: true,
+        mfaSecret: freshUser.mfaPendingSecret,
+        mfaPendingSecret: null,
+        mfaBackupCodes: backupCodes.map(hashBackupCode),
+        mfaEnrolledAt: new Date(),
+      },
+    });
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: req.user.agencyId,
+      action: 'mfa.enabled', entityType: 'User', entityId: req.user.id,
+      correlationId: req.correlationId,
+    });
+
+    return res.json({ success: true, user: publicUser(updated), backupCodes });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const mfaDisableSchema = z.object({ password: z.string().min(1), code: z.string().min(6).max(20) });
+
+// Requires both the account password and a real second-factor code (TOTP
+// or an unused backup code) — a stolen, still-logged-in session alone is
+// never enough to turn MFA off.
+router.post('/mfa/disable', mfaLimiter, async (req, res, next) => {
+  if (!req.user) return res.status(401).json({ success: false, error: 'UNAUTHENTICATED' });
+  try {
+    const parsed = mfaDisableSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+    const freshUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (!freshUser.mfaEnabled) {
+      return res.status(400).json({ success: false, error: 'MFA_NOT_ENABLED' });
+    }
+    const passwordOk = await verifyPassword(parsed.data.password, freshUser.passwordHash);
+    if (!passwordOk) {
+      return res.status(401).json({ success: false, error: 'INVALID_CREDENTIALS', message: 'Incorrect password.' });
+    }
+    let codeOk = await verifyTotpToken(freshUser.mfaSecret, parsed.data.code);
+    if (!codeOk && matchBackupCode(freshUser.mfaBackupCodes, parsed.data.code)) codeOk = true;
+    if (!codeOk) {
+      return res.status(400).json({ success: false, error: 'INVALID_CODE', message: 'Incorrect verification code.' });
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: req.user.id },
+      data: { mfaEnabled: false, mfaSecret: null, mfaPendingSecret: null, mfaBackupCodes: [], mfaEnrolledAt: null },
+    });
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: req.user.agencyId,
+      action: 'mfa.disabled', entityType: 'User', entityId: req.user.id,
+      correlationId: req.correlationId,
+    });
+
+    return res.json({ success: true, user: publicUser(updated) });
+  } catch (err) {
+    next(err);
+  }
 });
 
 // Marks the first-login product tour dismissed (finished or skipped) so it
@@ -353,6 +583,7 @@ function publicUser(user) {
     // yearly birthday celebration moments.
     birthday: user.birthday,
     firstLoginCelebratedAt: user.firstLoginCelebratedAt,
+    mfaEnabled: user.mfaEnabled,
   };
 }
 
