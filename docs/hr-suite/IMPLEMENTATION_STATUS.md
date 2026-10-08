@@ -198,19 +198,45 @@ flat under `server/src/` too, for the same reason.
   a swap, a `SWAP PENDING` badge while one is outstanding) and My Time
   Off (balance tiles, request form, request history) sections.
   `client/src/lib/api.js` has the full new `hr*` wrapper set. A
-  real-browser pass (see below) found and fixed three client bugs:
-  `HrDashboardPage.jsx`'s `load()` used one `Promise.all` across every
-  Part A Foundation call plus the new Part C ones, so a plain
-  `AGENCY_MANAGER` with no HR grant 403ing on a Foundation-only
-  endpoint blanked the *entire* page, including the Schedule/Leave
-  Calendar tabs that manager genuinely has access to — fixed by
-  settling each call independently and only hard-failing if every one
-  of them fails; shift times rendered via a bare `toLocaleTimeString()`
-  with no explicit zone, so they showed in the *viewer's* browser-local
-  zone instead of the shift's own work time zone — fixed by passing an
-  explicit `timeZone`; and a submitted swap request gave the requesting
-  employee no feedback that it was pending — fixed by having `GET
-  /hr/schedule/mine` include each shift's pending swap requests.
+  real-browser pass (see below) independently found two of the same
+  bugs a concurrent session on this branch had just fixed, plus one
+  more of its own:
+  - `HrDashboardPage.jsx`'s `load()`: a plain `AGENCY_MANAGER` with no
+    HR grant 403ing on a Part A Foundation-only call inside the page's
+    one `Promise.all` blanked the whole page with a raw error. This
+    session's own first fix made `load()` resilient (settle every call
+    independently, degrade only the failed piece). While rebasing onto
+    this branch's latest tip, a concurrent session under this same
+    overall effort had already landed a different, more thorough fix
+    for the identical bug — real per-tier access control (`GET /hr/
+    overview` now returns an `access: {hrRole, canWrite,
+    canManageGrants}` block; every existing tab hides write controls
+    for a read-only `HR_AUDITOR` viewer; a Manager with zero grant sees
+    an honest "ask your Agency Owner" message instead of a raw error).
+    Rather than silently overriding that already-shipped, deliberately-
+    reasoned design during the rebase, this session's own `load()` fix
+    was dropped in favor of it, and Part C's three new tabs
+    (SCHEDULE/LEAVE POLICIES — LEAVE CALENDAR is read-only already)
+    were extended with the same `canWrite` gating as every other tab,
+    for consistency. Net effect: reaching Backstage HR at all still
+    requires at least an `HR_AUDITOR` grant for a Manager (by that
+    session's explicit design), but once there, every tab — Part A and
+    Part C alike — now correctly shows/hides write controls by real
+    access tier instead of rendering buttons that would just 403 on
+    click.
+  - Shift times rendered via a bare `toLocaleTimeString()` with no
+    explicit zone, so they showed in the *viewer's* browser-local zone
+    instead of the shift's own work time zone (a shift resolved for
+    9:00 AM Eastern read as "01:00 PM" in a UTC-zoned browser) — fixed
+    by passing an explicit `timeZone` (the employee's own
+    `workTimeZone`) to every `toLocaleTimeString()` call for a shift,
+    in both `HrDashboardPage.jsx`'s SCHEDULE tab and
+    `HrMyProfilePage.jsx`'s My Schedule section.
+  - A submitted swap request gave the requesting employee no feedback
+    that it was pending — the shift's own `status` stays `SCHEDULED`
+    until a manager decides — fixed by having `GET /hr/schedule/mine`
+    include each shift's pending swap requests and showing a `SWAP
+    PENDING` badge in place of the button while one is outstanding.
 - [x] Tests: `server/src/lib/hrLeaveAccrual.test.js` (6 cases, real-DB):
   accrual math per method (the PER_HOUR_WORKED case against real
   `HrTimesheet.regularMinutes`, confirming a different month's
@@ -285,10 +311,13 @@ of recording what was caught, not just what shipped clean):
 - Three client-side bugs caught only by the real-browser Playwright
   pass, not by any test: `HrDashboardPage.jsx`'s single `Promise.all`
   blanked the whole page for a manager with no HR grant instead of
-  degrading gracefully; shift times rendered in the viewer's
-  browser-local zone instead of the shift's own work time zone; a
-  submitted swap request gave no pending-state feedback. All three
-  fixed — see Part C's own entry above for detail.
+  degrading gracefully (this session's own fix for this one was later
+  superseded, during a rebase, by a concurrent session's independent
+  and more thorough fix for the identical bug — see Part C's own Client
+  entry above for the full reconciliation story); shift times rendered
+  in the viewer's browser-local zone instead of the shift's own work
+  time zone; a submitted swap request gave no pending-state feedback.
+  All three fixed in what's on the branch now.
 
 ## External integration blockers (affecting future phases only)
 
