@@ -54,6 +54,10 @@ const PATHS = {
   gamepad: 'M6 8h12a4 4 0 0 1 4 4l1 5a2.5 2.5 0 0 1-4.5 1.5L17 16H7l-1.5 2.5A2.5 2.5 0 0 1 1 17l1-5a4 4 0 0 1 4-4zM7 11v3M5.5 12.5h3M15.5 11.5h.01M18 13.5h.01',
   lock: 'M6 11V8a6 6 0 1 1 12 0v3M5 11h14v9H5v-9zM12 15v3',
   archive: 'M3 7h18v3H3V7zm1 3h16v11H4V10zm5 3h6',
+  // Two opposite-pointing arrows — a bidirectional-exchange glyph for a
+  // cross-sell combo badge (distinct from transfer's train-signal shape
+  // and refresh's circular arrows).
+  exchange: 'M3 8h14m0 0l-4-4m4 4l-4 4M21 16H7m0 0l4-4m-4 4l4 4',
 };
 
 export default function Icon({ name, size = 18, style }) {

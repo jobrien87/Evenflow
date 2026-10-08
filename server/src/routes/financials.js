@@ -4,7 +4,8 @@ const { prisma } = require('../lib/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { computeProfitability, computeROI } = require('../lib/financialCalc');
-const { computeBillboard, GRANULARITIES } = require('../lib/billboard');
+const { computeBillboard, computeBillboardPeriod, GRANULARITIES } = require('../lib/billboard');
+const { PERIODS: BILLBOARD_PERIODS } = require('../lib/billboardPeriods');
 const { sumHistoricalPremium, countHistoricalSold, historicalByVendor, historicalByAgent } = require('../lib/historicalAggregates');
 const { countSales, salesByAgent } = require('../lib/manualSaleAggregates');
 
@@ -39,7 +40,7 @@ router.get('/summary', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req
     const [revenueAgg, costAgg, salesCount, historicalPremiumCents, historicalSoldCount, manualSalesCount] = await Promise.all([
       prisma.revenueEvent.aggregate({ where: whereBase, _sum: { amountCents: true } }),
       prisma.costEvent.aggregate({ where: whereBase, _sum: { amountCents: true } }),
-      prisma.lead.count({ where: { status: 'SOLD', updatedAt: { gte: from, lte: to }, ...(agencyId ? { agencyId } : {}) } }),
+      prisma.lead.count({ where: { status: 'SOLD', salePremiumCents: { gt: 0 }, updatedAt: { gte: from, lte: to }, ...(agencyId ? { agencyId } : {}) } }),
       // Historical Data (Back Catalog) rows aren't Leads and have no
       // RevenueEvent of their own — this is the actual integration point
       // that makes their premium count toward the SAME revenue total
@@ -118,7 +119,8 @@ router.get('/by-vendor', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (r
         const costCents = costAgg._sum.amountCents || 0;
         const leadCount = leads.length;
         const quotedCount = leads.filter((l) => QUOTED_OR_BEYOND_STATUSES.includes(l.status)).length;
-        const soldLeads = leads.filter((l) => l.status === 'SOLD');
+        // A zero/null-premium SOLD lead must never count as sold production.
+        const soldLeads = leads.filter((l) => l.status === 'SOLD' && l.salePremiumCents > 0);
         // Historical Data rows for this vendor count toward sold/revenue —
         // never toward leadsReceived/quotesReceived, since historical
         // backfill never had a real intake/quote pipeline to measure rates
@@ -195,7 +197,8 @@ router.get('/by-agent', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER'
           prisma.flowScoreSnapshot.findFirst({ where: { subjectType: 'USER', subjectId: p.id }, orderBy: { computedAt: 'desc' }, select: { score: true } }),
         ]);
         const leadCount = leads.length;
-        const soldLeads = leads.filter((l) => l.status === 'SOLD');
+        // A zero/null-premium SOLD lead must never count as sold production.
+        const soldLeads = leads.filter((l) => l.status === 'SOLD' && l.salePremiumCents > 0);
         // Historical Data and Add Closed Sale rows attributed to this
         // producer count toward their sold/revenue totals — never
         // leadsAssigned, for the same reason /by-vendor excludes it from
@@ -257,9 +260,19 @@ router.get('/by-agent', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER'
 });
 
 // The Billboard — real sold-item count + premium total, broken down by
-// producer and by product line, plus a real time-series trend line at
-// whatever granularity (day/week/month/year) the caller asks for. Same
+// producer and by product line, plus a real time-series trend line. Same
 // visibility as /by-agent (the whole team, not just Owner/Manager).
+//
+// `?period=week|month|year|all_years` selects the new Eastern-time
+// fixed-calendar period system (mostRecentCompletedWorkWeek/monthBounds/
+// yearBounds/all years present in the data — see lib/billboardPeriods.js)
+// and takes precedence when present. `?month=YYYY-MM`/`?year=YYYY` pick a
+// specific Month/Year-view selection; both default to the agency's
+// current Eastern calendar month/year when omitted.
+//
+// Without `?period=`, the route falls back to the original rolling
+// `?granularity=`/`?from=`/`?to=` contract (computeBillboard) unchanged —
+// defensive backward compatibility for any caller beyond BillboardPanel.jsx.
 router.get('/billboard', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER', 'PLATFORM_OWNER'), async (req, res, next) => {
   try {
     const agencyId = scopedAgencyId(req);
@@ -268,6 +281,17 @@ router.get('/billboard', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER
     if (!agencyId) {
       return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
     }
+
+    if (BILLBOARD_PERIODS.includes(req.query.period)) {
+      const result = await computeBillboardPeriod({
+        agencyId,
+        period: req.query.period,
+        month: req.query.month || undefined,
+        year: req.query.year || undefined,
+      });
+      return res.json({ success: true, ...result });
+    }
+
     const granularity = GRANULARITIES.includes(req.query.granularity) ? req.query.granularity : 'month';
     const result = await computeBillboard({
       agencyId,

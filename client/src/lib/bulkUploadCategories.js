@@ -8,6 +8,8 @@
 export const CATEGORY_OPTIONS = [
   { value: 'WINBACK', label: 'Winbacks' },
   { value: 'CROSS_SELL', label: 'Cross-Sell' },
+  { value: 'AUTO_NO_HOME', label: 'Auto No Home' },
+  { value: 'HOME_NO_AUTO', label: 'Home No Auto' },
   { value: 'REFERRAL', label: 'Referral' },
   { value: 'INTERNET', label: 'Internet' },
   { value: 'WALK_IN', label: 'Walk In' },

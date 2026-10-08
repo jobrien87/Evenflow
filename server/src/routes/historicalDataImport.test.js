@@ -17,6 +17,8 @@ const { computeFunnel } = require('../lib/funnelMetrics');
 const { computeProductBreakdown } = require('../lib/performanceBreakdown');
 const { computeBillboard } = require('../lib/billboard');
 const { computeGoalActual } = require('../lib/runningReport');
+const { classifyIsSold } = require('../lib/historicalDataImport');
+const { sumHistoricalPremium, countHistoricalSold, historicalLeadLikeRows } = require('../lib/historicalAggregates');
 
 const suffix = Date.now();
 let agencyId, ownerId, ownerCookie, vendorAId, producerXId, server, port, baseUrl;
@@ -429,4 +431,68 @@ test('blank rows are counted in skipped with a real reason, and created+skipped 
   assert.equal(body.skippedReasons['Missing or unparseable date'], 1);
 
   await fetch(`${baseUrl}/api/leads/import-batches/${body.batchId}/undo`, { method: 'POST', headers: { Cookie: ownerCookie } });
+});
+
+// Regression test for the zero-premium-counted-as-sold bug: a positive
+// keyword alone (e.g. "Sale") must no longer be enough to mark a row
+// sold — a real premium is required too, matching the user's own
+// "zero-premium terminations must not count as sold production" rule.
+test('classifyIsSold: a positive keyword with $0/null premium is never sold (the fix)', () => {
+  assert.equal(classifyIsSold('Sale', 0), false);
+  assert.equal(classifyIsSold('Sale', null), false);
+  assert.equal(classifyIsSold('Issued', 0), false);
+});
+
+test('classifyIsSold: existing behavior is unchanged — a real premium still counts, a termination never does', () => {
+  assert.equal(classifyIsSold('Sale', 50000), true);
+  assert.equal(classifyIsSold('Terminated', 50000), false);
+  assert.equal(classifyIsSold(null, 10000), true, 'no outcome column at all still falls through to the premium-floor rule');
+  assert.equal(classifyIsSold(null, 0), false);
+});
+
+test('a $0-premium row imported with a positive-keyword outcome is excluded end-to-end (import + every aggregate consumer)', async () => {
+  const csv = [
+    'Date,Name,Product,Premium,Outcome',
+    `2024-07-01,Zero Premium Guy ${suffix},Auto,0,Sale`,
+  ].join('\n');
+  const form = new FormData();
+  form.append('file', new Blob([csv], { type: 'text/csv' }), 'zero-premium.csv');
+  form.append('sourceSystem', 'OTHER');
+  const res = await fetch(`${baseUrl}/api/leads/historical-data-import`, { method: 'POST', headers: { Cookie: ownerCookie }, body: form });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.created, 1);
+
+  const [record] = await prisma.historicalRecord.findMany({ where: { importBatchId: body.batchId } });
+  assert.equal(record.isSold, false, 'the import-time classifier must not mark a $0 "Sale" row as sold');
+
+  await fetch(`${baseUrl}/api/leads/import-batches/${body.batchId}/undo`, { method: 'POST', headers: { Cookie: ownerCookie } });
+});
+
+test('historicalAggregates read-time guard: a pre-existing bad row (isSold:true, premiumCents:0) is excluded from every consumer, not just future imports', async () => {
+  const batch = await prisma.leadImportBatch.create({
+    data: { agencyId, uploadedById: ownerId, isHistorical: true, totalRows: 1, created: 1, skipped: 0 },
+  });
+  const badRecord = await prisma.historicalRecord.create({
+    data: {
+      agencyId,
+      importBatchId: batch.id,
+      recordDate: new Date('2024-08-01'),
+      firstName: 'Legacy', lastName: 'BadRow',
+      premiumCents: 0,
+      isSold: true, // simulates a row imported before the classifyIsSold fix shipped
+      product: 'AUTO',
+      sourceSystem: 'OTHER',
+    },
+  });
+
+  const from = new Date('2024-07-01');
+  const to = new Date('2024-09-01');
+  assert.equal(await sumHistoricalPremium({ agencyId, from, to }), 0, 'the bad row contributes nothing to the premium sum');
+  assert.equal(await countHistoricalSold({ agencyId, from, to }), 0, 'the bad row is not counted as sold');
+  const rows = await historicalLeadLikeRows({ agencyId, from, to });
+  assert.equal(rows.length, 0, 'the bad row never reaches Billboard via historicalLeadLikeRows');
+
+  await prisma.historicalRecord.delete({ where: { id: badRecord.id } });
+  await prisma.leadImportBatch.delete({ where: { id: batch.id } });
 });

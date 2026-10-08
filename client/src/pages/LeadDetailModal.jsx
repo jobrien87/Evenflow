@@ -15,6 +15,13 @@ const TASK_TYPES = ['FOLLOW_UP', 'CALLBACK', 'APPOINTMENT'];
 const ACTIVITY_TYPES = ['CALL', 'EMAIL', 'TEXT'];
 
 const PRODUCT_ABBR = { AUTO: 'AUTO', HOME: 'HOME', RENTERS: 'RENT', LIFE: 'LIFE', HEALTH: 'HLTH', COMMERCIAL: 'COMM' };
+
+// A cross-sell lead uploaded under AUTO_NO_HOME/HOME_NO_AUTO carries the
+// already-held line in crossSellHaveProduct — it stays visible as context
+// (the header badge below) but is never an available line to quote.
+function getAvailableProducts(lead) {
+  return lead.crossSellHaveProduct ? PRODUCTS.filter((p) => p !== lead.crossSellHaveProduct) : PRODUCTS;
+}
 const PRODUCT_STATUS_OPTIONS = [
   { value: null, label: 'Not Quoted' },
   { value: 'QUOTED', label: 'Quoted' },
@@ -210,7 +217,7 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
       )}
       <div style={s.header}>
         <div style={s.headerAvatar}>
-          <LeadTypeIcon type={lead.leadType} size={22} />
+          <LeadTypeIcon type={lead.leadType} product={lead.product} crossSellHaveProduct={lead.crossSellHaveProduct} size={22} />
         </div>
         <div style={{ flex: 1 }}>
           <div style={s.name}>{c ? `${c.firstName} ${c.lastName}` : 'Lead'}</div>
@@ -223,7 +230,10 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
         </div>
         <div style={s.headerBadges}>
           {lead.product && <Badge tone="neutral">{lead.product}</Badge>}
-          <Badge tone={soldCount > 0 ? 'accent' : 'neutral'}>{soldCount}/{PRODUCTS.length} SOLD</Badge>
+          {lead.crossSellHaveProduct && (
+            <Badge tone="neutral">Has {PRODUCT_META[lead.crossSellHaveProduct]?.label || lead.crossSellHaveProduct}</Badge>
+          )}
+          <Badge tone={soldCount > 0 ? 'accent' : 'neutral'}>{soldCount}/{getAvailableProducts(lead).length} SOLD</Badge>
           <Badge tone={statusTone(lead.status)}>{lead.status.replace(/_/g, ' ')}</Badge>
         </div>
       </div>
@@ -365,22 +375,29 @@ function ProductsBlock({ lead, onDone }) {
   const quotesByProduct = Object.fromEntries((lead.productQuotes || []).map((q) => [q.product, q]));
   const [expanded, setExpanded] = useState(null);
 
+  const availableProducts = getAvailableProducts(lead);
   const soldRows = (lead.productQuotes || []).filter((q) => q.status === 'SOLD');
   const quotedRows = (lead.productQuotes || []).filter((q) => q.status === 'QUOTED');
   const totalSoldCents = soldRows.reduce((sum, q) => sum + (q.premiumCents || 0), 0);
   const totalQuotedCents = quotedRows.reduce((sum, q) => sum + (q.premiumCents || 0), 0);
-  const untouched = PRODUCTS.filter((p) => !quotesByProduct[p]);
+  const untouched = availableProducts.filter((p) => !quotesByProduct[p]);
 
   return (
     <div>
+      {lead.crossSellHaveProduct && (
+        <div style={s.crossSellHint}>
+          <Icon name={PRODUCT_META[lead.crossSellHaveProduct]?.icon} size={13} style={{ marginRight: 6 }} />
+          Already has {PRODUCT_META[lead.crossSellHaveProduct]?.label || lead.crossSellHaveProduct} — not quotable here.
+        </div>
+      )}
       <div style={s.statRow}>
         <StatTile label="SOLD PREMIUM / MO" value={money(totalSoldCents) || '$0.00'} />
         <StatTile label="OPEN QUOTE POTENTIAL / MO" value={money(totalQuotedCents) || '$0.00'} />
-        <StatTile label="PRODUCTS SOLD" value={`${soldRows.length}/${PRODUCTS.length}`} />
+        <StatTile label="PRODUCTS SOLD" value={`${soldRows.length}/${availableProducts.length}`} />
       </div>
 
       <div style={s.chipRow}>
-        {PRODUCTS.map((p) => {
+        {availableProducts.map((p) => {
           const q = quotesByProduct[p];
           const tone = q?.status === 'SOLD' ? 'accent' : q?.status === 'QUOTED' ? 'warning' : 'neutral';
           const active = expanded === p;

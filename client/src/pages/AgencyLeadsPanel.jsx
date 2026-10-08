@@ -131,7 +131,7 @@ export default function AgencyLeadsPanel() {
         >
           <div>
             <div style={{ ...s.rowTitle, cursor: 'pointer', textDecoration: 'underline' }}>
-              <LeadTypeIcon type={l.leadType} style={{ marginRight: 6, textDecoration: 'none' }} />
+              <LeadTypeIcon type={l.leadType} product={l.product} crossSellHaveProduct={l.crossSellHaveProduct} style={{ marginRight: 6, textDecoration: 'none' }} />
               {l.customer ? `${l.customer.firstName} ${l.customer.lastName}` : 'Lead'}
             </div>
             <div style={s.rowSub}>{l.product || l.source} · {l.assignedTo ? `${l.assignedTo.firstName} ${l.assignedTo.lastName}` : 'Unassigned'}</div>

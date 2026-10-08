@@ -10,6 +10,15 @@ const { prisma } = require('./db');
 const { PRODUCT_LABELS } = require('./products');
 const { historicalLeadLikeRows } = require('./historicalAggregates');
 const { saleLeadLikeRows } = require('./manualSaleAggregates');
+const {
+  PERIODS: BILLBOARD_PERIODS,
+  mostRecentCompletedWorkWeek,
+  monthBoundsEastern,
+  yearBoundsEastern,
+  yearMonthBuckets,
+  agencyDataYearSpan,
+} = require('./billboardPeriods');
+const { zonedYearMonthDay } = require('./timezone');
 
 const GRANULARITIES = ['day', 'week', 'month', 'year'];
 
@@ -81,37 +90,33 @@ function buildSeries(soldLeads, granularity, from, to) {
   return Array.from(buckets.values());
 }
 
-async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
-  const g = GRANULARITIES.includes(granularity) ? granularity : 'month';
-  const range = from && to ? { from: new Date(from), to: new Date(to) } : defaultRange(g);
+// Real-Lead query shared by both computeBillboard (legacy rolling range)
+// and computeBillboardPeriod (new fixed-calendar periods) — a SOLD lead
+// with null/zero salePremiumCents must never count as sold production,
+// so the premium floor lives here, once, protecting both callers.
+function soldLeadsQuery(agencyId, from, to) {
+  return prisma.lead.findMany({
+    where: { agencyId, status: 'SOLD', salePremiumCents: { gt: 0 }, updatedAt: { gte: from, lte: to } },
+    select: {
+      updatedAt: true,
+      salePremiumCents: true,
+      saleProduct: true,
+      assignedToId: true,
+      assignedTo: { select: { id: true, firstName: true, lastName: true } },
+      vendorId: true,
+      vendor: { select: { id: true, name: true } },
+      zip: true,
+    },
+  });
+}
 
-  const [realSoldLeads, historicalRows, manualSaleRows, producers] = await Promise.all([
-    prisma.lead.findMany({
-      where: { agencyId, status: 'SOLD', updatedAt: { gte: range.from, lte: range.to } },
-      select: {
-        updatedAt: true,
-        salePremiumCents: true,
-        saleProduct: true,
-        assignedToId: true,
-        assignedTo: { select: { id: true, firstName: true, lastName: true } },
-        vendorId: true,
-        vendor: { select: { id: true, name: true } },
-        zip: true,
-      },
-    }),
-    // Historical Data (Back Catalog) rows, shaped identically to the real
-    // Lead rows above — concatenated in so every grouping/series below
-    // reuses this one aggregation pass rather than a second copy of it.
-    historicalLeadLikeRows({ agencyId, from: range.from, to: range.to }),
-    // Add Closed Sale (standalone, no Lead) rows — same reshape pattern.
-    saleLeadLikeRows({ agencyId, from: range.from, to: range.to }),
-    // Same roster query financials.js's /by-agent already uses — every
-    // active producer must appear on the leaderboard even with zero sales
-    // in range, not just whoever happened to sell something.
-    prisma.user.findMany({ where: { agencyId, role: 'PRODUCER', status: 'ACTIVE' }, select: { id: true, firstName: true, lastName: true } }),
-  ]);
-  const soldLeads = [...realSoldLeads, ...historicalRows, ...manualSaleRows];
-
+// The real producer/product/vendor/zip grouping pass — pure, given an
+// already-fetched soldLeads array and a producer roster to zero-fill.
+// Shared by both computeBillboard and computeBillboardPeriod so this
+// logic (and its zero-premium protection, applied upstream in
+// soldLeadsQuery/historicalAggregates/manualSaleAggregates) is written
+// exactly once.
+function aggregateSoldRows(soldLeads, producers) {
   const byProducerMap = new Map();
   for (const p of producers) {
     byProducerMap.set(p.id, { userId: p.id, firstName: p.firstName, lastName: p.lastName, soldCount: 0, premiumCents: 0 });
@@ -169,11 +174,8 @@ async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
   const byProduct = Array.from(byProductMap.values()).sort((a, b) => b.premiumCents - a.premiumCents);
   const byVendor = Array.from(byVendorMap.values()).sort((a, b) => b.premiumCents - a.premiumCents);
   const byZip = Array.from(byZipMap.values()).sort((a, b) => b.premiumCents - a.premiumCents);
-  const series = buildSeries(soldLeads, g, range.from, range.to);
 
   return {
-    granularity: g,
-    period: { from: range.from.toISOString(), to: range.to.toISOString() },
     totals: {
       soldCount: soldLeads.length,
       premiumCents: soldLeads.reduce((sum, l) => sum + (l.salePremiumCents || 0), 0),
@@ -182,6 +184,39 @@ async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
     byProduct,
     byVendor,
     byZip,
+  };
+}
+
+// Same real active-producer roster query financials.js's /by-agent
+// already uses — every active producer must appear on the leaderboard
+// even with zero sales in range, not just whoever happened to sell
+// something.
+function activeProducersQuery(agencyId) {
+  return prisma.user.findMany({ where: { agencyId, role: 'PRODUCER', status: 'ACTIVE' }, select: { id: true, firstName: true, lastName: true } });
+}
+
+async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
+  const g = GRANULARITIES.includes(granularity) ? granularity : 'month';
+  const range = from && to ? { from: new Date(from), to: new Date(to) } : defaultRange(g);
+
+  const [realSoldLeads, historicalRows, manualSaleRows, producers] = await Promise.all([
+    soldLeadsQuery(agencyId, range.from, range.to),
+    // Historical Data (Back Catalog) rows, shaped identically to the real
+    // Lead rows above — concatenated in so every grouping/series below
+    // reuses this one aggregation pass rather than a second copy of it.
+    historicalLeadLikeRows({ agencyId, from: range.from, to: range.to }),
+    // Add Closed Sale (standalone, no Lead) rows — same reshape pattern.
+    saleLeadLikeRows({ agencyId, from: range.from, to: range.to }),
+    activeProducersQuery(agencyId),
+  ]);
+  const soldLeads = [...realSoldLeads, ...historicalRows, ...manualSaleRows];
+  const aggregated = aggregateSoldRows(soldLeads, producers);
+  const series = buildSeries(soldLeads, g, range.from, range.to);
+
+  return {
+    granularity: g,
+    period: { from: range.from.toISOString(), to: range.to.toISOString() },
+    ...aggregated,
     series,
     // Historical Data (Back Catalog) rows folded into the totals above —
     // surfaced so the client can show a small "(includes N historical
@@ -190,4 +225,112 @@ async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
   };
 }
 
-module.exports = { computeBillboard, bucketStart, bucketKey, buildSeries, defaultRange, GRANULARITIES };
+// Buckets an already-fetched soldLeads list into an arbitrary list of
+// {key, label, from, to} windows (the Week view's 5 daily buckets, the
+// Year view's 12 month buckets, or All Years' N year buckets) — distinct
+// from buildSeries, which only ever walks fixed-size granularity steps.
+function bucketBySpans(soldLeads, spans) {
+  return spans.map((span) => {
+    let soldCount = 0;
+    let premiumCents = 0;
+    for (const lead of soldLeads) {
+      const t = new Date(lead.updatedAt).getTime();
+      if (t >= span.from.getTime() && t < span.to.getTime()) {
+        soldCount += 1;
+        premiumCents += lead.salePremiumCents || 0;
+      }
+    }
+    return { date: span.key, label: span.label, soldCount, premiumCents };
+  });
+}
+
+// The new Eastern-time fixed-calendar-period entry point — Week/Month/
+// Year/All Years, as distinct from computeBillboard's existing rolling
+// day/week/month/year granularities, which stay completely unchanged
+// above. Shares soldLeadsQuery/aggregateSoldRows/activeProducersQuery
+// with computeBillboard, so the zero-premium protection and grouping
+// logic are identical between the two entry points.
+async function computeBillboardPeriod({ agencyId, period, month, year, now = new Date() }) {
+  const p = BILLBOARD_PERIODS.includes(period) ? period : 'month';
+
+  const agency = await prisma.agency.findUnique({ where: { id: agencyId }, select: { timezone: true } });
+  const timeZone = agency?.timezone || 'America/New_York';
+
+  let range;
+  let series = [];
+  let extra = {};
+
+  if (p === 'week') {
+    const week = mostRecentCompletedWorkWeek(now, timeZone);
+    range = { from: week.from, to: week.to, label: week.label };
+    extra.weekBuckets = week.buckets;
+  } else if (p === 'month') {
+    const { year: curYear, month: curMonth } = month
+      ? { year: Number(month.slice(0, 4)), month: Number(month.slice(5, 7)) }
+      : zonedYearMonthDay(now, timeZone);
+    const bounds = monthBoundsEastern(curYear, curMonth, timeZone);
+    range = { ...bounds };
+    extra.selectedMonth = { year: curYear, month: curMonth };
+
+    const span = await agencyDataYearSpan({ agencyId, timeZone });
+    const nowYmd = zonedYearMonthDay(now, timeZone);
+    const earliestYear = span ? Math.min(span.minYear, nowYmd.year) : nowYmd.year;
+    const months = [];
+    for (let yy = nowYmd.year; yy >= earliestYear; yy--) {
+      const maxMonth = yy === nowYmd.year ? nowYmd.month : 12;
+      for (let mm = maxMonth; mm >= 1; mm--) {
+        const { label } = monthBoundsEastern(yy, mm, timeZone);
+        months.push({ year: yy, month: mm, label });
+      }
+    }
+    extra.availableMonths = months;
+  } else if (p === 'year') {
+    const curYear = year ? Number(year) : zonedYearMonthDay(now, timeZone).year;
+    const bounds = yearBoundsEastern(curYear, timeZone);
+    range = { ...bounds };
+    extra.selectedYear = curYear;
+    extra.monthBuckets = yearMonthBuckets(curYear, timeZone);
+  } else {
+    const span = await agencyDataYearSpan({ agencyId, timeZone });
+    const nowYmd = zonedYearMonthDay(now, timeZone);
+    const minYear = span ? span.minYear : nowYmd.year;
+    const maxYear = span ? Math.max(span.maxYear, nowYmd.year) : nowYmd.year;
+    const yearBounds = [];
+    for (let yy = minYear; yy <= maxYear; yy++) yearBounds.push(yearBoundsEastern(yy, timeZone));
+    range = { from: yearBounds[0].from, to: yearBounds[yearBounds.length - 1].to, label: `${minYear}–${maxYear}` };
+    extra.yearBuckets = yearBounds;
+  }
+
+  const [realSoldLeads, historicalRows, manualSaleRows, producers] = await Promise.all([
+    soldLeadsQuery(agencyId, range.from, range.to),
+    historicalLeadLikeRows({ agencyId, from: range.from, to: range.to }),
+    saleLeadLikeRows({ agencyId, from: range.from, to: range.to }),
+    activeProducersQuery(agencyId),
+  ]);
+  const soldLeads = [...realSoldLeads, ...historicalRows, ...manualSaleRows];
+  const aggregated = aggregateSoldRows(soldLeads, producers);
+
+  if (p === 'week') {
+    series = bucketBySpans(soldLeads, extra.weekBuckets);
+  } else if (p === 'year') {
+    series = bucketBySpans(soldLeads, extra.monthBuckets);
+  } else if (p === 'all_years') {
+    series = bucketBySpans(soldLeads, extra.yearBuckets);
+  }
+  // Month period intentionally has no series — only a single total.
+
+  return {
+    period: p,
+    timezone: timeZone,
+    periodLabel: range.label,
+    from: range.from.toISOString(),
+    to: range.to.toISOString(),
+    ...(p === 'month' ? { selectedMonth: extra.selectedMonth, availableMonths: extra.availableMonths } : {}),
+    ...(p === 'year' ? { selectedYear: extra.selectedYear } : {}),
+    ...aggregated,
+    series,
+    historicalRecordsIncluded: historicalRows.length,
+  };
+}
+
+module.exports = { computeBillboard, computeBillboardPeriod, bucketStart, bucketKey, buildSeries, defaultRange, GRANULARITIES };

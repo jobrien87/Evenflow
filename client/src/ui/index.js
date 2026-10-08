@@ -9,6 +9,8 @@ export { default as ProgressRing } from './ProgressRing';
 export { default as ProgressBar } from './ProgressBar';
 export { default as BarRow } from './BarRow';
 export { default as Sparkline } from './Sparkline';
+export { default as TrendChart } from './TrendChart';
+export { default as MonthSelector } from './MonthSelector';
 export { default as GradientDefs } from './GradientDefs';
 export { default as EmptyState } from './EmptyState';
 export { default as SectionHeader } from './SectionHeader';

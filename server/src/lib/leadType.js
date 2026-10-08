@@ -32,6 +32,13 @@ function deriveLeadType({ isLiveTransfer, vendorCategory }) {
 const BULK_UPLOAD_CATEGORIES = {
   WINBACK: { leadTypeOverride: 'WINBACK' },
   CROSS_SELL: { leadTypeOverride: 'CROSS_SELL' },
+  // Specific have/need cross-sell pairs — the customer already holds the
+  // "have" line (crossSellHaveProduct, a canonical products.js PRODUCTS
+  // code), and `product` is the one line actually available to quote.
+  // Carried through to the lead listing's icon and the opened lead's
+  // quote-option filtering (see LeadDetailModal.jsx's getAvailableProducts).
+  AUTO_NO_HOME: { leadTypeOverride: 'CROSS_SELL', product: 'Home', crossSellHaveProduct: 'AUTO' },
+  HOME_NO_AUTO: { leadTypeOverride: 'CROSS_SELL', product: 'Auto', crossSellHaveProduct: 'HOME' },
   REFERRAL: { leadTypeOverride: 'REFERRAL' },
   INTERNET: { leadTypeOverride: 'INTERNET' },
   WALK_IN: { sourceOverride: 'walk_in' },

@@ -170,7 +170,7 @@ export default function MyLeadsPanel() {
             {leads.map((lead) => (
               <div key={lead.id} style={s.leadRow} onClick={() => setOpenLeadId(lead.id)}>
                 <span style={s.colLeadName}>
-                  <LeadTypeIcon type={lead.leadType} style={{ marginRight: 6 }} />
+                  <LeadTypeIcon type={lead.leadType} product={lead.product} crossSellHaveProduct={lead.crossSellHaveProduct} style={{ marginRight: 6 }} />
                   {lead.customer ? `${lead.customer.firstName} ${lead.customer.lastName}` : 'Lead'}
                   {!lead.firstAttemptAt && <Badge tone="warning" style={{ marginLeft: 8 }}>UNTOUCHED</Badge>}
                 </span>

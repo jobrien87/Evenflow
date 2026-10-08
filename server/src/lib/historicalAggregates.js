@@ -13,6 +13,12 @@ function dateRangeWhere(agencyId, from, to, extra = {}) {
     agencyId,
     recordDate: { gte: from, lte: to },
     isSold: true,
+    // A zero/null-premium row must never count as sold production,
+    // regardless of its stored isSold flag — this protects every
+    // consumer below (sums, counts, by-vendor/agent/product breakdowns,
+    // and Billboard via historicalLeadLikeRows) at read time, including
+    // rows that were already imported before classifyIsSold's own fix.
+    premiumCents: { gt: 0 },
     ...extra,
   };
 }

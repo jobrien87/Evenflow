@@ -715,6 +715,13 @@ model Lead {
   externalLeadId       String?
   rawPayload           Json?
   product              String?
+  // Populated only by the AUTO_NO_HOME/HOME_NO_AUTO (and any future
+  // specific-pair) bulk-upload categories — the canonical PRODUCTS code
+  // (lib/products.js) for the line the customer already holds. Drives the
+  // combo lead-type icon and excludes this line from the opened lead's
+  // available quote options in LeadDetailModal. Never written from
+  // Customer.products or any other inferred source.
+  crossSellHaveProduct String?
   status               LeadStatus       @default(NEW)
   priorityScore        Int              @default(0)
   priorityReason       String?

@@ -62,12 +62,16 @@ const NEGATIVE_SALE_SIGNALS = ['terminat', 'cancel', 'lapsed', 'nsf', 'chargebac
 const POSITIVE_SALE_SIGNALS = ['sale', 'sold', 'issued', 'bound', 'active', 'reinstat'];
 
 function classifyIsSold(outcome, premiumCents) {
+  const hasPremium = !!premiumCents && premiumCents > 0;
   const text = String(outcome || '').toLowerCase();
   if (text) {
     if (NEGATIVE_SALE_SIGNALS.some((sig) => text.includes(sig))) return false;
-    if (POSITIVE_SALE_SIGNALS.some((sig) => text.includes(sig))) return true;
+    // A positive keyword alone is not enough — zero-premium terminations
+    // (or any $0 row) must never count as sold production, even when the
+    // outcome text reads as a sale.
+    if (POSITIVE_SALE_SIGNALS.some((sig) => text.includes(sig))) return hasPremium;
   }
-  return !!premiumCents && premiumCents > 0;
+  return hasPremium;
 }
 
 const MAX_ROWS = 20000;

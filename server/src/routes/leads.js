@@ -182,6 +182,7 @@ async function createLeadRecord({ agencyId, source, createdById, data, importBat
         customerId: customer.id,
         source,
         product: data.product,
+        crossSellHaveProduct: data.crossSellHaveProduct || null,
         assignedToId: data.assignedToId,
         assignedAt: data.assignedToId ? new Date() : null,
         status: 'NEW',

@@ -30,11 +30,16 @@ test('applyBulkUploadCategory: UNKNOWN and an unrecognized value both apply noth
   assert.deepEqual(applyBulkUploadCategory('NOT_A_REAL_CATEGORY'), {});
 });
 
-test('BULK_UPLOAD_CATEGORIES has exactly the 11 categories the bulk-upload UI offers', () => {
+test('BULK_UPLOAD_CATEGORIES has exactly the 13 categories the bulk-upload UI offers', () => {
   assert.deepEqual(
     Object.keys(BULK_UPLOAD_CATEGORIES).sort(),
-    ['AUTO', 'COMMERCIAL', 'CROSS_SELL', 'HEALTH', 'HOME', 'INTERNET', 'LIFE', 'REFERRAL', 'UNKNOWN', 'WALK_IN', 'WINBACK']
+    ['AUTO', 'AUTO_NO_HOME', 'COMMERCIAL', 'CROSS_SELL', 'HEALTH', 'HOME', 'HOME_NO_AUTO', 'INTERNET', 'LIFE', 'REFERRAL', 'UNKNOWN', 'WALK_IN', 'WINBACK']
   );
+});
+
+test('applyBulkUploadCategory: AUTO_NO_HOME/HOME_NO_AUTO set leadTypeOverride, the available product, and the already-held product', () => {
+  assert.deepEqual(applyBulkUploadCategory('AUTO_NO_HOME'), { leadTypeOverride: 'CROSS_SELL', product: 'Home', crossSellHaveProduct: 'AUTO' });
+  assert.deepEqual(applyBulkUploadCategory('HOME_NO_AUTO'), { leadTypeOverride: 'CROSS_SELL', product: 'Auto', crossSellHaveProduct: 'HOME' });
 });
 
 test('applyBulkUploadCategory: Referral/Internet set leadTypeOverride, Walk In sets sourceOverride', () => {

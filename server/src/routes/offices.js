@@ -22,7 +22,7 @@ router.get('/', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'),
     const offices = await prisma.office.findMany({
       where: { agencyId },
       include: {
-        users: { select: { id: true, firstName: true, lastName: true }, where: { role: 'PRODUCER' } },
+        users: { select: { id: true, firstName: true, lastName: true }, where: { role: { in: ['PRODUCER', 'AGENCY_MANAGER'] } } },
         alphaAssignments: { include: { user: { select: { id: true, firstName: true, lastName: true } } } },
       },
       orderBy: { createdAt: 'asc' },
@@ -195,13 +195,13 @@ router.put('/:officeId/alpha-assignments', requireRole('AGENCY_OWNER', 'AGENCY_M
     if (assignments.length > 0) {
       const userIds = assignments.map((a) => a.userId);
       const activeAtThisOffice = await prisma.user.findMany({
-        where: { id: { in: userIds }, role: 'PRODUCER', status: 'ACTIVE', officeId: office.id },
+        where: { id: { in: userIds }, role: { in: ['PRODUCER', 'AGENCY_MANAGER'] }, status: 'ACTIVE', officeId: office.id },
         select: { id: true },
       });
       const validIds = new Set(activeAtThisOffice.map((u) => u.id));
       const invalid = userIds.find((id) => !validIds.has(id));
       if (invalid) {
-        return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Every producer must be an ACTIVE producer already assigned to this office.' });
+        return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Every producer/manager must be ACTIVE and already assigned to this office.' });
       }
     }
 

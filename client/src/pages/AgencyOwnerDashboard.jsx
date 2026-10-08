@@ -339,7 +339,7 @@ export default function AgencyOwnerDashboard() {
               <div style={s.inlineEditForm}>
                 <input style={s.input} value={editUserForm.firstName} onChange={(e) => setEditUserForm({ ...editUserForm, firstName: e.target.value })} placeholder="First name" />
                 <input style={s.input} value={editUserForm.lastName} onChange={(e) => setEditUserForm({ ...editUserForm, lastName: e.target.value })} placeholder="Last name" />
-                {u.role === 'PRODUCER' && (
+                {(u.role === 'PRODUCER' || u.role === 'AGENCY_MANAGER') && (
                   <select style={s.input} value={editUserForm.officeId} onChange={(e) => setEditUserForm({ ...editUserForm, officeId: e.target.value })}>
                     <option value="">No office</option>
                     {offices.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}

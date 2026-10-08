@@ -1,91 +1,65 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { Card, SectionHeader, StatTile, BarRow, Badge, Button, ExportButton, DateRangeFilter, EmptyState } from '../ui';
+import { Card, SectionHeader, StatTile, BarRow, Badge, Button, ExportButton, EmptyState, TrendChart, MonthSelector } from '../ui';
+import { money } from '../lib/format';
 import { downloadCsv } from '../lib/downloadCsv';
 import AddClosedSaleModal from './AddClosedSaleModal';
 
-const GRANULARITIES = [
-  { key: 'day', label: 'DAY' },
+const PERIODS = [
   { key: 'week', label: 'WEEK' },
   { key: 'month', label: 'MONTH' },
   { key: 'year', label: 'YEAR' },
+  { key: 'all_years', label: 'ALL YEARS' },
 ];
-
-const money = (cents) => `$${((cents || 0) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
-
-// A real, wider inline line chart (not the compact Sparkline — this is
-// the Billboard's headline visual, so it carries axis labels) built on
-// the shared #accent-gradient stroke every other SVG primitive in this
-// app already references.
-function TrendLine({ series, height = 140 }) {
-  if (!series || series.length < 2) return null;
-  const width = Math.max(series.length * 48, 320);
-  const max = Math.max(...series.map((p) => p.premiumCents), 1);
-  const stepX = width / (series.length - 1);
-  const coords = series.map((p, i) => `${i * stepX},${height - (p.premiumCents / max) * (height - 16)}`).join(' ');
-
-  return (
-    <div style={{ overflowX: 'auto' }}>
-      <svg width={width} height={height + 24}>
-        <polyline points={coords} fill="none" stroke="url(#accent-gradient)" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
-        {series.map((p, i) => (
-          <circle key={p.date} cx={i * stepX} cy={height - (p.premiumCents / max) * (height - 16)} r={3} fill="var(--accent)" />
-        ))}
-        {series.map((p, i) => (
-          i % Math.max(Math.ceil(series.length / 8), 1) === 0 && (
-            <text key={`${p.date}-label`} x={i * stepX} y={height + 18} fontSize={10} fill="var(--text-muted)" textAnchor="middle">
-              {p.date.slice(5)}
-            </text>
-          )
-        ))}
-      </svg>
-    </div>
-  );
-}
 
 // Billboard — the merged, promoted leaderboard tab: sold-item count and
 // premium total by producer and by product line, plus a real time-series
-// trend line, at whatever granularity (day/week/month/year) is selected.
-// All data from GET /financials/billboard — no second, divergent "sale"
-// computation.
+// trend chart, for a fixed Eastern-time calendar period (Week/Month/Year/
+// All Years — see server/src/lib/billboardPeriods.js). All data from
+// GET /financials/billboard?period=... — no second, divergent "sale"
+// computation. A single fetched `data` object backs every stat tile, the
+// trend chart, and all four breakdown cards below, so changing the
+// period always updates everything together, by construction.
 export default function BillboardPanel() {
   const { user } = useAuth();
-  const [granularity, setGranularity] = useState('month');
-  // The granularity tabs (Day/Week/Month/Year) double as range presets —
-  // each implies its own default lookback window server-side. "Custom"
-  // keeps whichever granularity was last picked (still controls the trend
-  // line's bucket size) but overrides the implied range with real dates.
-  const [useCustomRange, setUseCustomRange] = useState(false);
-  const [customFrom, setCustomFrom] = useState('');
-  const [customTo, setCustomTo] = useState('');
+  const [period, setPeriod] = useState('month');
+  const [selectedMonth, setSelectedMonth] = useState(null);
+  const [selectedYear, setSelectedYear] = useState(null);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [showAddSale, setShowAddSale] = useState(false);
 
   useEffect(() => {
     load();
-  }, [granularity, useCustomRange, customFrom, customTo]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period, selectedMonth, selectedYear]);
 
-  function selectPreset(key) {
-    if (key === 'custom') {
-      setUseCustomRange(true);
-      return;
-    }
-    setUseCustomRange(false);
-    setGranularity(key);
+  function selectPeriod(key) {
+    setPeriod(key);
+    if (key !== 'month') setSelectedMonth(null);
+    if (key !== 'year') setSelectedYear(null);
   }
 
   async function load() {
     setError('');
     try {
-      const params = new URLSearchParams({ granularity });
-      if (useCustomRange && customFrom && customTo) {
-        params.set('from', new Date(`${customFrom}T00:00:00.000Z`).toISOString());
-        params.set('to', new Date(`${customTo}T23:59:59.999Z`).toISOString());
+      const params = new URLSearchParams({ period });
+      if (period === 'month' && selectedMonth) {
+        params.set('month', `${selectedMonth.year}-${String(selectedMonth.month).padStart(2, '0')}`);
+      }
+      if (period === 'year' && selectedYear) {
+        params.set('year', String(selectedYear));
       }
       const res = await api.billboard(`?${params.toString()}`);
       setData(res);
+      // Adopt the server's own default exactly once per period switch
+      // (while still null) — never on every load, since a fresh object
+      // reference on every call would otherwise retrigger this same
+      // effect indefinitely (selectedMonth/selectedYear are both effect
+      // dependencies).
+      if (period === 'month' && !selectedMonth && res.selectedMonth) setSelectedMonth(res.selectedMonth);
+      if (period === 'year' && !selectedYear && res.selectedYear) setSelectedYear(res.selectedYear);
     } catch (err) {
       setError(err.data?.message || 'Could not load the Billboard. Try refreshing.');
     }
@@ -94,26 +68,37 @@ export default function BillboardPanel() {
   if (error) return <EmptyState title="Couldn't load the Billboard" description={error} />;
   if (!data) return <div style={{ color: 'var(--text-muted)' }}>Loading…</div>;
 
+  const showTrend = period === 'week' || period === 'year' || period === 'all_years';
+
   return (
     <div>
       <div style={s.headerRow}>
         <SectionHeader>Billboard</SectionHeader>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <Button size="sm" onClick={() => setShowAddSale(true)}>+ ADD CLOSED SALE</Button>
-          <DateRangeFilter
-            presets={GRANULARITIES}
-            periodKey={useCustomRange ? 'custom' : granularity}
-            onSelectPreset={selectPreset}
-            customFrom={customFrom}
-            customTo={customTo}
-            onCustomFromChange={setCustomFrom}
-            onCustomToChange={setCustomTo}
-          />
+          <div style={s.periodTabs}>
+            {PERIODS.map((p) => (
+              <button
+                key={p.key}
+                type="button"
+                onClick={() => selectPeriod(p.key)}
+                style={{ ...s.periodBtn, ...(period === p.key ? s.periodBtnActive : {}) }}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {showAddSale && (
         <AddClosedSaleModal onClose={() => setShowAddSale(false)} onSaved={load} />
+      )}
+
+      <div style={s.periodLabel}>{data.periodLabel}</div>
+
+      {period === 'month' && (
+        <MonthSelector months={data.availableMonths || []} selected={data.selectedMonth} onSelect={setSelectedMonth} />
       )}
 
       <div style={s.statsRow}>
@@ -125,10 +110,12 @@ export default function BillboardPanel() {
         <StatTile label="Premium Total" value={money(data.totals.premiumCents)} />
       </div>
 
-      <Card style={s.card}>
-        <div style={s.cardTitle}>TREND — PREMIUM BY {granularity.toUpperCase()}</div>
-        <TrendLine series={data.series} />
-      </Card>
+      {showTrend && (
+        <Card style={s.card}>
+          <div style={s.cardTitle}>TREND — PREMIUM BY {period === 'week' ? 'DAY' : period === 'year' ? 'MONTH' : 'YEAR'}</div>
+          <TrendChart series={data.series} />
+        </Card>
+      )}
 
       <Card style={s.card}>
         <div style={s.cardTitleRow}>
@@ -230,7 +217,11 @@ export default function BillboardPanel() {
 }
 
 const s = {
-  headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10, marginBottom: 16 },
+  headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10, marginBottom: 10 },
+  periodTabs: { display: 'flex', gap: 4, border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 3 },
+  periodBtn: { padding: '6px 12px', borderRadius: 6, border: 'none', background: 'transparent', color: 'var(--text-secondary)', fontSize: 11, fontWeight: 700, letterSpacing: 0.5, cursor: 'pointer' },
+  periodBtnActive: { background: 'var(--accent-gradient-soft)', color: 'var(--accent)' },
+  periodLabel: { fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 },
   statsRow: { display: 'flex', gap: 32, flexWrap: 'wrap', marginBottom: 20 },
   card: { marginBottom: 16, padding: 'var(--space-4)' },
   cardTitleRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },

@@ -129,7 +129,7 @@ async function officeAlphaAssignee(tx, { office, lastName }) {
 
   const eligibleUserIds = new Set(
     (await tx.user.findMany({
-      where: { id: { in: assignments.map((a) => a.userId) }, role: 'PRODUCER', status: 'ACTIVE', officeId: office.id },
+      where: { id: { in: assignments.map((a) => a.userId) }, role: { in: ['PRODUCER', 'AGENCY_MANAGER'] }, status: 'ACTIVE', officeId: office.id },
       select: { id: true },
     })).map((u) => u.id)
   );
@@ -148,7 +148,7 @@ async function officeAlphaAssignee(tx, { office, lastName }) {
 // cursor (not derived from any vendor).
 async function officeRoundRobinAssignee(tx, { office }) {
   const activeProducers = await tx.user.findMany({
-    where: { officeId: office.id, role: 'PRODUCER', status: 'ACTIVE' },
+    where: { officeId: office.id, role: { in: ['PRODUCER', 'AGENCY_MANAGER'] }, status: 'ACTIVE' },
     select: { id: true },
     orderBy: { id: 'asc' },
   });
