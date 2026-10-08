@@ -1,5 +1,6 @@
 const { z } = require('zod');
 const { callEd, isConfigured } = require('./aiProvider');
+const { redactTranscript } = require('./transcriptRedaction');
 
 const SCORING_DIMENSIONS = [
   'Opening', 'Rapport', 'Discovery', 'Needs Analysis', 'Question Quality',
@@ -56,7 +57,9 @@ async function analyzeTranscript(transcript) {
   }
 
   const systemPrompt = buildAnalysisPrompt();
-  const result = await callEd({ systemPrompt, userMessage: transcript, maxTokens: 2000 });
+  // Strip obvious PII (SSNs, card numbers, phone numbers, emails) before
+  // this transcript ever leaves our servers for the Anthropic API.
+  const result = await callEd({ systemPrompt, userMessage: redactTranscript(transcript), maxTokens: 2000 });
   if (!result.available) {
     return { available: false };
   }

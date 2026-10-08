@@ -75,3 +75,25 @@ test('analyzeTranscript throws on a schema-invalid response (e.g. missing a requ
 
   await assert.rejects(() => analyzeTranscript('producer: hi'), /did not match expected schema/);
 });
+
+test('analyzeTranscript redacts obvious PII from the transcript before it ever reaches the Anthropic API', async (t) => {
+  process.env.ANTHROPIC_API_KEY = 'test-key-not-real';
+  let sentBody;
+  t.mock.method(global, 'fetch', async (url, options) => {
+    sentBody = JSON.parse(options.body);
+    return { ok: true, json: async () => ({ content: [{ type: 'text', text: JSON.stringify(VALID_ANALYSIS) }], usage: { input_tokens: 500, output_tokens: 300 } }) };
+  });
+
+  const rawTranscript = 'Customer: my SSN is 123-45-6789, call me at (555) 123-4567 or email me at jane@example.com. Card is 4111 1111 1111 1111.';
+  await analyzeTranscript(rawTranscript);
+
+  const sentTranscript = sentBody.messages[0].content;
+  assert.ok(!sentTranscript.includes('123-45-6789'), 'SSN must never reach the LLM call');
+  assert.ok(!sentTranscript.includes('555) 123-4567'), 'phone number must never reach the LLM call');
+  assert.ok(!sentTranscript.includes('jane@example.com'), 'email must never reach the LLM call');
+  assert.ok(!sentTranscript.includes('4111 1111 1111 1111'), 'card number must never reach the LLM call');
+  assert.ok(sentTranscript.includes('[REDACTED-SSN]'));
+  assert.ok(sentTranscript.includes('[REDACTED-PHONE]'));
+  assert.ok(sentTranscript.includes('[REDACTED-EMAIL]'));
+  assert.ok(sentTranscript.includes('[REDACTED-CARD]'));
+});
