@@ -387,14 +387,14 @@ model User {
 
   // Backstage HR (docs/hr-suite/) — additive, never a second identity:
   // HrEmployeeProfile is a 1:1 extension of this same User row.
-  hrEmployeeProfile         HrEmployeeProfile?
-  hrEmployeesManaged        HrEmployeeProfile[]       @relation("HrEmployeeManager")
-  hrDepartmentsManaged      HrDepartment[]            @relation("HrDepartmentManager")
+  hrEmployeeProfile                 HrEmployeeProfile?
+  hrEmployeesManaged                HrEmployeeProfile[]        @relation("HrEmployeeManager")
+  hrDepartmentsManaged              HrDepartment[]             @relation("HrDepartmentManager")
   hrEmploymentHistoryEventsRecorded HrEmploymentHistoryEvent[] @relation("HrHistoryRecordedBy")
-  hrRoleGrantsHeld          HrRoleGrant[]             @relation("HrRoleGrantUser")
-  hrRoleGrantsGiven         HrRoleGrant[]             @relation("HrRoleGrantGrantedBy")
-  hrTimesheetsApproved      HrTimesheet[]             @relation("HrTimesheetApprovedBy")
-  hrAttendanceExceptionsReviewed HrAttendanceException[] @relation("HrAttendanceExceptionReviewedBy")
+  hrRoleGrantsHeld                  HrRoleGrant[]              @relation("HrRoleGrantUser")
+  hrRoleGrantsGiven                 HrRoleGrant[]              @relation("HrRoleGrantGrantedBy")
+  hrTimesheetsApproved              HrTimesheet[]              @relation("HrTimesheetApprovedBy")
+  hrAttendanceExceptionsReviewed    HrAttendanceException[]    @relation("HrAttendanceExceptionReviewedBy")
 
   @@index([agencyId])
   @@index([role])
@@ -588,14 +588,21 @@ model Agency {
   sales                    Sale[]
 
   // Backstage HR (docs/hr-suite/)
-  hrDepartments            HrDepartment[]
-  hrPositions              HrPosition[]
-  hrLegalEmployers         HrLegalEmployer[]
-  hrEmployeeProfiles       HrEmployeeProfile[]
+  hrDepartments             HrDepartment[]
+  hrPositions               HrPosition[]
+  hrLegalEmployers          HrLegalEmployer[]
+  hrEmployeeProfiles        HrEmployeeProfile[]
   hrEmploymentHistoryEvents HrEmploymentHistoryEvent[]
-  hrRoleGrants             HrRoleGrant[]
-  hrTimesheets             HrTimesheet[]
-  hrAttendanceExceptions   HrAttendanceException[]
+  hrRoleGrants              HrRoleGrant[]
+  hrTimesheets              HrTimesheet[]
+  hrAttendanceExceptions    HrAttendanceException[]
+  hrShiftTemplates          HrShiftTemplate[]
+  hrShiftAssignments        HrShiftAssignment[]
+  hrLeaveTypes              HrLeaveType[]
+  hrLeavePolicies           HrLeavePolicy[]
+  hrLeaveLedgerEntries      HrLeaveLedgerEntry[]
+  hrLeaveRequests           HrLeaveRequest[]
+  hrSettings                HrSettings?
 }
 
 enum BoberdooSyncStatus {
@@ -750,19 +757,19 @@ model PtoRequest {
 }
 
 model Customer {
-  id              String   @id @default(uuid())
-  firstName       String
-  lastName        String
-  phoneNormalized String?
-  email           String?
-  address         String?
-  city            String?
-  state           String?
-  zip             String?
+  id                 String    @id @default(uuid())
+  firstName          String
+  lastName           String
+  phoneNormalized    String?
+  email              String?
+  address            String?
+  city               String?
+  state              String?
+  zip                String?
   // Products this customer currently holds — populated only from real SOLD
   // dispositions (lead or transfer), never inferred or guessed. This is
   // what the cross-sell detector actually reads.
-  products        String[] @default([])
+  products           String[]  @default([])
   // Phone-number-level suppression (TCPA). Set whenever ANY Lead tied to
   // this Customer is dispositioned DO_NOT_CONTACT, so the suppression
   // follows the person across every future Lead from any vendor/source —
@@ -774,8 +781,8 @@ model Customer {
   doNotContact       Boolean   @default(false)
   doNotContactAt     DateTime?
   doNotContactReason String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   leads         Lead[]
   transfers     Transfer[]
@@ -1574,19 +1581,19 @@ model ApiTransaction {
 // fabricated; the reporting layer shows INSUFFICIENT_DATA instead.
 
 model RevenueEvent {
-  id          String          @id @default(uuid())
+  id          String             @id @default(uuid())
   agencyId    String?
-  agency      Agency?         @relation(fields: [agencyId], references: [id])
+  agency      Agency?            @relation(fields: [agencyId], references: [id])
   transferId  String?
-  transfer    Transfer?       @relation(fields: [transferId], references: [id])
+  transfer    Transfer?          @relation(fields: [transferId], references: [id])
   category    RevenueCategory
   sourceType  RevenueSourceType?
   amountCents Int
-  currency    String          @default("USD")
-  occurredAt  DateTime        @default(now())
+  currency    String             @default("USD")
+  occurredAt  DateTime           @default(now())
   notes       String?
   createdById String?
-  createdAt   DateTime        @default(now())
+  createdAt   DateTime           @default(now())
 
   @@index([agencyId])
   @@index([occurredAt])
@@ -1674,34 +1681,34 @@ model SupportTicket {
 // later, without changing anything downstream of "we have an audio file."
 
 model Call {
-  id                 String     @id @default(uuid())
-  agencyId           String
-  agency             Agency     @relation(fields: [agencyId], references: [id])
-  uploadedById       String
-  uploadedBy         User       @relation("CallUploadedBy", fields: [uploadedById], references: [id])
-  leadId             String?
-  lead               Lead?      @relation(fields: [leadId], references: [id])
-  source             CallSource @default(MANUAL_UPLOAD)
-  filename           String
+  id                    String     @id @default(uuid())
+  agencyId              String
+  agency                Agency     @relation(fields: [agencyId], references: [id])
+  uploadedById          String
+  uploadedBy            User       @relation("CallUploadedBy", fields: [uploadedById], references: [id])
+  leadId                String?
+  lead                  Lead?      @relation(fields: [leadId], references: [id])
+  source                CallSource @default(MANUAL_UPLOAD)
+  filename              String
   // Null once the raw audio has been permanently deleted ("burned") after
   // scoring completes — see recordingDeletedAt and jobs/callProcessing.js's
   // runAnalysis(). A non-null value is the only thing that makes the
   // recording readable/playable; GET /calls/:id/audio refuses once this
   // is null, regardless of status.
-  storageKey         String?
-  mimeType           String?
-  fileSizeBytes      Int?
-  durationSeconds    Int?
-  status             CallStatus @default(UPLOADED)
-  failureReason      String?
+  storageKey            String?
+  mimeType              String?
+  fileSizeBytes         Int?
+  durationSeconds       Int?
+  status                CallStatus @default(UPLOADED)
+  failureReason         String?
   // Transient only. Redacted (lib/transcriptRedaction.js) the moment it's
   // captured — whether from an automatic transcription provider or a
   // human pasting it in — so a raw, unredacted transcript is never
   // written here even momentarily. Permanently nulled out the moment
   // scoring completes (see transcriptDiscardedAt); the CallAnalysis row
   // is the durable record from that point on, never this field.
-  transcript         String?
-  transcriptProvider String?
+  transcript            String?
+  transcriptProvider    String?
   // Set together, once, the moment runAnalysis() successfully creates the
   // CallAnalysis row for this call — never touched again after that.
   recordingDeletedAt    DateTime?
@@ -1710,9 +1717,9 @@ model Call {
   // uploader has one (uploaded directly in the Bunny.net dashboard — never
   // re-uploaded or re-hosted by this app). Played via Bunny's own iframe
   // embed in the Coaching tab's per-call detail view. See lib/bunnyStream.js.
-  bunnyVideoId       String?
-  createdAt          DateTime   @default(now())
-  updatedAt          DateTime   @updatedAt
+  bunnyVideoId          String?
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
 
   analysis CallAnalysis?
 
@@ -2479,21 +2486,22 @@ model BreakRoomPlatformSettings {
 // User as the single source of truth.
 
 model HrDepartment {
-  id                 String        @id @default(uuid())
+  id                 String         @id @default(uuid())
   agencyId           String
-  agency             Agency        @relation(fields: [agencyId], references: [id])
+  agency             Agency         @relation(fields: [agencyId], references: [id])
   name               String
   parentDepartmentId String?
-  parentDepartment   HrDepartment? @relation("HrDeptHierarchy", fields: [parentDepartmentId], references: [id])
+  parentDepartment   HrDepartment?  @relation("HrDeptHierarchy", fields: [parentDepartmentId], references: [id])
   childDepartments   HrDepartment[] @relation("HrDeptHierarchy")
   managerId          String?
-  manager            User?         @relation("HrDepartmentManager", fields: [managerId], references: [id])
-  isActive           Boolean       @default(true)
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  manager            User?          @relation("HrDepartmentManager", fields: [managerId], references: [id])
+  isActive           Boolean        @default(true)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
 
-  positions          HrPosition[]
-  employeeProfiles   HrEmployeeProfile[]
+  positions        HrPosition[]
+  employeeProfiles HrEmployeeProfile[]
+  shiftTemplates   HrShiftTemplate[]
 
   @@index([agencyId])
   @@index([parentDepartmentId])
@@ -2525,8 +2533,8 @@ model HrLegalEmployer {
   agencyId            String
   agency              Agency   @relation(fields: [agencyId], references: [id])
   legalName           String
-  jurisdictionCountry String   // ISO 3166-1 alpha-2, e.g. "US"
-  jurisdictionRegion  String?  // e.g. a US state code
+  jurisdictionCountry String // ISO 3166-1 alpha-2, e.g. "US"
+  jurisdictionRegion  String? // e.g. a US state code
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -2536,45 +2544,49 @@ model HrLegalEmployer {
 }
 
 model HrEmployeeProfile {
-  id                    String    @id @default(uuid())
-  userId                String    @unique
-  user                  User      @relation(fields: [userId], references: [id])
-  agencyId              String
-  agency                Agency    @relation(fields: [agencyId], references: [id])
-  legalEmployerId       String?
-  legalEmployer         HrLegalEmployer? @relation(fields: [legalEmployerId], references: [id])
-  employeeNumber        String?
+  id                   String           @id @default(uuid())
+  userId               String           @unique
+  user                 User             @relation(fields: [userId], references: [id])
+  agencyId             String
+  agency               Agency           @relation(fields: [agencyId], references: [id])
+  legalEmployerId      String?
+  legalEmployer        HrLegalEmployer? @relation(fields: [legalEmployerId], references: [id])
+  employeeNumber       String?
   // Only set when different from User.firstName/lastName (the real
   // legal name on file) — most of the time this stays null and the
   // display name on User is also the legal name.
-  legalFirstName        String?
-  legalLastName         String?
-  personalEmail         String?
+  legalFirstName       String?
+  legalLastName        String?
+  personalEmail        String?
   // Free text in Phase 1 (e.g. "FULL_TIME", "PART_TIME", "CONTRACTOR") —
   // not an enum yet, since the real category set depends on the
   // jurisdiction/legal review the Payroll phase requires.
-  employmentType        String?
-  workerClassification  String?
-  hireDate              DateTime?
-  originalHireDate      DateTime?
-  terminationDate       DateTime?
-  departmentId          String?
-  department            HrDepartment? @relation(fields: [departmentId], references: [id])
-  positionId            String?
-  position              HrPosition?   @relation(fields: [positionId], references: [id])
-  managerId             String?
-  manager               User?     @relation("HrEmployeeManager", fields: [managerId], references: [id])
-  workTimeZone           String?
-  onboardingStatus      String    @default("NOT_STARTED")
-  offboardingStatus     String    @default("NOT_STARTED")
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  employmentType       String?
+  workerClassification String?
+  hireDate             DateTime?
+  originalHireDate     DateTime?
+  terminationDate      DateTime?
+  departmentId         String?
+  department           HrDepartment?    @relation(fields: [departmentId], references: [id])
+  positionId           String?
+  position             HrPosition?      @relation(fields: [positionId], references: [id])
+  managerId            String?
+  manager              User?            @relation("HrEmployeeManager", fields: [managerId], references: [id])
+  workTimeZone         String?
+  onboardingStatus     String           @default("NOT_STARTED")
+  offboardingStatus    String           @default("NOT_STARTED")
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
   // Optimistic concurrency for the profile-edit route.
-  version                Int       @default(1)
+  version              Int              @default(1)
 
   employmentHistory      HrEmploymentHistoryEvent[]
   timesheets             HrTimesheet[]
   attendanceExceptions   HrAttendanceException[]
+  shiftAssignments       HrShiftAssignment[]
+  leavePolicyAssignments HrLeavePolicyAssignment[]
+  leaveLedgerEntries     HrLeaveLedgerEntry[]
+  leaveRequests          HrLeaveRequest[]
 
   @@index([agencyId])
   @@index([departmentId])
@@ -2586,19 +2598,19 @@ model HrEmployeeProfile {
 // schema's established "never destroy history" convention (see
 // TelemarketerAssignment's own comment for the same precedent).
 model HrEmploymentHistoryEvent {
-  id                String   @id @default(uuid())
+  id                String            @id @default(uuid())
   employeeProfileId String
   employeeProfile   HrEmployeeProfile @relation(fields: [employeeProfileId], references: [id])
   agencyId          String
-  agency            Agency   @relation(fields: [agencyId], references: [id])
+  agency            Agency            @relation(fields: [agencyId], references: [id])
   // DEPARTMENT_CHANGE | MANAGER_CHANGE | POSITION_CHANGE | STATUS_CHANGE | LOCATION_CHANGE
   changeType        String
-  effectiveFrom     DateTime @default(now())
+  effectiveFrom     DateTime          @default(now())
   previousValue     Json?
   newValue          Json?
   recordedById      String
-  recordedBy        User     @relation("HrHistoryRecordedBy", fields: [recordedById], references: [id])
-  createdAt         DateTime @default(now())
+  recordedBy        User              @relation("HrHistoryRecordedBy", fields: [recordedById], references: [id])
+  createdAt         DateTime          @default(now())
 
   @@index([employeeProfileId])
   @@index([agencyId])
@@ -2639,72 +2651,264 @@ model HrRoleGrant {
 // on a schedule from real clock events, never hand-entered.
 
 model HrTimesheet {
-  id                String    @id @default(uuid())
+  id                String            @id @default(uuid())
   employeeProfileId String
   employeeProfile   HrEmployeeProfile @relation(fields: [employeeProfileId], references: [id])
   agencyId          String
-  agency            Agency    @relation(fields: [agencyId], references: [id])
+  agency            Agency            @relation(fields: [agencyId], references: [id])
   periodStart       DateTime
   periodEnd         DateTime
-  regularMinutes    Int       @default(0)
+  regularMinutes    Int               @default(0)
   // Flagged via a simple configurable weekly-hours threshold only — NOT
   // a jurisdiction-aware payroll overtime calculation (that's the
   // Payroll phase, after legal/payroll review).
-  overtimeMinutes   Int       @default(0)
+  overtimeMinutes   Int               @default(0)
   // Populated once Part C's leave ledger exists; always 0 until then —
   // never fabricated.
-  paidLeaveMinutes  Int       @default(0)
-  status            String    @default("OPEN") // OPEN | SUBMITTED | APPROVED | REJECTED
+  paidLeaveMinutes  Int               @default(0)
+  status            String            @default("OPEN") // OPEN | SUBMITTED | APPROVED | REJECTED
   approvedById      String?
-  approvedBy        User?     @relation("HrTimesheetApprovedBy", fields: [approvedById], references: [id])
+  approvedBy        User?             @relation("HrTimesheetApprovedBy", fields: [approvedById], references: [id])
   approvedAt        DateTime?
-  computedAt        DateTime  @default(now())
+  computedAt        DateTime          @default(now())
 
-  segments          HrTimesheetSegment[]
+  segments HrTimesheetSegment[]
 
   @@unique([employeeProfileId, periodStart, periodEnd])
   @@index([agencyId, periodStart])
 }
 
 model HrTimesheetSegment {
-  id              String   @id @default(uuid())
-  timesheetId     String
-  timesheet       HrTimesheet @relation(fields: [timesheetId], references: [id])
+  id                     String      @id @default(uuid())
+  timesheetId            String
+  timesheet              HrTimesheet @relation(fields: [timesheetId], references: [id])
   // FK by id only, no Prisma relation into TimeClockEntry — this module
   // never writes there; this is a read-derived pointer for traceability.
   sourceTimeClockEntryId String
-  segmentType     String   // WORK | LUNCH | BREAK
-  startedAt       DateTime
-  endedAt         DateTime?
-  minutes         Int?
+  segmentType            String // WORK | LUNCH | BREAK
+  startedAt              DateTime
+  endedAt                DateTime?
+  minutes                Int?
   // Missing punch, overlapping segment, overnight crossing, etc. —
   // flagged for human review, never guessed at.
-  isException     Boolean  @default(false)
-  exceptionReason String?
+  isException            Boolean     @default(false)
+  exceptionReason        String?
 
   @@index([timesheetId])
 }
 
 model HrAttendanceException {
-  id                String   @id @default(uuid())
+  id                String            @id @default(uuid())
   employeeProfileId String
   employeeProfile   HrEmployeeProfile @relation(fields: [employeeProfileId], references: [id])
   agencyId          String
-  agency            Agency   @relation(fields: [agencyId], references: [id])
+  agency            Agency            @relation(fields: [agencyId], references: [id])
   // Set once Part C's HrShiftAssignment exists.
   scheduledShiftId  String?
-  exceptionType     String   // LATE_ARRIVAL | EARLY_DEPARTURE | MISSED_PUNCH | NO_CALL_NO_SHOW_CANDIDATE | UNSCHEDULED_WORK
-  detectedAt        DateTime @default(now())
+  exceptionType     String // LATE_ARRIVAL | EARLY_DEPARTURE | MISSED_PUNCH | NO_CALL_NO_SHOW_CANDIDATE | UNSCHEDULED_WORK
+  detectedAt        DateTime          @default(now())
   // Never auto-classified to a RESOLVED_* state — only a human review
   // call (POST .../review) can move this out of OPEN/UNDER_REVIEW. See
   // the directive's own "no automatic discipline" rule.
-  status            String   @default("OPEN") // OPEN | UNDER_REVIEW | RESOLVED_EXCUSED | RESOLVED_UNEXCUSED
+  status            String            @default("OPEN") // OPEN | UNDER_REVIEW | RESOLVED_EXCUSED | RESOLVED_UNEXCUSED
   reviewedById      String?
-  reviewedBy        User?    @relation("HrAttendanceExceptionReviewedBy", fields: [reviewedById], references: [id])
+  reviewedBy        User?             @relation("HrAttendanceExceptionReviewedBy", fields: [reviewedById], references: [id])
   reviewedAt        DateTime?
   reviewNote        String?
-  createdAt         DateTime @default(now())
+  createdAt         DateTime          @default(now())
 
   @@index([agencyId, status])
   @@index([employeeProfileId])
+}
+
+// BACKSTAGE HR — Phase 1 Part C: Scheduling & Leave. HrLeaveLedgerEntry is
+// the one and only source of truth for a leave balance — no bare "current
+// balance" integer is stored anywhere; a balance is always SUM(minutes)
+// over the ledger, computed transactionally alongside any write. A
+// protected leave type (isProtected) is excluded from ordinary
+// balance-denial and flagged to HR for manual review instead of being
+// auto-approved/denied. A shift swap always requires explicit manager
+// approval before HrShiftAssignment actually changes.
+
+model HrShiftTemplate {
+  id           String        @id @default(uuid())
+  agencyId     String
+  agency       Agency        @relation(fields: [agencyId], references: [id])
+  name         String
+  startTime    String // "HH:MM", interpreted in the assignment's own work time zone
+  endTime      String
+  departmentId String?
+  department   HrDepartment? @relation(fields: [departmentId], references: [id])
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+
+  shiftAssignments HrShiftAssignment[]
+
+  @@index([agencyId])
+}
+
+model HrShiftAssignment {
+  id                String            @id @default(uuid())
+  agencyId          String
+  agency            Agency            @relation(fields: [agencyId], references: [id])
+  employeeProfileId String
+  employeeProfile   HrEmployeeProfile @relation(fields: [employeeProfileId], references: [id])
+  shiftTemplateId   String?
+  shiftTemplate     HrShiftTemplate?  @relation(fields: [shiftTemplateId], references: [id])
+  workDate          DateTime // date-only, in the employee's work time zone
+  startAt           DateTime // resolved UTC instant
+  endAt             DateTime
+  status            String            @default("SCHEDULED") // SCHEDULED | SWAPPED | COVERED | CANCELLED
+  notes             String?
+  // FK by id only, no Prisma relation — matches HrTimesheetSegment's own
+  // sourceTimeClockEntryId precedent for an attributed-but-unrelated id.
+  createdById       String
+  createdAt         DateTime          @default(now())
+
+  swapRequests HrShiftSwapRequest[]
+
+  @@index([agencyId, workDate])
+  @@index([employeeProfileId, workDate])
+}
+
+model HrShiftSwapRequest {
+  id                     String            @id @default(uuid())
+  shiftAssignmentId      String
+  shiftAssignment        HrShiftAssignment @relation(fields: [shiftAssignmentId], references: [id])
+  // FK by id only, no Prisma relation (same precedent as HrShiftAssignment.createdById).
+  requestedById          String
+  proposedCoveringUserId String?
+  status                 String            @default("PENDING") // PENDING | APPROVED | DENIED | CANCELLED
+  reason                 String?
+  decidedById            String?
+  decidedAt              DateTime?
+  createdAt              DateTime          @default(now())
+
+  @@index([shiftAssignmentId])
+}
+
+model HrLeaveType {
+  id          String   @id @default(uuid())
+  agencyId    String
+  agency      Agency   @relation(fields: [agencyId], references: [id])
+  name        String // "Vacation", "Sick", "Personal", "Unpaid", etc.
+  isPaid      Boolean  @default(true)
+  isProtected Boolean  @default(false) // flags it as legally-sensitive; full protected-leave CASE workflow (eligibility review, docs, intermittent tracking) is deferred to the later HR Cases phase — this flag only restricts visibility and excludes it from ordinary balance-denial rules today
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  leavePolicies HrLeavePolicy[]
+  ledgerEntries HrLeaveLedgerEntry[]
+  leaveRequests HrLeaveRequest[]
+
+  @@index([agencyId])
+}
+
+model HrLeavePolicy {
+  id                   String      @id @default(uuid())
+  agencyId             String
+  agency               Agency      @relation(fields: [agencyId], references: [id])
+  leaveTypeId          String
+  leaveType            HrLeaveType @relation(fields: [leaveTypeId], references: [id])
+  name                 String
+  accrualMethod        String // FRONT_LOADED | PER_PAY_PERIOD | PER_HOUR_WORKED
+  accrualAmountMinutes Int? // meaning depends on accrualMethod
+  annualCapMinutes     Int?
+  carryoverCapMinutes  Int?
+  waitingPeriodDays    Int         @default(0)
+  effectiveFrom        DateTime    @default(now())
+  effectiveTo          DateTime?
+  createdAt            DateTime    @default(now())
+
+  assignments HrLeavePolicyAssignment[]
+
+  @@index([agencyId])
+}
+
+model HrLeavePolicyAssignment {
+  id                String            @id @default(uuid())
+  employeeProfileId String
+  employeeProfile   HrEmployeeProfile @relation(fields: [employeeProfileId], references: [id])
+  leavePolicyId     String
+  leavePolicy       HrLeavePolicy     @relation(fields: [leavePolicyId], references: [id])
+  effectiveFrom     DateTime          @default(now())
+  effectiveTo       DateTime?
+
+  @@index([employeeProfileId])
+}
+
+model HrLeaveLedgerEntry {
+  id                String                 @id @default(uuid())
+  employeeProfileId String
+  employeeProfile   HrEmployeeProfile      @relation(fields: [employeeProfileId], references: [id])
+  leaveTypeId       String
+  leaveType         HrLeaveType            @relation(fields: [leaveTypeId], references: [id])
+  agencyId          String
+  agency            Agency                 @relation(fields: [agencyId], references: [id])
+  transactionType   HrLeaveTransactionType
+  minutes           Int // positive for ACCRUAL/GRANT/CARRYOVER/REVERSAL-of-a-use, negative for USE/EXPIRATION
+  reason            String
+  // FK by id only, no Prisma relation — points at HrLeaveRequest when
+  // transactionType is USE, matching this schema's established
+  // FK-by-id-only precedent for a traceability pointer.
+  sourceRequestId   String?
+  idempotencyKey    String?                @unique // prevents a retried accrual job run from double-posting
+  // FK by id only, no Prisma relation — null for system-posted accruals.
+  recordedById      String?
+  createdAt         DateTime               @default(now())
+
+  @@index([employeeProfileId, leaveTypeId])
+}
+
+model HrLeaveRequest {
+  id                String            @id @default(uuid())
+  employeeProfileId String
+  employeeProfile   HrEmployeeProfile @relation(fields: [employeeProfileId], references: [id])
+  agencyId          String
+  agency            Agency            @relation(fields: [agencyId], references: [id])
+  leaveTypeId       String
+  leaveType         HrLeaveType       @relation(fields: [leaveTypeId], references: [id])
+  startDate         DateTime
+  endDate           DateTime
+  requestedMinutes  Int
+  note              String?
+  status            String            @default("PENDING") // PENDING | APPROVED | DENIED | CANCELLED
+  // FK by id only, no Prisma relation (same precedent as other decidedBy/
+  // reviewedBy-style ids in this module where a full relation isn't
+  // needed for the route logic).
+  decidedById       String?
+  decidedAt         DateTime?
+  decisionNote      String?
+  createdAt         DateTime          @default(now())
+
+  @@index([agencyId, status])
+  @@index([employeeProfileId])
+}
+
+enum HrLeaveTransactionType {
+  ACCRUAL
+  GRANT
+  USE
+  ADJUSTMENT
+  CARRYOVER
+  EXPIRATION
+  REVERSAL
+  SEPARATION_PAYOUT
+}
+
+// A single per-agency scheduling-heads-up threshold — explicitly NOT a
+// jurisdiction-aware payroll overtime calculation (that's the Payroll
+// phase, after legal/payroll review). Drives only the Part C scheduling
+// warning; HrTimesheet's own Part B overtimeMinutes field keeps using its
+// existing DEFAULT_WEEKLY_OVERTIME_THRESHOLD_MINUTES constant until a
+// future pass wires timesheets to this same setting, to avoid touching
+// Part B's already-shipped, already-tested lib/hrTimesheetBuilder.js in
+// this round.
+model HrSettings {
+  id                             String   @id @default(uuid())
+  agencyId                       String   @unique
+  agency                         Agency   @relation(fields: [agencyId], references: [id])
+  weeklyOvertimeThresholdMinutes Int      @default(2400)
+  createdAt                      DateTime @default(now())
+  updatedAt                      DateTime @updatedAt
 }
