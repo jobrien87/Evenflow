@@ -18,5 +18,7 @@ router.use('/role-grants', require('./roleGrants'));
 router.use('/employees', require('./employees'));
 router.use('/overview', require('./overview'));
 router.use('/', require('./timeAttendance'));
+router.use('/', require('./scheduling'));
+router.use('/leave', require('./leave'));
 
 module.exports = router;
