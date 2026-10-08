@@ -40,7 +40,10 @@ router.post('/me/background', backgroundUpload.single('image'), async (req, res,
     try {
       storageKey = await save(req.file.buffer, req.file.originalname);
     } catch (err) {
-      return res.status(500).json({ success: false, error: 'STORAGE_ERROR', message: err.message });
+      // Never echo a raw storage exception (can include server filesystem
+      // paths or internal config state) back to the client.
+      console.error(`[users] background image storage failed correlationId=${req.correlationId}`, err);
+      return res.status(500).json({ success: false, error: 'STORAGE_ERROR', message: 'Failed to store the uploaded image. Please try again.' });
     }
 
     await prisma.user.update({

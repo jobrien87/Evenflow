@@ -452,7 +452,12 @@ async function importLeadsFromFile({ fileBuffer, agencyId, uploaderId, actorRole
         correlationId,
       });
     } catch (err) {
-      failures.push({ row: row._sourceRow, reason: err.message || 'Failed to create this row.' });
+      // Never echo a raw internal exception (e.g. a Prisma constraint
+      // message naming a column/table) back into a client-visible field —
+      // log the real error server-side for diagnosis, surface a generic,
+      // safe reason to the uploader.
+      console.error(`[leads] bulk-import row failed correlationId=${correlationId}`, err);
+      failures.push({ row: row._sourceRow, reason: 'Failed to create this row — contact support if this persists.' });
     }
   }
 
@@ -765,7 +770,10 @@ router.post('/historical-data-import', uploadSpreadsheet.single('file'), async (
         });
         created += 1;
       } catch (err) {
-        failures.push({ row: record._sourceRow, reason: err.message || 'Failed to create this row.' });
+        // Same rationale as importLeadsFromFile's catch above — never echo
+        // a raw internal exception back into a client-visible field.
+        console.error(`[leads] historical-data-import row failed correlationId=${req.correlationId}`, err);
+        failures.push({ row: record._sourceRow, reason: 'Failed to create this row — contact support if this persists.' });
       }
     }
 

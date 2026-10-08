@@ -395,7 +395,10 @@ router.post('/', requireRole('PRODUCER', 'AGENCY_MANAGER', 'AGENCY_OWNER'), uplo
     try {
       storageKey = await save(req.file.buffer, req.file.originalname);
     } catch (err) {
-      return res.status(500).json({ success: false, error: 'STORAGE_ERROR', message: err.message });
+      // Never echo a raw storage exception (can include server filesystem
+      // paths or internal config state) back to the client.
+      console.error(`[calls] recording storage failed correlationId=${req.correlationId}`, err);
+      return res.status(500).json({ success: false, error: 'STORAGE_ERROR', message: 'Failed to store the uploaded recording. Please try again.' });
     }
 
     const call = await prisma.call.create({
