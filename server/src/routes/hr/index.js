@@ -17,5 +17,6 @@ router.use('/legal-employers', require('./legalEmployers'));
 router.use('/role-grants', require('./roleGrants'));
 router.use('/employees', require('./employees'));
 router.use('/overview', require('./overview'));
+router.use('/', require('./timeAttendance'));
 
 module.exports = router;

@@ -14,8 +14,18 @@ const TABS = [
   { key: 'overview', label: 'OVERVIEW' },
   { key: 'employees', label: 'EMPLOYEES' },
   { key: 'departments', label: 'DEPARTMENTS' },
+  { key: 'attendance', label: 'ATTENDANCE' },
+  { key: 'timesheets', label: 'TIMESHEETS' },
   { key: 'settings', label: 'SETTINGS' },
 ];
+
+const CLOCK_STATE_TONE = { CLOCKED_IN: 'green', ON_BREAK: 'lime', ON_LUNCH: 'lime', CLOCKED_OUT: 'neutral' };
+const CLOCK_STATE_LABEL = { CLOCKED_IN: 'Clocked In', ON_BREAK: 'On Break', ON_LUNCH: 'On Lunch', CLOCKED_OUT: 'Clocked Out' };
+
+function minutesToHours(minutes) {
+  if (minutes == null) return '—';
+  return (minutes / 60).toFixed(1);
+}
 
 const ONBOARDING_STATUSES = ['NOT_STARTED', 'IN_PROGRESS', 'COMPLETE'];
 const OFFBOARDING_STATUSES = ['NOT_STARTED', 'IN_PROGRESS', 'COMPLETE'];
@@ -110,6 +120,8 @@ export default function HrDashboardPage({ agencyId: agencyIdProp }) {
         />
       )}
       {tab === 'departments' && <DepartmentsTab departments={departments} agencyUsers={agencyUsers} agencyId={agencyId} onChange={load} />}
+      {tab === 'attendance' && <AttendanceTab />}
+      {tab === 'timesheets' && <TimesheetsTab employees={employees} agencyId={agencyId} />}
       {tab === 'settings' && (
         <SettingsTab
           legalEmployers={legalEmployers}
@@ -576,6 +588,192 @@ function RoleGrantsCard({ roleGrants, agencyUsers, agencyId, onChange }) {
             <div key={g.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--bg-sunken)', borderRadius: 'var(--radius-sm)' }}>
               <div style={{ fontSize: 13 }}>{fullName(g.user)} — <Badge tone="lime">{g.hrRole}</Badge></div>
               <Button size="sm" variant="danger" onClick={() => revoke(g.id)}>REVOKE</Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function AttendanceTab() {
+  const [live, setLive] = useState(null);
+  const [exceptions, setExceptions] = useState([]);
+  const [error, setError] = useState('');
+  const [reviewingId, setReviewingId] = useState('');
+  const [reviewNote, setReviewNote] = useState('');
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function load() {
+    setError('');
+    try {
+      const [liveRes, exRes] = await Promise.all([
+        api.hrAttendanceLive(),
+        api.hrAttendanceExceptions('?status=OPEN'),
+      ]);
+      setLive(liveRes.live);
+      setExceptions(exRes.exceptions);
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Could not load attendance.');
+    }
+  }
+
+  async function review(id, status) {
+    try {
+      await api.reviewHrAttendanceException(id, { status, reviewNote: reviewNote.trim() || undefined });
+      setReviewingId('');
+      setReviewNote('');
+      load();
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Could not review this exception.');
+    }
+  }
+
+  if (error) return <EmptyState title="Could not load attendance" description={error} action={<Button size="sm" onClick={load}>RETRY</Button>} />;
+  if (!live) return <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading…</div>;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <Card>
+        <SectionHeader>LIVE STATUS</SectionHeader>
+        {live.length === 0 ? (
+          <EmptyState description="No HR employee profiles yet." />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {live.map((row) => (
+              <div key={row.employeeProfileId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--bg-sunken)', borderRadius: 'var(--radius-sm)' }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{row.firstName} {row.lastName}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{row.department?.name || 'No department'} · {row.position?.title || 'No position'}</div>
+                </div>
+                <Badge tone={CLOCK_STATE_TONE[row.state] || 'neutral'}>{CLOCK_STATE_LABEL[row.state] || row.state}</Badge>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card>
+        <SectionHeader>ATTENDANCE EXCEPTIONS — OPEN</SectionHeader>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+          A detected pattern (e.g. a forgotten clock-out) — never auto-resolved. Review each one and mark it excused or unexcused.
+        </div>
+        {exceptions.length === 0 ? (
+          <EmptyState description="No open attendance exceptions." />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {exceptions.map((ex) => (
+              <div key={ex.id} style={{ padding: '10px 12px', background: 'var(--bg-sunken)', borderRadius: 'var(--radius-sm)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>{fullName(ex.employeeProfile?.user)} — {ex.exceptionType.replace(/_/g, ' ')}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{new Date(ex.detectedAt).toLocaleString()}</div>
+                </div>
+                {reviewingId === ex.id ? (
+                  <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <input placeholder="Review note (optional)" value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} style={inputStyle} />
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <Button size="sm" onClick={() => review(ex.id, 'RESOLVED_EXCUSED')}>EXCUSE</Button>
+                      <Button size="sm" variant="danger" onClick={() => review(ex.id, 'RESOLVED_UNEXCUSED')}>UNEXCUSED</Button>
+                      <Button size="sm" variant="secondary" onClick={() => { setReviewingId(''); setReviewNote(''); }}>CANCEL</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <Button size="sm" variant="secondary" style={{ marginTop: 8 }} onClick={() => setReviewingId(ex.id)}>REVIEW</Button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function TimesheetsTab({ employees, agencyId }) {
+  const [timesheets, setTimesheets] = useState([]);
+  const [error, setError] = useState('');
+  const [employeeProfileId, setEmployeeProfileId] = useState('');
+  const [periodStart, setPeriodStart] = useState('');
+  const [periodEnd, setPeriodEnd] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function load() {
+    setError('');
+    try {
+      const data = await api.hrTimesheets(agencyId ? `?agencyId=${agencyId}` : '');
+      setTimesheets(data.timesheets);
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Could not load timesheets.');
+    }
+  }
+
+  async function compute() {
+    if (!employeeProfileId || !periodStart || !periodEnd) { setError('Pick an employee and a period.'); return; }
+    setBusy(true);
+    setError('');
+    try {
+      await api.computeHrTimesheet({ employeeProfileId, periodStart, periodEnd, agencyId: agencyId || undefined });
+      load();
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Could not compute this timesheet.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function decide(id, action) {
+    try {
+      if (action === 'approve') await api.approveHrTimesheet(id);
+      else await api.rejectHrTimesheet(id);
+      load();
+    } catch (err) {
+      setError(err.data?.message || err.message || `Could not ${action} this timesheet.`);
+    }
+  }
+
+  return (
+    <Card>
+      <SectionHeader>TIMESHEETS</SectionHeader>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+        <select value={employeeProfileId} onChange={(e) => setEmployeeProfileId(e.target.value)} style={inputStyle}>
+          <option value="">Select employee…</option>
+          {employees.map((e) => <option key={e.id} value={e.id}>{fullName(e.user)}</option>)}
+        </select>
+        <input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} style={inputStyle} />
+        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>to</span>
+        <input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} style={inputStyle} />
+        <Button size="sm" onClick={compute} disabled={busy}>{busy ? 'COMPUTING…' : 'COMPUTE'}</Button>
+      </div>
+      {error && <div style={{ color: 'var(--danger)', fontSize: 12, marginBottom: 10 }}>{error}</div>}
+      {timesheets.length === 0 ? (
+        <EmptyState description="No timesheets computed yet." />
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {timesheets.map((t) => (
+            <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'var(--bg-sunken)', borderRadius: 'var(--radius-sm)' }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{fullName(t.employeeProfile?.user)}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  {new Date(t.periodStart).toLocaleDateString()} – {new Date(t.periodEnd).toLocaleDateString()} · {minutesToHours(t.regularMinutes)}h regular
+                  {t.overtimeMinutes > 0 ? ` · ${minutesToHours(t.overtimeMinutes)}h OT` : ''}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <Badge tone={t.status === 'APPROVED' ? 'green' : t.status === 'REJECTED' ? 'danger' : 'neutral'}>{t.status}</Badge>
+                {t.status === 'SUBMITTED' && (
+                  <>
+                    <Button size="sm" onClick={() => decide(t.id, 'approve')}>APPROVE</Button>
+                    <Button size="sm" variant="danger" onClick={() => decide(t.id, 'reject')}>REJECT</Button>
+                  </>
+                )}
+              </div>
             </div>
           ))}
         </div>

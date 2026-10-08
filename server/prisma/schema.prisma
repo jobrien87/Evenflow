@@ -393,6 +393,8 @@ model User {
   hrEmploymentHistoryEventsRecorded HrEmploymentHistoryEvent[] @relation("HrHistoryRecordedBy")
   hrRoleGrantsHeld          HrRoleGrant[]             @relation("HrRoleGrantUser")
   hrRoleGrantsGiven         HrRoleGrant[]             @relation("HrRoleGrantGrantedBy")
+  hrTimesheetsApproved      HrTimesheet[]             @relation("HrTimesheetApprovedBy")
+  hrAttendanceExceptionsReviewed HrAttendanceException[] @relation("HrAttendanceExceptionReviewedBy")
 
   @@index([agencyId])
   @@index([role])
@@ -592,6 +594,8 @@ model Agency {
   hrEmployeeProfiles       HrEmployeeProfile[]
   hrEmploymentHistoryEvents HrEmploymentHistoryEvent[]
   hrRoleGrants             HrRoleGrant[]
+  hrTimesheets             HrTimesheet[]
+  hrAttendanceExceptions   HrAttendanceException[]
 }
 
 enum BoberdooSyncStatus {
@@ -2569,6 +2573,8 @@ model HrEmployeeProfile {
   version                Int       @default(1)
 
   employmentHistory      HrEmploymentHistoryEvent[]
+  timesheets             HrTimesheet[]
+  attendanceExceptions   HrAttendanceException[]
 
   @@index([agencyId])
   @@index([departmentId])
@@ -2623,4 +2629,82 @@ model HrRoleGrant {
 
   @@unique([userId, agencyId, hrRole])
   @@index([agencyId])
+}
+
+// BACKSTAGE HR — Phase 1 Part B: Time & Attendance. A strictly read-only
+// consumer of TimeClockEntry — hrTimesheetBuilder.js is the one function
+// allowed to read it; nothing in this module ever writes to it, and
+// nothing here changes timeClockState.js's logic or Break Room
+// eligibility. HrTimesheet/HrTimesheetSegment are derived data, computed
+// on a schedule from real clock events, never hand-entered.
+
+model HrTimesheet {
+  id                String    @id @default(uuid())
+  employeeProfileId String
+  employeeProfile   HrEmployeeProfile @relation(fields: [employeeProfileId], references: [id])
+  agencyId          String
+  agency            Agency    @relation(fields: [agencyId], references: [id])
+  periodStart       DateTime
+  periodEnd         DateTime
+  regularMinutes    Int       @default(0)
+  // Flagged via a simple configurable weekly-hours threshold only — NOT
+  // a jurisdiction-aware payroll overtime calculation (that's the
+  // Payroll phase, after legal/payroll review).
+  overtimeMinutes   Int       @default(0)
+  // Populated once Part C's leave ledger exists; always 0 until then —
+  // never fabricated.
+  paidLeaveMinutes  Int       @default(0)
+  status            String    @default("OPEN") // OPEN | SUBMITTED | APPROVED | REJECTED
+  approvedById      String?
+  approvedBy        User?     @relation("HrTimesheetApprovedBy", fields: [approvedById], references: [id])
+  approvedAt        DateTime?
+  computedAt        DateTime  @default(now())
+
+  segments          HrTimesheetSegment[]
+
+  @@unique([employeeProfileId, periodStart, periodEnd])
+  @@index([agencyId, periodStart])
+}
+
+model HrTimesheetSegment {
+  id              String   @id @default(uuid())
+  timesheetId     String
+  timesheet       HrTimesheet @relation(fields: [timesheetId], references: [id])
+  // FK by id only, no Prisma relation into TimeClockEntry — this module
+  // never writes there; this is a read-derived pointer for traceability.
+  sourceTimeClockEntryId String
+  segmentType     String   // WORK | LUNCH | BREAK
+  startedAt       DateTime
+  endedAt         DateTime?
+  minutes         Int?
+  // Missing punch, overlapping segment, overnight crossing, etc. —
+  // flagged for human review, never guessed at.
+  isException     Boolean  @default(false)
+  exceptionReason String?
+
+  @@index([timesheetId])
+}
+
+model HrAttendanceException {
+  id                String   @id @default(uuid())
+  employeeProfileId String
+  employeeProfile   HrEmployeeProfile @relation(fields: [employeeProfileId], references: [id])
+  agencyId          String
+  agency            Agency   @relation(fields: [agencyId], references: [id])
+  // Set once Part C's HrShiftAssignment exists.
+  scheduledShiftId  String?
+  exceptionType     String   // LATE_ARRIVAL | EARLY_DEPARTURE | MISSED_PUNCH | NO_CALL_NO_SHOW_CANDIDATE | UNSCHEDULED_WORK
+  detectedAt        DateTime @default(now())
+  // Never auto-classified to a RESOLVED_* state — only a human review
+  // call (POST .../review) can move this out of OPEN/UNDER_REVIEW. See
+  // the directive's own "no automatic discipline" rule.
+  status            String   @default("OPEN") // OPEN | UNDER_REVIEW | RESOLVED_EXCUSED | RESOLVED_UNEXCUSED
+  reviewedById      String?
+  reviewedBy        User?    @relation("HrAttendanceExceptionReviewedBy", fields: [reviewedById], references: [id])
+  reviewedAt        DateTime?
+  reviewNote        String?
+  createdAt         DateTime @default(now())
+
+  @@index([agencyId, status])
+  @@index([employeeProfileId])
 }

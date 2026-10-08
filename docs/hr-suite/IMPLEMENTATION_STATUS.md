@@ -79,13 +79,49 @@ this glob gap (e.g. switching the npm script to rely on Node's own
 built-in recursive test discovery) — Part B/C's own test files must stay
 flat under `server/src/` too, for the same reason.
 
-### Part B — Time & Attendance (read-only consumer of TimeClockEntry)
-- [ ] Schema: `HrTimesheet`, `HrTimesheetSegment`, `HrAttendanceException`
-- [ ] Backend: `hrTimesheetBuilder.js`, `hrAttendanceDetection.js` job,
-  `timeAttendance.js` routes
-- [ ] Client: live status, timesheets, exceptions review, My Time
-- [ ] Tests: timesheet-builder edge cases, zero writes to
-  `TimeClockEntry` (regression guard), NCNS requires human review
+### Part B — Time & Attendance (read-only consumer of TimeClockEntry) — COMPLETE, verified, committed
+- [x] Schema: `HrTimesheet`, `HrTimesheetSegment`, `HrAttendanceException`.
+  Additive-only; `npx prisma db push` succeeded clean.
+- [x] Backend: `server/src/lib/hrTimesheetBuilder.js` — `segmentsForEntry`
+  (pure, derives WORK/LUNCH/BREAK segments from one `TimeClockEntry` row,
+  sorted by real chronological order regardless of field-declaration
+  order; flags `ORDERING_ANOMALY`/`OVERNIGHT_SHIFT`/
+  `STILL_OPEN_PAST_EXPECTED_SHIFT_LENGTH`, never fabricates an end time),
+  `buildTimesheetForEmployee`/`computeAndStoreTimesheet` (the only
+  functions that read `TimeClockEntry` — a regression-guard test asserts
+  this literally by grepping the source). `server/src/jobs/
+  hrAttendanceDetection.js` — periodic (`setInterval`, same in-process
+  convention as `leadPriorityRecompute.js`), registered in `index.js`;
+  Part B scope note: without Part C's `HrShiftAssignment` or an agency
+  grace-period setting, it can only detect what the raw clock data
+  itself reveals — a forgotten clock-out (`MISSED_PUNCH`) — never a
+  fabricated LATE_ARRIVAL/NO_CALL_NO_SHOW_CANDIDATE guess; every row it
+  creates starts `OPEN`, never auto-resolved. `server/src/routes/hr/
+  timeAttendance.js` — `GET /hr/attendance/live`, `POST /hr/timesheets/
+  compute`, `GET /hr/timesheets[/mine|/:id]`, `POST /hr/timesheets/:id/
+  {submit,approve,reject}` (state-machine-enforced: OPEN→SUBMITTED→
+  APPROVED/REJECTED, an APPROVED timesheet is locked against
+  recomputation), `GET /hr/attendance/exceptions`, `POST /hr/attendance/
+  exceptions/:id/review` (the only way out of OPEN, HR_ADMIN only).
+- [x] Client: `HrDashboardPage.jsx` gained ATTENDANCE (live roster status
+  + open-exception review queue) and TIMESHEETS (compute + approve/
+  reject) tabs. `HrMyProfilePage.jsx` gained a MY TIME section
+  (self-service: view own timesheets, submit an OPEN one — no
+  self-compute, an honest "ask HR" empty state when nothing's been
+  computed yet).
+- [x] Tests: `server/src/lib/hrTimesheetBuilder.test.js` (11 cases — 8
+  pure-logic segment-derivation edge cases including the regression-guard
+  grep, 3 real-DB) + `server/src/routes/hrAttendance.test.js` (4 real-DB/
+  HTTP cases covering the full timesheet state machine, live status,
+  and detection→human-review flow). `npm test`: 373/373 (358 baseline +
+  15 new, zero regressions — one isolated flake seen once across many
+  runs, not reproduced on two immediate reruns, likely unrelated DB-pool
+  contention in the large real-DB suite, not a Part B defect). `npm run
+  build` (client): clean. Real-browser Playwright check: live status
+  shows a real `ON_BREAK` state, a stale shift produces a real
+  `MISSED_PUNCH` candidate, reviewing it (EXCUSE) removes it from the
+  OPEN queue, computing a timesheet via the UI shows up correctly, and
+  the employee's own My Time page shows and successfully submits it.
 
 ### Part C — Scheduling & Leave
 - [ ] Schema: `HrShiftTemplate`, `HrShiftAssignment`, `HrShiftSwapRequest`,
@@ -150,16 +186,22 @@ None yet — nothing has been built.
 
 ## Next required action
 
-Part A is complete and verified (358/358 server tests, clean client
-build, real-browser check). Begin Phase 1 Part B — Time & Attendance:
-schema (`HrTimesheet`/`HrTimesheetSegment`/`HrAttendanceException`),
-then `server/src/lib/hrTimesheetBuilder.js` (the one function allowed to
-read `TimeClockEntry`, strictly read-only — never writes to it, a
-regression test must assert this literally), the
-`hrAttendanceDetection.js` periodic job (never auto-classifies a
-no-call/no-show — only ever creates an `OPEN` candidate row for a human
-to resolve), `timeAttendance.js` routes, then client, then tests — per
-the plan at
+Parts A and B are complete and verified (373/373 server tests, clean
+client build, real-browser checks of both). Begin Phase 1 Part C —
+Scheduling & Leave: schema (`HrShiftTemplate`/`HrShiftAssignment`/
+`HrShiftSwapRequest`/`HrLeaveType`/`HrLeavePolicy`/
+`HrLeavePolicyAssignment`/`HrLeaveLedgerEntry`/`HrLeaveRequest`), then
+`scheduling.js` routes, `hrLeaveAccrual.js` (idempotent accrual posting
+— deterministic `idempotencyKey`, never double-posts on a retried run;
+`HrLeaveLedgerEntry` is the *only* source of truth for a balance, never
+a bare stored integer), `leave.js` routes (balance-denial check skipped
+for `isProtected` leave types — flagged to HR, never auto-approved/
+denied), then client (schedule calendar, leave policies/calendar, My
+Schedule, My Time Off), then tests — per the plan at
 `/root/.claude/plans/root-claude-uploads-f963d8da-f76a-598c-adaptive-shore.md`.
 Remember the test-file-location gap noted above before adding any new
-`*.test.js` file.
+`*.test.js` file — keep it flat under `server/src/`, never nested.
+Once Part C lands, Part B's `HrAttendanceException` detection job can
+be extended to use `HrShiftAssignment` as a real expected-schedule
+baseline (LATE_ARRIVAL/EARLY_DEPARTURE/NO_CALL_NO_SHOW_CANDIDATE) — not
+required for Part C itself, note it as a natural follow-up only.

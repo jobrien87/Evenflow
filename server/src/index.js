@@ -3,6 +3,7 @@ const { checkStaleLeads } = require('./lib/staleLeadReminders');
 const { recomputeAllLeadPriorities } = require('./lib/leadPriorityRecompute');
 const { checkFirstAttemptSla } = require('./lib/firstAttemptSlaAlerts');
 const { checkAgentOfMonth } = require('./lib/agentOfMonth');
+const { startHrAttendanceDetectionJob } = require('./jobs/hrAttendanceDetection');
 
 const PORT = process.env.PORT || 4000;
 
@@ -37,3 +38,7 @@ setInterval(() => {
 setInterval(() => {
   checkAgentOfMonth().catch((err) => console.error('[agentOfMonth] check failed', err.message));
 }, 6 * 60 * 60 * 1000);
+
+// Backstage HR — read-only TimeClockEntry anomaly detection (forgotten
+// clock-outs only, in Part B's scope). See jobs/hrAttendanceDetection.js.
+startHrAttendanceDetectionJob();

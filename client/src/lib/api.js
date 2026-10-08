@@ -416,4 +416,17 @@ export const api = {
   hrRoleGrants: (agencyId = '') => request(`/hr/role-grants${agencyId ? `?agencyId=${agencyId}` : ''}`),
   createHrRoleGrant: (payload) => request('/hr/role-grants', { method: 'POST', body: payload }),
   revokeHrRoleGrant: (id) => request(`/hr/role-grants/${id}/revoke`, { method: 'POST' }),
+
+  // Backstage HR — Phase 1 Part B: Time & Attendance. A read-only
+  // consumer of the real time clock — never a second clock-in/out system.
+  hrAttendanceLive: () => request('/hr/attendance/live'),
+  hrAttendanceExceptions: (params = '') => request(`/hr/attendance/exceptions${params}`),
+  reviewHrAttendanceException: (id, payload) => request(`/hr/attendance/exceptions/${id}/review`, { method: 'POST', body: payload }),
+  computeHrTimesheet: (payload) => request('/hr/timesheets/compute', { method: 'POST', body: payload }),
+  hrTimesheets: (params = '') => request(`/hr/timesheets${params}`),
+  hrTimesheetDetail: (id) => request(`/hr/timesheets/${id}`),
+  hrMyTimesheets: () => request('/hr/timesheets/mine'),
+  submitHrTimesheet: (id) => request(`/hr/timesheets/${id}/submit`, { method: 'POST' }),
+  approveHrTimesheet: (id) => request(`/hr/timesheets/${id}/approve`, { method: 'POST' }),
+  rejectHrTimesheet: (id) => request(`/hr/timesheets/${id}/reject`, { method: 'POST' }),
 };
