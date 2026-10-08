@@ -1434,6 +1434,19 @@ router.post('/:leadId/products', async (req, res, next) => {
     if (forbidden) return res.status(403).json({ success: false, error: 'FORBIDDEN' });
 
     const { product, status, premiumCents } = parsed.data;
+
+    // Enforced server-side too, not just the client's chip-row filter — a
+    // direct API call must not be able to quote the product this lead's
+    // own cross-sell category says is already held. Only enforced when
+    // crossSellHaveProduct is actually populated (a plain/generic
+    // CROSS_SELL lead with no reliable source data is never inferred).
+    if (lead.crossSellHaveProduct && lead.crossSellHaveProduct === product) {
+      return res.status(400).json({
+        success: false, error: 'PRODUCT_ALREADY_HELD',
+        message: `This lead already has ${PRODUCT_LABELS[product] || product} — it cannot be quoted here.`,
+      });
+    }
+
     const existing = await prisma.leadProductQuote.findUnique({
       where: { leadId_product: { leadId: lead.id, product } },
     });

@@ -37,6 +37,7 @@ before(async () => {
 
 after(async () => {
   await prisma.leadEvent.deleteMany({ where: { lead: { agencyId } } });
+  await prisma.leadProductQuote.deleteMany({ where: { lead: { agencyId } } });
   await prisma.lead.deleteMany({ where: { agencyId } });
   await prisma.leadImportBatch.deleteMany({ where: { agencyId } });
   await prisma.notification.deleteMany({ where: { agencyId } });
@@ -112,4 +113,39 @@ test('the raw category string is preserved on the import batch for both new cate
   const res = await uploadBulk({ rows: [{ firstName: 'Quinn', lastName: 'Batchcheck' }], leadCategory: 'AUTO_NO_HOME' });
   const batch = await prisma.leadImportBatch.findUnique({ where: { id: res.body.batchId } });
   assert.equal(batch.leadCategory, 'AUTO_NO_HOME');
+});
+
+// Item 7 of the production-correction round: quoting the already-held
+// product must be rejected server-side too, not just filtered out of the
+// client's chip row — a direct API call must not be able to bypass it.
+test('POST /:leadId/products rejects a quote for the already-held product (server-side enforcement)', async () => {
+  const res = await uploadBulk({ rows: [{ firstName: 'Rae', lastName: 'Enforcecheck' }], leadCategory: 'AUTO_NO_HOME' });
+  const [lead] = await leadsForBatch(res.body.batchId);
+  assert.equal(lead.crossSellHaveProduct, 'AUTO');
+
+  const heldRes = await fetch(`${baseUrl}/api/leads/${lead.id}/products`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ product: 'AUTO', status: 'QUOTED' }),
+  });
+  assert.equal(heldRes.status, 400);
+  const heldBody = await heldRes.json();
+  assert.equal(heldBody.error, 'PRODUCT_ALREADY_HELD');
+
+  const quotableRes = await fetch(`${baseUrl}/api/leads/${lead.id}/products`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ product: 'HOME', status: 'QUOTED' }),
+  });
+  assert.equal(quotableRes.status, 200, 'the actual cross-sell target (Home) must still be quotable');
+});
+
+test('POST /:leadId/products never blocks any product for a plain CROSS_SELL lead with no crossSellHaveProduct', async () => {
+  const res = await uploadBulk({ rows: [{ firstName: 'Sam', lastName: 'Genericcheck' }], leadCategory: 'CROSS_SELL' });
+  const [lead] = await leadsForBatch(res.body.batchId);
+  assert.equal(lead.crossSellHaveProduct, null);
+
+  const anyRes = await fetch(`${baseUrl}/api/leads/${lead.id}/products`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ product: 'AUTO', status: 'QUOTED' }),
+  });
+  assert.equal(anyRes.status, 200, 'never inferred/blocked for a generic cross-sell lead with no reliable have-product data');
 });

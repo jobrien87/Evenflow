@@ -116,7 +116,7 @@ export default function MoshpitPanel() {
               <div style={s.cardTop}>
                 <div>
                   <div style={s.name}>
-                    <LeadTypeIcon type={lead.leadType} style={{ marginRight: 6 }} />
+                    <LeadTypeIcon type={lead.leadType} product={lead.product} crossSellHaveProduct={lead.crossSellHaveProduct} style={{ marginRight: 6 }} />
                     {c ? `${c.firstName} ${c.lastName}` : 'Lead'}
                   </div>
                   <div style={s.meta}>{lead.isLiveTransfer ? 'Live transfer' : (lead.vendor?.name || 'Unknown vendor')} · {new Date(lead.receivedAt).toLocaleString()}</div>
