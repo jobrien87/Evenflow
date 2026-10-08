@@ -50,7 +50,11 @@ export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill }
 
   useEffect(() => {
     if (isProducer) return;
-    api.users('').then((data) => setProducers(data.users.filter((u) => u.role === 'PRODUCER' && u.status === 'ACTIVE'))).catch(() => {});
+    // A selling AGENCY_MANAGER (e.g. one who carries her own book of
+    // business) must be selectable here too, not just a plain PRODUCER —
+    // same eligible-production-roles rule as Billboard/financials.js's
+    // eligibleProducersWhere.
+    api.users('').then((data) => setProducers(data.users.filter((u) => ['PRODUCER', 'AGENCY_MANAGER'].includes(u.role) && u.status === 'ACTIVE'))).catch(() => {});
     api.offices('').then((data) => setOffices(data.offices || [])).catch(() => {});
   }, [isProducer]);
 

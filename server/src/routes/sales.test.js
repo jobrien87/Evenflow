@@ -21,7 +21,7 @@ const { computeBillboard } = require('../lib/billboard');
 const app = require('../app');
 
 const suffix = Date.now();
-let agencyId, ownerId, producerId, ownerCookie, producerCookie, server, baseUrl;
+let agencyId, ownerId, producerId, managerId, ownerCookie, producerCookie, server, baseUrl;
 
 before(async () => {
   const agency = await prisma.agency.create({ data: { name: `Sales Test Agency ${suffix}` } });
@@ -36,6 +36,13 @@ before(async () => {
     data: { email: `sales-producer-${suffix}@test.local`, passwordHash: hash, firstName: 'Sales', lastName: 'Producer', role: 'PRODUCER', agencyId, status: 'ACTIVE' },
   });
   producerId = producer.id;
+  // A selling AGENCY_MANAGER (Julie-style) — real production credit must
+  // attribute to her, not fall into an "(unattributed)" bucket just
+  // because her role isn't plain PRODUCER.
+  const manager = await prisma.user.create({
+    data: { email: `sales-manager-${suffix}@test.local`, passwordHash: hash, firstName: 'Julie', lastName: 'Manager', role: 'AGENCY_MANAGER', agencyId, status: 'ACTIVE' },
+  });
+  managerId = manager.id;
 
   const ownerSession = await createSession(ownerId);
   ownerCookie = `evenflow_session=${ownerSession.rawToken}`;
@@ -260,4 +267,41 @@ test('re-dispositioning an already-SOLD lead to SOLD again does not post a secon
   await prisma.revenueEvent.deleteMany({ where: { agencyId, notes: { contains: lead.id } } });
   await prisma.lead.delete({ where: { id: lead.id } });
   await prisma.customer.delete({ where: { id: customer.id } });
+});
+
+// Item 5 of the production-correction round: a selling AGENCY_MANAGER
+// (e.g. Julie) must be creditable the same real way a PRODUCER is — not
+// rejected as an invalid assignee, and not lumped into Billboard/
+// financials.js's "(unattributed)" bucket just because her role isn't
+// plain PRODUCER.
+test('a selling AGENCY_MANAGER can be assigned a Sale and is credited correctly, not bucketed as unattributed', async () => {
+  const res = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ premiumCents: 60000, assignedToId: managerId })),
+  });
+  assert.equal(res.status, 201, 'assignedToId must accept a real AGENCY_MANAGER, not just PRODUCER');
+  const { sale } = await res.json();
+  assert.equal(sale.assignedToId, managerId);
+
+  const from = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const to = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const billboard = await computeBillboard({ agencyId, granularity: 'day', from, to });
+  const managerRow = billboard.byProducer.find((p) => p.userId === managerId);
+  assert.ok(managerRow, 'the manager must appear on the Billboard leaderboard by her own id');
+  assert.equal(managerRow.soldCount, 1);
+  assert.equal(managerRow.premiumCents, 60000);
+  assert.equal(billboard.byProducer.some((p) => p.firstName === 'Historical' || p.lastName === '(unattributed)'), false, 'nothing should fall into an unattributed bucket here');
+
+  const byAgentRes = await fetch(`${baseUrl}/api/financials/by-agent?${new URLSearchParams({ agencyId, from: from.toISOString(), to: to.toISOString() })}`, { headers: { Cookie: ownerCookie } });
+  assert.equal(byAgentRes.status, 200);
+  const byAgentBody = await byAgentRes.json();
+  const managerAgentRow = byAgentBody.agents.find((a) => a.userId === managerId);
+  assert.ok(managerAgentRow, 'the manager must appear on /financials/by-agent by her own id, same roster-first treatment as a producer');
+  assert.equal(managerAgentRow.salesCount, 1);
+  assert.equal(managerAgentRow.revenue, 600);
+  const unattributedAgentRow = byAgentBody.agents.find((a) => a.userId === null);
+  assert.equal(unattributedAgentRow, undefined, 'nothing should fall into the unattributed bucket here');
+
+  await prisma.sale.delete({ where: { id: sale.id } });
+  await prisma.revenueEvent.deleteMany({ where: { notes: { contains: sale.id } } });
 });
