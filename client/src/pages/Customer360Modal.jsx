@@ -1,12 +1,48 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { useAuth } from '../lib/AuthContext';
+
+const PRIVACY_ROLES = ['AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'];
 
 export default function Customer360Modal({ customerId, onClose }) {
+  const { user } = useAuth();
   const [data, setData] = useState(null);
+  const [anonymizing, setAnonymizing] = useState(false);
+  const [anonymizeError, setAnonymizeError] = useState('');
+  const [anonymizeDone, setAnonymizeDone] = useState(false);
 
   useEffect(() => {
     api.customerDetail(customerId).then(setData);
   }, [customerId]);
+
+  async function exportData() {
+    const result = await api.exportCustomer(customerId);
+    const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `customer-${customerId}-export.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function anonymize() {
+    if (!confirm('Permanently erase this person\'s name/contact info from every record this agency holds on them? This cannot be undone. Their sales/lead history is kept for accounting purposes, but will no longer be attributed to a real name.')) {
+      return;
+    }
+    setAnonymizing(true);
+    setAnonymizeError('');
+    try {
+      await api.anonymizeCustomer(customerId);
+      setAnonymizeDone(true);
+      const refreshed = await api.customerDetail(customerId);
+      setData(refreshed);
+    } catch (err) {
+      setAnonymizeError(err.data?.message || 'Could not complete the erasure request.');
+    } finally {
+      setAnonymizing(false);
+    }
+  }
 
   if (!data) {
     return (
@@ -68,6 +104,23 @@ export default function Customer360Modal({ customerId, onClose }) {
             ))}
           </div>
         )}
+
+        {user && PRIVACY_ROLES.includes(user.role) && (
+          <div style={s.section}>
+            <div style={s.sectionTitle}>PRIVACY</div>
+            {anonymizeDone ? (
+              <div style={s.anonymizedNote}>This person's name/contact info has been erased from this agency's records.</div>
+            ) : (
+              <div style={s.privacyRow}>
+                <button style={s.privacyButton} onClick={exportData}>EXPORT THIS PERSON'S DATA</button>
+                <button style={s.dangerButton} onClick={anonymize} disabled={anonymizing}>
+                  {anonymizing ? 'ERASING…' : 'ERASE (RIGHT TO BE FORGOTTEN)'}
+                </button>
+              </div>
+            )}
+            {anonymizeError && <div style={s.anonymizeError}>{anonymizeError}</div>}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -108,4 +161,9 @@ const s = {
     fontSize: 9, padding: '2px 6px', borderRadius: 4,
     color: type === 'WINBACK' ? 'var(--warning)' : 'var(--accent)', border: `1px solid ${type === 'WINBACK' ? 'rgba(255, 184, 77, 0.4)' : 'var(--border-accent)'}`,
   }),
+  privacyRow: { display: 'flex', gap: 8, flexWrap: 'wrap' },
+  privacyButton: { padding: '8px 14px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700 },
+  dangerButton: { padding: '8px 14px', background: 'transparent', border: '1px solid var(--danger)', color: 'var(--danger)', borderRadius: 6, cursor: 'pointer', fontSize: 11, fontWeight: 700 },
+  anonymizedNote: { color: 'var(--text-muted)', fontSize: 12, fontStyle: 'italic' },
+  anonymizeError: { color: 'var(--danger)', fontSize: 12, marginTop: 8 },
 };

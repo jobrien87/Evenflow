@@ -74,23 +74,25 @@ it's the one role in the system with zero agency-level self-service.
 ## leads.js
 | Route | Role(s) | Tenant scoping | Notes |
 |---|---|---|---|
-| GET / | Any authenticated | `scopeAgencyId`; PRODUCER additionally forced to `assignedToId: req.user.id` in the where-clause | Correction: an earlier version of this doc claimed Producer-scoping wasn't server-enforced here — re-verified against the actual code (`leads.js:29`) and it is. |
-| GET /funnel | Any authenticated | `scopeAgencyId`; `scope=me` restricted to PRODUCER/TELEMARKETER | Added this session (Phase B) — real response-speed/contact/quote/close rates, never fabricated. |
-| POST / | Any authenticated | Caller's own agency | |
+| GET / | Any authenticated | `scopeAgencyId`; PRODUCER additionally forced to `assignedToId: req.user.id` in the where-clause; TELEMARKETER scoped to `createdById: req.user.id` across agencies | Correction: an earlier version of this doc claimed Producer-scoping wasn't server-enforced here — re-verified against the actual code and it is. |
+| GET /funnel | Any authenticated | `scopeAgencyId`; `scope=me` restricted to PRODUCER/TELEMARKETER | Real response-speed/contact/quote/close rates, never fabricated. |
+| GET /moshpit | Any authenticated | `scopeAgencyId` | |
+| POST / | Any authenticated | Caller's own agency; TELEMARKETER requires a real ACTIVE `TelemarketerAssignment` to the requested agency | A Customer already marked `DO_NOT_CONTACT` forces the new Lead straight to `DO_NOT_CONTACT`/archived/unassigned regardless of caller input — see `createLeadRecord`. |
 | GET /:leadId | Any authenticated | Explicit `agencyId` match check | |
-| POST /:leadId/disposition | Any authenticated | Explicit `agencyId` match check | |
+| POST /:leadId/disposition | **AGENCY_OWNER, AGENCY_MANAGER, PRODUCER, PLATFORM_OWNER** | Explicit `agencyId` match check via `authorizeLeadAccess` | **Fixed this pass** — previously had no `requireRole` at all (any authenticated role, including TELEMARKETER, could call it); TELEMARKETER has no real UI path that calls this and is now excluded. A `DO_NOT_CONTACT` disposition also marks the underlying Customer, not just this Lead. |
+| POST /:leadId/activities | Any authenticated | Access check via `loadLeadWithAccessCheck` | Refuses (403 `DO_NOT_CONTACT`) an outbound CALL/TEXT logged against a Customer already marked suppressed. |
 
 ## tasks.js
 | Route | Role(s) | Tenant scoping | Notes |
 |---|---|---|---|
-| GET / | Any authenticated | `scopeAgencyId` | |
+| GET / | AGENCY_OWNER, AGENCY_MANAGER, PRODUCER, TELEMARKETER, PLATFORM_OWNER | `scopeAgencyId` | |
 | POST / | Any authenticated | Caller's own agency | |
-| POST /:taskId/complete | Any authenticated | Explicit `agencyId` match check | Now also triggers a Flow Score recompute for the assignee (Phase A). |
+| POST /:taskId/complete | **AGENCY_OWNER, AGENCY_MANAGER, PRODUCER, TELEMARKETER, PLATFORM_OWNER** | Explicit `agencyId` match check, or `assignedToId === req.user.id` (covers a TM, who has no `agencyId` of their own) | **Fixed this pass** — previously had no `requireRole` at all. Triggers a Flow Score recompute for the assignee. |
 
 ## workqueue.js
 | Route | Role(s) | Tenant scoping | Notes |
 |---|---|---|---|
-| GET / | Any authenticated | `scopeAgencyId`; Producers forced to their own `userId`, others may pass `?userId=` | |
+| GET / | Any authenticated | `scopeAgencyId`; Producers forced to their own `userId`, others may pass `?userId=` (ownership-checked against the target's own agency) | |
 
 ## startmyday.js
 | Route | Role(s) | Tenant scoping | Notes |
@@ -98,19 +100,23 @@ it's the one role in the system with zero agency-level self-service.
 | GET / | Any authenticated | Self only (aggregates the caller's own leads/tasks) | |
 
 ## transfers.js
+**Retired this session** (Yield Transfers rebuild) — the entire accept/
+reject/connect/complete/disposition/credit-request state machine was
+removed; a telemarketer's submission is now a real `Lead` (see
+`leads.js`), not a `Transfer`. This router is now read-only history:
+
 | Route | Role(s) | Tenant scoping | Notes |
 |---|---|---|---|
-| GET / | Any authenticated | `scopeAgencyId` | |
-| GET /credit-requests | AGENCY_OWNER, PLATFORM_OWNER | `scopeAgencyId` | Registered before `/:id` — verified not shadowed. |
+| GET / | Any authenticated | `scopeAgencyId` | Historical rows only — nothing writes a new `Transfer` row anymore. |
 | GET /:id | Any authenticated | Explicit `agencyId` match check | |
-| POST / | TELEMARKETER | N/A (not agency-scoped — a TM creates transfers, routing decides the agency) | |
-| POST /:id/accept | AGENCY_OWNER, AGENCY_MANAGER, PRODUCER, PLATFORM_OWNER | Explicit `agencyId` match check | + `transfersEnabled` entitlement. Atomic `updateMany` guard verified race-safe under real concurrent load. |
-| POST /:id/reject | AGENCY_OWNER, AGENCY_MANAGER, PLATFORM_OWNER | Explicit `agencyId` match check | + `transfersEnabled` entitlement. |
-| POST /:id/connect | AGENCY_OWNER, AGENCY_MANAGER, PRODUCER, PLATFORM_OWNER | Explicit `agencyId` match check | |
-| POST /:id/complete | AGENCY_OWNER, AGENCY_MANAGER, PRODUCER, PLATFORM_OWNER | Explicit `agencyId` match check | |
-| POST /:id/disposition | AGENCY_OWNER, AGENCY_MANAGER, PRODUCER, PLATFORM_OWNER | Explicit `agencyId` match check | + `transfersEnabled` entitlement. Now also triggers Flow Score recompute (Phase A). |
-| POST /:id/credit-request | AGENCY_OWNER, AGENCY_MANAGER | Explicit `agencyId` match check | |
-| POST /credit-requests/:creditId/decide | PLATFORM_OWNER | N/A | |
+
+## customers.js
+| Route | Role(s) | Tenant scoping | Notes |
+|---|---|---|---|
+| GET /search | AGENCY_OWNER, AGENCY_MANAGER, PLATFORM_OWNER | `scopeAgencyId`, applied via the customer's related Lead/Transfer agency (Customer has no direct `agencyId`) | |
+| GET /:id | AGENCY_OWNER, AGENCY_MANAGER, PRODUCER, PLATFORM_OWNER | Same indirect scoping, checked across Lead/Transfer/Opportunity/Sale | Customer 360 timeline. |
+| GET /:id/export | AGENCY_OWNER, AGENCY_MANAGER, PLATFORM_OWNER | Same indirect scoping | **New this pass** — data-subject access/export request (CCPA-class). Narrower role list than GET /:id since this is a compliance action, not a day-to-day lookup. |
+| POST /:id/anonymize | AGENCY_OWNER, AGENCY_MANAGER, PLATFORM_OWNER | Same indirect scoping | **New this pass** — data-subject erasure request. Nulls PII on the Customer row and on Transfer/Sale's own denormalized copies (never a hard delete — financial/legal records are kept, un-attributed to a real name). Known limitation: `HistoricalRecord` rows and `Call` transcripts are not touched (see route comment). |
 
 ## vendors.js
 | Route | Role(s) | Tenant scoping | Notes |
@@ -192,12 +198,6 @@ confirmed against `lead.agencyId`-style scoping like every other
 item-specific route in this app — verify it isn't possible for an Agency
 Owner to delete another agency's goal by ID before treating this as clean.
 
-## customers.js
-| Route | Role(s) | Tenant scoping | Notes |
-|---|---|---|---|
-| GET /search | AGENCY_OWNER, AGENCY_MANAGER, PLATFORM_OWNER | `scopeAgencyId`, applied via the customer's related Lead/Transfer agency (Customer has no direct `agencyId`) | |
-| GET /:id | AGENCY_OWNER, AGENCY_MANAGER, PRODUCER, PLATFORM_OWNER | Same indirect scoping | Customer 360 timeline. |
-
 ## notifications.js
 | Route | Role(s) | Tenant scoping | Notes |
 |---|---|---|---|
@@ -254,42 +254,40 @@ glance like every other sensitive route in this file list).
 | GET / | Public (no `requireAuth`) | N/A | Deliberately public — used by Render's health check and load balancers. Reports real DB connectivity, never fakes `ok`. |
 
 ## Findings summary
-All five below were re-verified directly against the actual handler code
-(not just asserted) before being listed here.
 
-1. **`GET /api/users` can leak every user platform-wide to a non-Platform-
-   Owner caller with no `agencyId`** (e.g. a TELEMARKETER — telemarketers
-   aren't tied to an agency in this schema). The handler does
-   `agencyId = req.user.role === 'PLATFORM_OWNER' ? req.query.agencyId : req.user.agencyId`,
-   then `where: agencyId ? { agencyId } : {}` — when `agencyId` is
-   falsy for a non-Platform-Owner, the where-clause collapses to `{}` and
-   returns everyone, agency boundary or not. Contrast with `leads.js`,
-   which explicitly returns `[]` in the equivalent situation. This is a
-   real cross-tenant data leak, not a hypothetical.
-2. **Three financially/operationally significant routes have no
-   `requireRole` at all** — `leads.js POST /:leadId/disposition` (can mark
-   SOLD, posting real revenue), `tasks.js POST /:taskId/complete`, and
-   `opportunities.js POST /:id/disposition`. Any authenticated role in the
-   right agency can call them, including e.g. a role with much narrower
-   intended scope — worth deciding whether these should be role-restricted
-   or are intentionally open to whoever's agency-scoped to the record.
-3. **`users.js POST /:userId/deactivate` has no role-hierarchy check** — an
-   AGENCY_MANAGER can deactivate the AGENCY_OWNER of their own agency. Only
-   the agency-match check runs; nothing stops a manager from deactivating
-   their own owner.
+This doc was regenerated against the code as it stands after a SOC 2/
+compliance-readiness pass. It documents the route files most relevant to
+that pass in full; it does not claim to enumerate every route in every
+file mounted in `app.js` (roughly 30 route modules exist today) — treat
+gaps in coverage here as "not yet re-verified," not "confirmed clean."
+
+**Resolved since this doc was first written:**
+1. ~~`GET /api/users` can leak every user platform-wide to a non-Platform-
+   Owner caller with no `agencyId`~~ — fixed: the handler now returns
+   `{ users: [] }` early when a non-Platform-Owner has no `agencyId`
+   (e.g. a TELEMARKETER), matching `leads.js`'s own pattern.
+2. ~~Three financially/operationally significant routes have no
+   `requireRole` at all~~ — fixed this pass: `leads.js POST
+   /:leadId/disposition`, `tasks.js POST /:taskId/complete`, and
+   `opportunities.js POST /:id/disposition` are all now role-restricted
+   (see each file's section above).
+3. ~~`users.js POST /:userId/deactivate` has no role-hierarchy check~~ —
+   fixed: both `deactivate` and the newer "permanently delete a
+   deactivated user" route now call `canActOnUser`, blocking an
+   AGENCY_MANAGER from acting on their own AGENCY_OWNER.
+5. ~~`transfers.js` gates `accept`/`reject`/`disposition` inconsistently
+   with `connect`/`complete`~~ — moot: the entire Transfer state machine
+   (accept/reject/connect/complete/disposition/credit-request) was
+   retired in the Yield Transfers rebuild; `transfers.js` is now
+   read-only history.
+
+**Still open:**
 4. **`financials.js` and `vendors.js` each reimplement `scopeAgencyId`'s
    logic locally** (as `scopedAgencyId`/inline equivalents) instead of
    importing the shared helper from `middleware/auth.js`. Currently
-   behaviorally identical, but a security-relevant rule duplicated in three
-   places will eventually drift.
-5. **`transfers.js` gates `accept`/`reject`/`disposition` with
-   `requireModuleEnabled('transfersEnabled')` but not `connect`/`complete`**
-   — inconsistent within the same state-machine lifecycle. If an agency's
-   transfers entitlement is revoked mid-lifecycle, a transfer already past
-   `accept` could still be walked through `connect`/`complete` without the
-   gate re-checking.
+   behaviorally identical, but a security-relevant rule duplicated across
+   files will eventually drift — a Tier 1 cleanup item, not an active
+   exploit.
 
-None of these are newly introduced by this session's work — they're
-observations from reading the existing code as it stands today. #1 and #3
-are the two worth prioritizing first (real data-boundary and privilege-
-hierarchy gaps); #2, #4, #5 are more judgment calls about intended scope.
+None of the above are newly introduced by this pass — they're
+observations from reading the existing code as it stands.

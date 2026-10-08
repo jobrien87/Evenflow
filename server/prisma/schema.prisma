@@ -691,6 +691,17 @@ model Customer {
   // dispositions (lead or transfer), never inferred or guessed. This is
   // what the cross-sell detector actually reads.
   products        String[] @default([])
+  // Phone-number-level suppression (TCPA). Set whenever ANY Lead tied to
+  // this Customer is dispositioned DO_NOT_CONTACT, so the suppression
+  // follows the person across every future Lead from any vendor/source —
+  // not just the one Lead row it was first recorded on. Enforced at
+  // intake (createLeadRecord/vendorApi.js force a new Lead for a
+  // suppressed Customer straight to DO_NOT_CONTACT, skipping
+  // distribution/notification) and at activity-logging time (an outbound
+  // CALL/TEXT against a suppressed Customer is refused).
+  doNotContact       Boolean   @default(false)
+  doNotContactAt     DateTime?
+  doNotContactReason String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

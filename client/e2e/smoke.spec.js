@@ -6,11 +6,21 @@
 //
 // Requires: both dev servers running, and the fixed-credential test
 // accounts seeded (see the smoke-test session notes) —
-//   josh@yield-marketing.com / SuperSecret123!           (PLATFORM_OWNER)
+//   josh@yield-marketing.com     (PLATFORM_OWNER — the REAL seeded owner
+//                                 account; password comes from
+//                                 SMOKE_TEST_OWNER_PASSWORD, never
+//                                 hardcoded here — see server/scripts/
+//                                 smoke-test.js for why)
 //   pw-owner@smoketest.local / PlaywrightPass123!        (AGENCY_OWNER)
 //   pw-producer@smoketest.local / PlaywrightPass123!     (PRODUCER)
 //   pw-tm@smoketest.local / PlaywrightPass123!            (TELEMARKETER)
 import { test, expect } from '@playwright/test';
+
+// Fake-domain fixture accounts only — not real identities, so a committed
+// default is low-risk, but overridable for a non-local run.
+const PW_PASSWORD = process.env.PW_PASSWORD || 'PlaywrightPass123!';
+// The REAL josh@yield-marketing.com account's password — never hardcoded.
+const OWNER_PASSWORD = process.env.SMOKE_TEST_OWNER_PASSWORD;
 
 async function login(page, email, password) {
   // Real uncaught JS exceptions (React render crashes, etc.) — not a
@@ -29,7 +39,7 @@ async function login(page, email, password) {
 }
 
 test('Agency Owner: dashboard, billing, record store, back catalog, roster settings, billboard all render real data', async ({ page }) => {
-  const errors = await login(page, 'pw-owner@smoketest.local', 'PlaywrightPass123!');
+  const errors = await login(page, 'pw-owner@smoketest.local', PW_PASSWORD);
 
   // Main dashboard — roster + leads should be visible.
   await expect(page.getByText(/Pat/i).first()).toBeVisible({ timeout: 10000 });
@@ -63,7 +73,7 @@ test('Agency Owner: dashboard, billing, record store, back catalog, roster setti
 });
 
 test('Producer: dashboard and My Leads render', async ({ page }) => {
-  const errors = await login(page, 'pw-producer@smoketest.local', 'PlaywrightPass123!');
+  const errors = await login(page, 'pw-producer@smoketest.local', PW_PASSWORD);
   await expect(page.getByText(/Pete/i).first()).toBeVisible({ timeout: 10000 });
 
   await page.goto('/producer/my-leads');
@@ -73,7 +83,7 @@ test('Producer: dashboard and My Leads render', async ({ page }) => {
 });
 
 test('Telemarketer: split-screen intake + team chat renders', async ({ page }) => {
-  const errors = await login(page, 'pw-tm@smoketest.local', 'PlaywrightPass123!');
+  const errors = await login(page, 'pw-tm@smoketest.local', PW_PASSWORD);
   await expect(page.getByText(/Terri/i).first()).toBeVisible({ timeout: 10000 });
   await expect(page.locator('body')).not.toContainText('Something went wrong');
 
@@ -81,7 +91,8 @@ test('Telemarketer: split-screen intake + team chat renders', async ({ page }) =
 });
 
 test('Platform Owner: agencies list renders our Playwright test agency', async ({ page }) => {
-  const errors = await login(page, 'josh@yield-marketing.com', 'SuperSecret123!');
+  test.skip(!OWNER_PASSWORD, 'SMOKE_TEST_OWNER_PASSWORD is not set — skipping rather than attempting a login with an undefined password against the real josh@yield-marketing.com account.');
+  const errors = await login(page, 'josh@yield-marketing.com', OWNER_PASSWORD);
   await expect(page.getByText(/Playwright Test Agency/i).first()).toBeVisible({ timeout: 10000 });
 
   expect(errors, `uncaught page errors: ${errors.join(' | ')}`).toHaveLength(0);

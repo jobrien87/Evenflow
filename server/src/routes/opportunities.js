@@ -158,7 +158,7 @@ const dispositionSchema = z.object({
   assignedToId: z.string().uuid().optional(),
 });
 
-router.post('/:id/disposition', async (req, res, next) => {
+router.post('/:id/disposition', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER', 'PLATFORM_OWNER'), async (req, res, next) => {
   try {
     const parsed = dispositionSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });

@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const { z } = require('zod');
 const { prisma } = require('../lib/db');
-const { requireAuth, scopeAgencyId } = require('../middleware/auth');
+const { requireAuth, requireRole, scopeAgencyId } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { scoreLead } = require('../lib/priority');
 const { deriveLeadType, BULK_UPLOAD_CATEGORIES, applyBulkUploadCategory } = require('../lib/leadType');
@@ -172,6 +172,15 @@ async function createLeadRecord({ agencyId, source, createdById, data, importBat
           },
         });
 
+    // Phone-number-level suppression (TCPA) — a Customer previously marked
+    // DO_NOT_CONTACT (via any past Lead's disposition, from any source)
+    // never gets a new, workable Lead: force straight to DO_NOT_CONTACT,
+    // unassigned, and archived (hidden from GET /leads' default view, the
+    // Moshpit pool, and priority recompute — same mechanism DUPLICATE/
+    // ARCHIVED already use) rather than letting a new vendor/upload/
+    // telemarketer submission re-surface this person for outreach.
+    const isSuppressed = customer.doNotContact;
+
     const intakeFields = Object.fromEntries(
       INTAKE_FIELD_KEYS.filter((key) => data[key]).map((key) => [key, data[key]])
     );
@@ -183,9 +192,10 @@ async function createLeadRecord({ agencyId, source, createdById, data, importBat
         source,
         product: data.product,
         crossSellHaveProduct: data.crossSellHaveProduct || null,
-        assignedToId: data.assignedToId,
-        assignedAt: data.assignedToId ? new Date() : null,
-        status: 'NEW',
+        assignedToId: isSuppressed ? null : data.assignedToId,
+        assignedAt: !isSuppressed && data.assignedToId ? new Date() : null,
+        status: isSuppressed ? 'DO_NOT_CONTACT' : 'NEW',
+        archivedAt: isSuppressed ? new Date() : null,
         createdById,
         customFields: data.customFields || {},
         // Lossless full-row capture from a bulk/back-catalog import only —
@@ -200,8 +210,9 @@ async function createLeadRecord({ agencyId, source, createdById, data, importBat
         // Every telemarketer-submitted lead becomes Moshpit-claimable —
         // not just ones explicitly flagged as a live transfer (that flag
         // stays purely informational, driving the notification's urgency
-        // framing below, not eligibility).
-        moshpitEligible: source === 'telemarketer' ? true : !!data.moshpitEligible,
+        // framing below, not eligibility) — except a suppressed Customer,
+        // who must never be offered up for anyone to claim/contact.
+        moshpitEligible: isSuppressed ? false : source === 'telemarketer' ? true : !!data.moshpitEligible,
         leadType: data.leadTypeOverride || deriveLeadType({ isLiveTransfer: !!data.isLiveTransfer }),
         importBatchId: importBatchId || null,
         ...intakeFields,
@@ -229,11 +240,12 @@ async function createLeadRecord({ agencyId, source, createdById, data, importBat
           // never counts as "real work" against bulk-import undo's
           // untouched-since-import check.
           ...(data.externalStatus ? { externalStatus: data.externalStatus } : {}),
+          ...(isSuppressed ? { suppressedReason: customer.doNotContactReason || 'Customer marked DO_NOT_CONTACT' } : {}),
         },
       },
     });
 
-    return { lead: updatedLead, customer, isDuplicate: !!duplicateOf };
+    return { lead: updatedLead, customer, isDuplicate: !!duplicateOf, isSuppressed };
   });
 }
 
@@ -298,7 +310,13 @@ router.post('/', async (req, res, next) => {
       correlationId: req.correlationId,
     });
 
-    if (parsed.data.assignedToId) {
+    // A suppressed Customer's forced-DO_NOT_CONTACT Lead is never assigned
+    // or distributed (createLeadRecord already enforces that at the data
+    // level) — skip every notification below too, so nobody is nudged to
+    // reach out to someone who opted out.
+    if (result.isSuppressed) {
+      // no-op
+    } else if (parsed.data.assignedToId) {
       await notifyUser({
         userId: parsed.data.assignedToId,
         agencyId,
@@ -342,7 +360,7 @@ router.post('/', async (req, res, next) => {
       });
     }
 
-    return res.status(201).json({ success: true, lead: result.lead, possibleDuplicate: result.isDuplicate });
+    return res.status(201).json({ success: true, lead: result.lead, possibleDuplicate: result.isDuplicate, suppressed: result.isSuppressed });
   } catch (err) {
     next(err);
   }
@@ -1274,6 +1292,23 @@ router.post('/:leadId/activities', async (req, res, next) => {
     if (!lead) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
     if (forbidden) return res.status(403).json({ success: false, error: 'FORBIDDEN' });
 
+    // TCPA backstop: refuse to log an outbound call/text against a
+    // Customer already marked DO_NOT_CONTACT, regardless of what this
+    // particular Lead's own status says — a clear "don't reach out to
+    // this person" warning at the one place a producer is about to record
+    // that they did. Inbound contact (the customer reaching out to US) and
+    // EMAIL are unaffected — this only gates the TCPA-relevant channels.
+    if (lead.customerId && parsed.data.direction === 'OUTBOUND' && ['CALL', 'TEXT'].includes(parsed.data.type)) {
+      const customer = await prisma.customer.findUnique({ where: { id: lead.customerId }, select: { doNotContact: true } });
+      if (customer?.doNotContact) {
+        return res.status(403).json({
+          success: false,
+          error: 'DO_NOT_CONTACT',
+          message: 'This customer is marked DO_NOT_CONTACT. Outbound calls/texts cannot be logged against them.',
+        });
+      }
+    }
+
     const activity = await prisma.leadActivity.create({
       data: {
         leadId: lead.id,
@@ -1499,7 +1534,10 @@ const dispositionSchema = z.object({
 });
 
 // Disposition a lead — records status HISTORY, never overwrites it.
-router.post('/:leadId/disposition', async (req, res, next) => {
+// Role-restricted to the roles that actually work leads (no TELEMARKETER —
+// they submit leads but never disposition them; see authorizeLeadAccess
+// below for the further per-record ownership/agency check).
+router.post('/:leadId/disposition', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER', 'PLATFORM_OWNER'), async (req, res, next) => {
   try {
     const parsed = dispositionSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -1583,6 +1621,23 @@ router.post('/:leadId/disposition', async (req, res, next) => {
     // duplicate RevenueEvent for the same real-world sale.
     if (parsed.data.status === 'SOLD' && fromStatus !== 'SOLD' && parsed.data.salePremiumCents) {
       await recordLeadSaleRevenue(updated);
+    }
+
+    // Phone-number-level suppression (TCPA) — a DO_NOT_CONTACT disposition
+    // marks the underlying Customer, not just this one Lead row, so the
+    // suppression follows this person across every future Lead from any
+    // vendor/source (createLeadRecord/vendorApi.js both check this flag at
+    // intake). Never cleared automatically — only a real admin action
+    // should ever lift a suppression once recorded.
+    if (parsed.data.status === 'DO_NOT_CONTACT' && updated.customerId) {
+      await prisma.customer.update({
+        where: { id: updated.customerId },
+        data: {
+          doNotContact: true,
+          doNotContactAt: now,
+          doNotContactReason: parsed.data.note || 'Marked DO_NOT_CONTACT via lead disposition',
+        },
+      });
     }
 
     // A real sold product updates the customer's real product ledger and

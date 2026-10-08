@@ -6,8 +6,12 @@
 // save round-trip through the real local API.
 import { test, expect } from '@playwright/test';
 
-const OWNER_EMAIL = 'pw-owner@smoketest.local';
-const OWNER_PASSWORD = 'PlaywrightPass123!';
+// A fake-domain, non-production fixture account — not a real identity, so
+// a committed default password is low-risk here, but still overridable via
+// env var for consistency with how every real-credential test fixture in
+// this app is handled.
+const OWNER_EMAIL = process.env.PW_OWNER_EMAIL || 'pw-owner@smoketest.local';
+const OWNER_PASSWORD = process.env.PW_OWNER_PASSWORD || 'PlaywrightPass123!';
 const NORTH_OFFICE_ID = '37714f24-acc3-4ef1-8440-fabf25d37f08';
 
 async function login(page) {

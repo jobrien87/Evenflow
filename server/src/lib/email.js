@@ -43,10 +43,13 @@ async function sendInvitationEmail({ to, role, agencyName, token }) {
   const acceptUrl = `${APP_URL}/accept-invitation?token=${token}`;
 
   if (!isConfigured()) {
-    console.warn(
-      `[email:NOT_CONFIGURED] Would send invitation to ${to} (role=${role}, agency=${agencyName}). ` +
-        `Set BREVO_API_KEY to enable real delivery. Accept URL: ${acceptUrl}`
-    );
+    // Deliberately never logs acceptUrl — it embeds a live, unexpired,
+    // single-use token. Printing it to server console would hand anyone
+    // with log access (not just the admin who triggered this) a working
+    // credential before the real recipient uses it. Recovery path is to
+    // configure BREVO_API_KEY and use the real resend-invite action, not
+    // to recover this exact token from logs.
+    console.warn(`[email:NOT_CONFIGURED] Invitation to ${to} (role=${role}, agency=${agencyName}) not sent — BREVO_API_KEY is not set. Use resend-invite once email delivery is configured.`);
     return { status: 'NOT_CONFIGURED', acceptUrl };
   }
 
@@ -60,11 +63,11 @@ async function sendInvitationEmail({ to, role, agencyName, token }) {
     });
     return { status: 'SENT', acceptUrl };
   } catch (err) {
-    // The accept link is logged even on a real send failure (not just the
-    // NOT_CONFIGURED case above) — the one failure mode this app has hit
-    // repeatedly in production, and previously left an operator with no
-    // way to recover the link and relay it manually.
-    console.error(`[email:FAILED] ${err.message} — Accept URL: ${acceptUrl}`);
+    // Same reasoning as the NOT_CONFIGURED case above — never log the raw
+    // link, even on a real send failure. An operator recovers by using
+    // resend-invite again once delivery is working, which issues a fresh
+    // token rather than reusing this one.
+    console.error(`[email:FAILED] Invitation to ${to} failed to send (${err.message}). Use resend-invite to retry.`);
     return { status: 'FAILED', acceptUrl };
   }
 }
@@ -73,7 +76,9 @@ async function sendPasswordResetEmail({ to, token }) {
   const resetUrl = `${APP_URL}/reset-password?token=${token}`;
 
   if (!isConfigured()) {
-    console.warn(`[email:NOT_CONFIGURED] Would send password reset to ${to}. Set BREVO_API_KEY to enable real delivery. Reset URL: ${resetUrl}`);
+    // See sendInvitationEmail above — the raw token-bearing URL is
+    // deliberately never logged.
+    console.warn(`[email:NOT_CONFIGURED] Password reset for ${to} not sent — BREVO_API_KEY is not set. Ask the user to retry once email delivery is configured.`);
     return { status: 'NOT_CONFIGURED', resetUrl };
   }
 
@@ -87,7 +92,7 @@ async function sendPasswordResetEmail({ to, token }) {
     });
     return { status: 'SENT', resetUrl };
   } catch (err) {
-    console.error(`[email:FAILED] ${err.message} — Reset URL: ${resetUrl}`);
+    console.error(`[email:FAILED] Password reset for ${to} failed to send (${err.message}). Ask the user to retry.`);
     return { status: 'FAILED', resetUrl };
   }
 }

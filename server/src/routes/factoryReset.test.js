@@ -15,7 +15,7 @@ const { createSession } = require('../lib/auth');
 const app = require('../app');
 
 const suffix = Date.now();
-let agencyId, ownerId, ownerCookie, vendorId, officeId, customerId, leadId, server, baseUrl;
+let agencyId, ownerId, ownerCookie, vendorId, officeId, customerId, leadId, saleId, server, baseUrl;
 
 before(async () => {
   const agency = await prisma.agency.create({ data: { name: `Factory Reset Test Agency ${suffix}` } });
@@ -55,6 +55,17 @@ before(async () => {
   await prisma.revenueEvent.create({ data: { agencyId, category: 'OTHER', amountCents: 50000, createdById: ownerId } });
   await prisma.costEvent.create({ data: { agencyId, vendorId, category: 'VENDOR_LEAD_COST', amountCents: 10000, createdById: ownerId } });
 
+  // A standalone sale (Add Closed Sale) — previously never touched by
+  // Factory Reset at all, which is the real gap this test proves is fixed.
+  const sale = await prisma.sale.create({
+    data: {
+      agencyId, customerId, firstName: 'Reset', lastName: 'Customer',
+      saleDate: new Date(), carrier: 'Allstate', policyType: 'Auto-Standard', productFamily: 'AUTO',
+      assignedToId: ownerId, createdById: ownerId,
+    },
+  });
+  saleId = sale.id;
+
   await new Promise((resolve) => { server = http.createServer(app).listen(0, '127.0.0.1', resolve); });
   const port = server.address().port;
   baseUrl = `http://127.0.0.1:${port}`;
@@ -63,6 +74,7 @@ before(async () => {
 after(async () => {
   await prisma.leadNote.deleteMany({ where: { leadId } }).catch(() => {});
   await prisma.lead.deleteMany({ where: { agencyId } }).catch(() => {});
+  await prisma.sale.deleteMany({ where: { agencyId } }).catch(() => {});
   await prisma.goal.deleteMany({ where: { agencyId } });
   await prisma.revenueEvent.deleteMany({ where: { agencyId } });
   await prisma.costEvent.deleteMany({ where: { agencyId } });
@@ -83,6 +95,7 @@ test('factory-reset-preview returns real counts without deleting anything', asyn
   assert.equal(body.counts.leads, 1);
   assert.equal(body.counts.revenueEvents, 1);
   assert.equal(body.counts.costEvents, 1);
+  assert.equal(body.counts.sales, 1, 'a standalone sale must be counted — previously missing from Factory Reset entirely');
   // Real roster identity, not just the (non-unique) agency name — lets the
   // confirm UI make a duplicate-named Agency row's mixup visually obvious.
   assert.equal(body.ownerEmail, `fr-owner-${suffix}@test.local`);
@@ -119,12 +132,14 @@ test('factory-reset wipes leads/financial/historical data but keeps Vendors/Offi
   assert.equal(body.wipedCounts.leads, 1);
   assert.equal(body.wipedCounts.revenueEvents, 1, 'the agencyId-scoped revenue event must be deleted — the real gap over the old adminWipe.js');
   assert.equal(body.wipedCounts.costEvents, 1);
+  assert.equal(body.wipedCounts.sales, 1, 'the standalone sale must be deleted — previously survived every Factory Reset indefinitely');
   assert.equal(body.wipedCounts.customers, 1);
 
-  const [leadsLeft, revenueLeft, costLeft, customerLeft, vendorLeft, officeLeft, goalLeft, userLeft] = await Promise.all([
+  const [leadsLeft, revenueLeft, costLeft, salesLeft, customerLeft, vendorLeft, officeLeft, goalLeft, userLeft] = await Promise.all([
     prisma.lead.count({ where: { agencyId } }),
     prisma.revenueEvent.count({ where: { agencyId } }),
     prisma.costEvent.count({ where: { agencyId } }),
+    prisma.sale.count({ where: { id: saleId } }),
     prisma.customer.count({ where: { id: customerId } }),
     prisma.vendor.count({ where: { id: vendorId } }),
     prisma.office.count({ where: { id: officeId } }),
@@ -134,7 +149,8 @@ test('factory-reset wipes leads/financial/historical data but keeps Vendors/Offi
   assert.equal(leadsLeft, 0);
   assert.equal(revenueLeft, 0);
   assert.equal(costLeft, 0);
-  assert.equal(customerLeft, 0);
+  assert.equal(salesLeft, 0, 'the sale row itself must be gone, not just excluded from counts');
+  assert.equal(customerLeft, 0, 'the customer referenced only by the sale (after the lead is gone) must also be wiped');
   assert.equal(vendorLeft, 1, 'Vendor must survive a factory reset');
   assert.equal(officeLeft, 1, 'Office must survive a factory reset');
   assert.equal(goalLeft, 1, 'Goal must survive a factory reset');

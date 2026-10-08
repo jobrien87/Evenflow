@@ -14,9 +14,19 @@
 //     read them from the server log when RESEND_API_KEY is unset.
 //   - `npm run seed` has been run at least once against that database
 //     (creates josh@yield-marketing.com as a Platform Owner).
+//   - SMOKE_TEST_PASSWORD is set — this script activates/logs into
+//     josh@yield-marketing.com, the REAL seeded Platform Owner account used
+//     in every environment including production. No password is hardcoded
+//     here; pick one yourself each run and never commit it.
 //
 // Usage: node scripts/smoke-test.js
-//   BASE_URL=https://your-server.onrender.com DATABASE_URL=... node scripts/smoke-test.js
+//   BASE_URL=https://your-server.onrender.com DATABASE_URL=... SMOKE_TEST_PASSWORD=... node scripts/smoke-test.js
+//
+// Safety: if BASE_URL doesn't look like localhost, this refuses to run
+// unless ALLOW_REMOTE_SMOKE_TEST=true is also set — this script activates
+// the real josh@yield-marketing.com account with whatever password you
+// give it, so running it unintentionally against a live deployment would
+// overwrite that account's real credential.
 const { execSync } = require('child_process');
 
 const BASE = (process.env.BASE_URL || 'http://localhost:4000') + '/api';
@@ -25,7 +35,22 @@ const DB_URL = process.env.DATABASE_URL;
 // fixtures — email/phone dedup and cross-sell duplicate-prevention are real
 // app behavior, not something to work around with hardcoded fixtures.
 const RUN = String(Date.now()).slice(-7);
-const PASSWORD = 'SuperSecret123!';
+
+if (!process.env.SMOKE_TEST_PASSWORD) {
+  console.error('SMOKE_TEST_PASSWORD is required (this script sets/uses the real josh@yield-marketing.com Platform Owner password). Set it and re-run — never hardcode it in this file.');
+  process.exit(1);
+}
+const PASSWORD = process.env.SMOKE_TEST_PASSWORD;
+
+const isLocalBase = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//.test(BASE);
+if (!isLocalBase && process.env.ALLOW_REMOTE_SMOKE_TEST !== 'true') {
+  console.error(
+    `Refusing to run: BASE_URL (${BASE}) is not localhost, and this script activates/logs into the real ` +
+      `josh@yield-marketing.com Platform Owner account. If you really intend to run this against a remote ` +
+      `deployment, set ALLOW_REMOTE_SMOKE_TEST=true explicitly.`
+  );
+  process.exit(1);
+}
 
 function latestInvitationToken(email) {
   if (!DB_URL) {

@@ -365,19 +365,25 @@ function factoryResetAuthorized(req, agencyId) {
 }
 
 async function collectFactoryResetScope(tx, agencyId) {
-  const [leadIds, transferIds, opportunityIds, callIds] = await Promise.all([
+  const [leadIds, transferIds, opportunityIds, callIds, saleIds] = await Promise.all([
     tx.lead.findMany({ where: { agencyId }, select: { id: true } }).then((r) => r.map((l) => l.id)),
     tx.transfer.findMany({ where: { agencyId }, select: { id: true } }).then((r) => r.map((t) => t.id)),
     tx.opportunity.findMany({ where: { agencyId }, select: { id: true } }).then((r) => r.map((o) => o.id)),
     tx.call.findMany({ where: { agencyId }, select: { id: true } }).then((r) => r.map((c) => c.id)),
+    tx.sale.findMany({ where: { agencyId }, select: { id: true } }).then((r) => r.map((s) => s.id)),
   ]);
 
   const customerIds = new Set();
   (await tx.lead.findMany({ where: { agencyId, customerId: { not: null } }, select: { customerId: true } })).forEach((l) => customerIds.add(l.customerId));
   (await tx.transfer.findMany({ where: { agencyId, customerId: { not: null } }, select: { customerId: true } })).forEach((t) => customerIds.add(t.customerId));
   (await tx.opportunity.findMany({ where: { agencyId }, select: { customerId: true } })).forEach((o) => customerIds.add(o.customerId));
+  // Sale.customerId is required (never null) — a standalone sale's
+  // customer was the one real gap here: without this, a Customer row
+  // referenced only by a Sale survived a Factory Reset indefinitely, and
+  // the Sale row itself was never even counted for deletion below.
+  (await tx.sale.findMany({ where: { agencyId }, select: { customerId: true } })).forEach((s) => customerIds.add(s.customerId));
 
-  return { leadIds, transferIds, opportunityIds, callIds, customerIds };
+  return { leadIds, transferIds, opportunityIds, callIds, saleIds, customerIds };
 }
 
 router.get('/:agencyId/factory-reset-preview', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res, next) => {
@@ -387,7 +393,7 @@ router.get('/:agencyId/factory-reset-preview', requireRole('AGENCY_OWNER', 'PLAT
     const agency = await prisma.agency.findUnique({ where: { id: agencyId }, select: { id: true, name: true } });
     if (!agency) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
 
-    const { leadIds, transferIds, opportunityIds, callIds, customerIds } = await collectFactoryResetScope(prisma, agencyId);
+    const { leadIds, transferIds, opportunityIds, callIds, saleIds, customerIds } = await collectFactoryResetScope(prisma, agencyId);
     // Fetched once, with enough fields to both scope FlowScoreSnapshot below
     // AND show real roster identity in the confirm UI — a duplicate-named
     // Agency row (schema has no uniqueness constraint on Agency.name) looks
@@ -401,12 +407,13 @@ router.get('/:agencyId/factory-reset-preview', requireRole('AGENCY_OWNER', 'PLAT
     // sibling (the real delete transaction below) to blow Prisma's 5s
     // interactive-transaction timeout at production scale.
     const customerIdList = [...customerIds];
-    const [leadRefs, transferRefs, opportunityRefs] = await Promise.all([
+    const [leadRefs, transferRefs, opportunityRefs, saleRefs] = await Promise.all([
       prisma.lead.findMany({ where: { customerId: { in: customerIdList }, agencyId: { not: agencyId } }, select: { customerId: true } }),
       prisma.transfer.findMany({ where: { customerId: { in: customerIdList }, agencyId: { not: agencyId } }, select: { customerId: true } }),
       prisma.opportunity.findMany({ where: { customerId: { in: customerIdList }, agencyId: { not: agencyId } }, select: { customerId: true } }),
+      prisma.sale.findMany({ where: { customerId: { in: customerIdList }, agencyId: { not: agencyId } }, select: { customerId: true } }),
     ]);
-    const stillReferencedElsewhere = new Set([...leadRefs, ...transferRefs, ...opportunityRefs].map((r) => r.customerId));
+    const stillReferencedElsewhere = new Set([...leadRefs, ...transferRefs, ...opportunityRefs, ...saleRefs].map((r) => r.customerId));
     const wipeableCustomers = customerIdList.filter((id) => !stillReferencedElsewhere.has(id)).length;
 
     const [leadEvents, leadNotes, leadActivities, leadProductQuotes, leadTasks, opportunityEvents, creditRequests, transferEvents, revenueEvents, costEvents, callAnalyses, historicalRecords, importBatches, flowScoreSnapshots, notifications] = await Promise.all([
@@ -442,6 +449,7 @@ router.get('/:agencyId/factory-reset-preview', requireRole('AGENCY_OWNER', 'PLAT
         wipeableCustomers,
         transfers: transferIds.length,
         opportunities: opportunityIds.length,
+        sales: saleIds.length,
         calls: callIds.length,
         callAnalyses,
         leadEvents,
@@ -477,7 +485,7 @@ router.post('/:agencyId/factory-reset', requireRole('AGENCY_OWNER', 'PLATFORM_OW
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      const { leadIds, transferIds, opportunityIds, callIds, customerIds } = await collectFactoryResetScope(tx, agencyId);
+      const { leadIds, transferIds, opportunityIds, callIds, saleIds, customerIds } = await collectFactoryResetScope(tx, agencyId);
       const userIds = (await tx.user.findMany({ where: { agencyId }, select: { id: true } })).map((u) => u.id);
 
       const counts = {};
@@ -507,6 +515,14 @@ router.post('/:agencyId/factory-reset', requireRole('AGENCY_OWNER', 'PLATFORM_OW
       counts.revenueEvents = (await tx.revenueEvent.deleteMany({ where: { agencyId } })).count;
       counts.costEvents = (await tx.costEvent.deleteMany({ where: { agencyId } })).count;
 
+      // Standalone sales (Add Closed Sale) — previously never touched by
+      // Factory Reset at all, leaving both the Sale rows and (via their
+      // required customerId) that customer's PII behind indefinitely.
+      // Deleted before the orphaned-customer check below so a Sale row
+      // belonging to THIS agency doesn't itself keep its customer "still
+      // referenced."
+      counts.sales = (await tx.sale.deleteMany({ where: { agencyId } })).count;
+
       // HistoricalRecord before LeadImportBatch — HistoricalRecord.importBatchId
       // is a required FK into LeadImportBatch.
       counts.historicalRecords = (await tx.historicalRecord.deleteMany({ where: { agencyId } })).count;
@@ -525,12 +541,13 @@ router.post('/:agencyId/factory-reset', requireRole('AGENCY_OWNER', 'PLATFORM_OW
       // This agency's own Lead/Transfer/Opportunity rows are already gone
       // above, so any remaining reference is inherently from another agency.
       const customerIdList = [...customerIds];
-      const [leadRefs, transferRefs, opportunityRefs] = await Promise.all([
+      const [leadRefs, transferRefs, opportunityRefs, saleRefs] = await Promise.all([
         tx.lead.findMany({ where: { customerId: { in: customerIdList } }, select: { customerId: true } }),
         tx.transfer.findMany({ where: { customerId: { in: customerIdList } }, select: { customerId: true } }),
         tx.opportunity.findMany({ where: { customerId: { in: customerIdList } }, select: { customerId: true } }),
+        tx.sale.findMany({ where: { customerId: { in: customerIdList } }, select: { customerId: true } }),
       ]);
-      const stillReferenced = new Set([...leadRefs, ...transferRefs, ...opportunityRefs].map((r) => r.customerId));
+      const stillReferenced = new Set([...leadRefs, ...transferRefs, ...opportunityRefs, ...saleRefs].map((r) => r.customerId));
       const wipeableCustomerIds = customerIdList.filter((id) => !stillReferenced.has(id));
       counts.customers = (await tx.customer.deleteMany({ where: { id: { in: wipeableCustomerIds } } })).count;
 

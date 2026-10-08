@@ -106,7 +106,7 @@ const completeSchema = z.object({
   snoozeUntil: z.string().datetime().optional(),
 });
 
-router.post('/:taskId/complete', async (req, res, next) => {
+router.post('/:taskId/complete', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER', 'TELEMARKETER', 'PLATFORM_OWNER'), async (req, res, next) => {
   try {
     const parsed = completeSchema.safeParse(req.body);
     if (!parsed.success) {

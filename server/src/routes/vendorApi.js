@@ -124,10 +124,18 @@ router.post('/leads', requireVendorAuth, async (req, res) => {
         });
       }
 
+      // Phone-number-level suppression (TCPA) — see leads.js's
+      // createLeadRecord for the full reasoning. A vendor-API-sourced lead
+      // for an already-suppressed Customer never gets distributed.
+      const isSuppressed = customer.doNotContact;
+
       // The vendor API's postSchema has no `city` field today (state + zip
       // only) — zip alone is enough to drive OFFICE_SPLIT/ALPHA_SPLIT's
-      // geography match for vendor-sourced leads.
-      const assignment = await resolveVendorAssignment(tx, req.vendor, { lastName: customer.lastName, zip: data.zip });
+      // geography match for vendor-sourced leads. Never resolve/spend a
+      // real distribution assignment on a suppressed lead.
+      const assignment = isSuppressed
+        ? { assignedToId: null, mode: null, reason: 'Customer is DO_NOT_CONTACT — not distributed' }
+        : await resolveVendorAssignment(tx, req.vendor, { lastName: customer.lastName, zip: data.zip });
 
       const lead = await tx.lead.create({
         data: {
@@ -138,7 +146,8 @@ router.post('/leads', requireVendorAuth, async (req, res) => {
           rawPayload: req.body,
           source: `vendor:${req.vendor.name}`,
           product: data.product,
-          status: 'NEW',
+          status: isSuppressed ? 'DO_NOT_CONTACT' : 'NEW',
+          archivedAt: isSuppressed ? new Date() : null,
           assignedToId: assignment.assignedToId,
           assignedAt: assignment.assignedToId ? new Date() : null,
           leadType: deriveLeadType({ vendorCategory: req.vendor.category }),
@@ -159,14 +168,17 @@ router.post('/leads', requireVendorAuth, async (req, res) => {
           leadId: lead.id,
           type: 'lead.created.vendor_api',
           toStatus: updatedLead.status,
-          metadata: { vendorId: req.vendor.id, distributionMode: assignment.mode, distributionReason: assignment.reason },
+          metadata: {
+            vendorId: req.vendor.id, distributionMode: assignment.mode, distributionReason: assignment.reason,
+            ...(isSuppressed ? { suppressedReason: customer.doNotContactReason || 'Customer marked DO_NOT_CONTACT' } : {}),
+          },
         },
       });
 
-      return { lead: updatedLead, assignment };
+      return { lead: updatedLead, assignment, isSuppressed };
     });
 
-    const { lead, assignment } = result;
+    const { lead, assignment, isSuppressed } = result;
 
     await logTransaction({
       vendorId: req.vendor.id, method: 'POST', endpoint, statusCode: 201, startedAt,
@@ -182,43 +194,52 @@ router.post('/leads', requireVendorAuth, async (req, res) => {
       correlationId,
     });
 
-    // Record the real vendor lead cost, if this vendor connection has one configured.
+    // Record the real vendor lead cost, if this vendor connection has one
+    // configured — a vendor accounting matter, orthogonal to the TCPA
+    // suppression check above, so this still runs even for a suppressed
+    // lead (the vendor delivered it; whether to bill for it is unrelated
+    // to whether this app may reach out to the consumer).
     await recordVendorLeadCost(lead, req.vendor);
 
-    await notifyAgencyOwners(req.vendor.agencyId, {
-      type: 'lead.new',
-      severity: 'INFO',
-      title: `New lead from ${req.vendor.name}`,
-      body: `${data.first_name} ${data.last_name} — ${data.product}`,
-      relatedEntityType: 'Lead',
-      relatedEntityId: lead.id,
-    });
+    // A suppressed Customer's forced-DO_NOT_CONTACT lead is never
+    // distributed or surfaced for anyone to act on — skip every
+    // notification below, same as the telemarketer/manual intake path.
+    if (!isSuppressed) {
+      await notifyAgencyOwners(req.vendor.agencyId, {
+        type: 'lead.new',
+        severity: 'INFO',
+        title: `New lead from ${req.vendor.name}`,
+        body: `${data.first_name} ${data.last_name} — ${data.product}`,
+        relatedEntityType: 'Lead',
+        relatedEntityId: lead.id,
+      });
 
-    if (assignment.assignedToId) {
-      await notifyUser({
-        userId: assignment.assignedToId,
-        agencyId: req.vendor.agencyId,
-        type: 'lead.assigned',
-        severity: 'INFO',
-        title: 'New lead assigned to you',
-        body: `${data.first_name} ${data.last_name} — ${data.product} (from ${req.vendor.name})`,
-        relatedEntityType: 'Lead',
-        relatedEntityId: lead.id,
-      });
-    } else if (assignment.mode === 'MOSHPIT') {
-      const eligibleProducers = await prisma.user.findMany({
-        where: { agencyId: req.vendor.agencyId, role: 'PRODUCER', status: 'ACTIVE' },
-        select: { id: true },
-      });
-      await notifyUsers(eligibleProducers.map((u) => u.id), {
-        agencyId: req.vendor.agencyId,
-        type: 'lead.moshpit_available',
-        severity: 'INFO',
-        title: `New Moshpit lead from ${req.vendor.name}`,
-        body: `${data.first_name} ${data.last_name} — ${data.product}. First to claim it gets it.`,
-        relatedEntityType: 'Lead',
-        relatedEntityId: lead.id,
-      });
+      if (assignment.assignedToId) {
+        await notifyUser({
+          userId: assignment.assignedToId,
+          agencyId: req.vendor.agencyId,
+          type: 'lead.assigned',
+          severity: 'INFO',
+          title: 'New lead assigned to you',
+          body: `${data.first_name} ${data.last_name} — ${data.product} (from ${req.vendor.name})`,
+          relatedEntityType: 'Lead',
+          relatedEntityId: lead.id,
+        });
+      } else if (assignment.mode === 'MOSHPIT') {
+        const eligibleProducers = await prisma.user.findMany({
+          where: { agencyId: req.vendor.agencyId, role: 'PRODUCER', status: 'ACTIVE' },
+          select: { id: true },
+        });
+        await notifyUsers(eligibleProducers.map((u) => u.id), {
+          agencyId: req.vendor.agencyId,
+          type: 'lead.moshpit_available',
+          severity: 'INFO',
+          title: `New Moshpit lead from ${req.vendor.name}`,
+          body: `${data.first_name} ${data.last_name} — ${data.product}. First to claim it gets it.`,
+          relatedEntityType: 'Lead',
+          relatedEntityId: lead.id,
+        });
+      }
     }
 
     return res.status(201).json({

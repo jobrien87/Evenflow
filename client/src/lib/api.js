@@ -348,6 +348,8 @@ export const api = {
   },
   searchCustomers: (q) => request(`/customers/search?q=${encodeURIComponent(q)}`),
   customerDetail: (id) => request(`/customers/${id}`),
+  exportCustomer: (id) => request(`/customers/${id}/export`),
+  anonymizeCustomer: (id) => request(`/customers/${id}/anonymize`, { method: 'POST' }),
 
   goals: (params = '') => request(`/goals${params}`),
   createGoal: (payload) => request('/goals', { method: 'POST', body: payload }),
