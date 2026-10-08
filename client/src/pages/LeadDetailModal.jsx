@@ -59,6 +59,70 @@ function SaleLogNudge({ lead, onDismiss, onLogged }) {
   );
 }
 
+// Matches the server's authorizeLeadAccess write rule exactly: a Producer
+// may reassign only a lead actually assigned to them; Owner/Manager/
+// Platform Owner may reassign any lead in their agency. Reassignment only
+// ever applies to an already-assigned lead — an unassigned one uses claim.
+function canReassign(lead, user) {
+  if (!lead.assignedToId) return false;
+  if (user?.role === 'PRODUCER') return lead.assignedToId === user.id;
+  return ['AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'].includes(user?.role);
+}
+
+// Hands a lead off to another eligible active LSP in the same agency —
+// never touches assignedAt/firstAttemptAt (the server enforces this), so
+// reassignment can't be used to restart a lead's SLA clock.
+function ReassignControl({ lead, onDone }) {
+  const [open, setOpen] = useState(false);
+  const [targets, setTargets] = useState([]);
+  const [selectedId, setSelectedId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    api.users(`?agencyId=${lead.agencyId}`)
+      .then((data) => {
+        setTargets((data.users || []).filter((u) => ['PRODUCER', 'AGENCY_MANAGER'].includes(u.role) && u.status === 'ACTIVE' && u.id !== lead.assignedToId));
+      })
+      .catch(() => {});
+  }, [open, lead.agencyId, lead.assignedToId]);
+
+  async function submit() {
+    if (!selectedId) return;
+    setBusy(true);
+    setError('');
+    try {
+      await api.reassignLead(lead.id, selectedId);
+      setOpen(false);
+      setSelectedId('');
+      await onDone();
+    } catch (e) {
+      setError(e.data?.message || 'Failed to reassign this lead.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return <Button variant="secondary" size="sm" onClick={() => setOpen(true)}>REASSIGN</Button>;
+  }
+
+  return (
+    <div style={s.reassignRow}>
+      <select style={s.select} value={selectedId} onChange={(e) => setSelectedId(e.target.value)} disabled={busy}>
+        <option value="">Select teammate…</option>
+        {targets.map((t) => (
+          <option key={t.id} value={t.id}>{t.firstName} {t.lastName}{t.role === 'AGENCY_MANAGER' ? ' (Manager)' : ''}</option>
+        ))}
+      </select>
+      <Button variant="primary" size="sm" disabled={!selectedId || busy} onClick={submit}>CONFIRM</Button>
+      <Button variant="secondary" size="sm" disabled={busy} onClick={() => { setOpen(false); setError(''); setSelectedId(''); }}>CANCEL</Button>
+      {error && <div style={s.quickActionsStatus}>{error}</div>}
+    </div>
+  );
+}
+
 const LEAD_STATUSES = [
   'NEW', 'CONTACTED', 'LEFT_VM', 'APPOINTMENT',
   'QUOTED', 'QUOTED_HOT', 'FOLLOW_UP', 'SOLD', 'LOST', 'NOT_INTERESTED', 'BAD_CONTACT',
@@ -298,6 +362,11 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
             {lead.assignedTo && ` · Assigned to ${lead.assignedTo.firstName} ${lead.assignedTo.lastName}`}
             {` · ${lead.attemptCount || 0} attempt${lead.attemptCount === 1 ? '' : 's'}`}
           </div>
+          {canReassign(lead, user) && (
+            <div style={s.reassignWrap}>
+              <ReassignControl lead={lead} onDone={refresh} />
+            </div>
+          )}
         </div>
         <div style={s.headerBadges}>
           {lead.product && <Badge tone="neutral">{lead.product}</Badge>}
@@ -930,6 +999,8 @@ const s = {
   name: { fontWeight: 700, fontSize: 19, color: 'var(--text-primary)' },
   meta: { color: 'var(--text-muted)', fontSize: 12, marginTop: 4 },
   headerBadges: { display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end', flexShrink: 0 },
+  reassignWrap: { marginTop: 8 },
+  reassignRow: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' },
   section: {
     marginBottom: 'var(--space-4)', background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)',
     borderLeft: '3px solid rgba(198, 255, 46, 0.35)',

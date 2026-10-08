@@ -43,6 +43,7 @@ export const api = {
   dispositionLead: (id, payload) => request(`/leads/${id}/disposition`, { method: 'POST', body: payload }),
   moshpitLeads: () => request('/leads/moshpit'),
   claimLead: (id) => request(`/leads/${id}/claim`, { method: 'POST' }),
+  reassignLead: (id, assignedToId) => request(`/leads/${id}/reassign`, { method: 'POST', body: { assignedToId } }),
   logLeadActivity: (id, payload) => request(`/leads/${id}/activities`, { method: 'POST', body: payload }),
   createLeadNote: (id, content) => request(`/leads/${id}/notes`, { method: 'POST', body: { content } }),
   logProductQuote: (id, payload) => request(`/leads/${id}/products`, { method: 'POST', body: payload }),

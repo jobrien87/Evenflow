@@ -16,6 +16,7 @@ const { computeFunnel } = require('../lib/funnelMetrics');
 const { parseLeadFileWithAi } = require('../lib/leadBulkImport');
 const { parseHistoricalFileWithAi } = require('../lib/historicalDataImport');
 const { resolveManualAssignment } = require('../lib/leadDistribution');
+const { eligibleProducersWhere } = require('../lib/eligibleProducersQuery');
 const { computeZipBreakdown } = require('../lib/zipBreakdown');
 const { sendZipReportEmail } = require('../lib/email');
 
@@ -1288,6 +1289,91 @@ async function loadLeadWithAccessCheck(req, { write = true } = {}) {
   const access = authorizeLeadAccess(req, lead, { write });
   return { lead, forbidden: !access.ok };
 }
+
+const reassignSchema = z.object({
+  assignedToId: z.string().uuid(),
+});
+
+// Reassign an already-assigned lead to a different eligible active LSP in
+// the same agency — a distinct action from POST /:leadId/claim (which
+// exclusively assigns from assignedToId:null and sets assignedAt/the real
+// "this is when the clock started" moment). Reassignment must never touch
+// assignedAt/firstAttemptAt — doing so would let a reassignment restart
+// the SLA clock a producer's own slow response already started.
+router.post('/:leadId/reassign', async (req, res, next) => {
+  try {
+    const parsed = reassignSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+    const { lead, forbidden } = await loadLeadWithAccessCheck(req);
+    if (!lead) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (forbidden) return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+
+    const previousAssigneeId = lead.assignedToId;
+    if (!previousAssigneeId) {
+      return res.status(400).json({ success: false, error: 'NOT_ASSIGNED', message: 'This lead has no current assignee — use claim instead.' });
+    }
+    const { assignedToId: newAssigneeId } = parsed.data;
+    if (newAssigneeId === previousAssigneeId) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'This lead is already assigned to that person.' });
+    }
+
+    // Never trust the client-supplied target blindly — must be a real,
+    // active, production-eligible teammate in this exact same agency.
+    const target = await prisma.user.findFirst({
+      where: eligibleProducersWhere(lead.agencyId, { id: newAssigneeId }),
+      select: { id: true },
+    });
+    if (!target) {
+      return res.status(400).json({ success: false, error: 'INVALID_ASSIGNEE', message: 'assignedToId must be a real, active producer or manager in this agency.' });
+    }
+
+    // Atomic concurrency guard — same updateMany-then-recheck idiom as
+    // /claim, keyed on the assignee actually still being who we read above.
+    const result = await prisma.lead.updateMany({
+      where: { id: lead.id, assignedToId: previousAssigneeId },
+      data: { assignedToId: newAssigneeId },
+    });
+    if (result.count === 0) {
+      return res.status(409).json({ success: false, error: 'ALREADY_REASSIGNED', message: 'This lead was just reassigned by someone else.' });
+    }
+
+    const updated = await prisma.lead.findUnique({
+      where: { id: lead.id },
+      include: {
+        customer: true,
+        assignedTo: { select: { id: true, firstName: true, lastName: true } },
+      },
+    });
+
+    await prisma.leadEvent.create({
+      data: {
+        leadId: lead.id,
+        type: 'lead.reassigned',
+        fromStatus: lead.status,
+        toStatus: lead.status,
+        metadata: { fromAssigneeId: previousAssigneeId, toAssigneeId: newAssigneeId, reassignedById: req.user.id },
+      },
+    });
+
+    await recordAudit({
+      actorId: req.user.id,
+      actorRole: req.user.role,
+      agencyId: lead.agencyId,
+      action: 'lead.reassigned',
+      entityType: 'Lead',
+      entityId: lead.id,
+      before: { assignedToId: previousAssigneeId },
+      after: { assignedToId: newAssigneeId },
+      correlationId: req.correlationId,
+    });
+
+    return res.json({ success: true, lead: updated });
+  } catch (err) {
+    next(err);
+  }
+});
 
 const activitySchema = z.object({
   type: z.enum(['CALL', 'EMAIL', 'TEXT']),
