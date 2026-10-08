@@ -4,13 +4,24 @@
 // time clock at all.
 const express = require('express');
 const { prisma } = require('../../lib/db');
-const { requireHrRole } = require('../../middleware/hrAuth');
+const { requireHrRole, hasHrRole } = require('../../middleware/hrAuth');
 
 const router = express.Router();
 
 router.get('/', requireHrRole('HR_ADMIN', 'HR_AUDITOR'), async (req, res, next) => {
   try {
     const agencyId = req.hrAgencyId;
+    // Tells the client what this caller may do, so write controls (add/
+    // edit buttons, grant/revoke) only ever render for someone who can
+    // actually use them — an HR_AUDITOR grant is real read-only access,
+    // not a cosmetic difference, and only the agency's real owner (or
+    // Platform Owner) can delegate HR authority at all (see roleGrants.js).
+    const canWrite = await hasHrRole(req.user, agencyId, 'HR_ADMIN');
+    const access = {
+      hrRole: canWrite ? 'HR_ADMIN' : 'HR_AUDITOR',
+      canWrite,
+      canManageGrants: req.user.role === 'AGENCY_OWNER' || req.user.role === 'PLATFORM_OWNER',
+    };
     const [activeEmployeeCount, departmentCounts, pendingOnboardingCount, pendingOffboardingCount, totalDepartments] = await Promise.all([
       prisma.hrEmployeeProfile.count({ where: { agencyId, user: { status: 'ACTIVE' } } }),
       prisma.hrEmployeeProfile.groupBy({
@@ -36,6 +47,7 @@ router.get('/', requireHrRole('HR_ADMIN', 'HR_AUDITOR'), async (req, res, next) 
 
     return res.json({
       success: true,
+      access,
       overview: {
         activeEmployeeCount,
         totalDepartments,

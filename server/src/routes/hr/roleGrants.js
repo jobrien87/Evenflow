@@ -12,7 +12,10 @@ const { requireHrRole } = require('../../middleware/hrAuth');
 
 const router = express.Router();
 
-router.get('/', requireHrRole('HR_ADMIN'), async (req, res, next) => {
+// Read access matches every other HR route's convention (ADMIN + AUDITOR
+// can both see who holds HR authority — that's exactly what "auditor"
+// means); only the writes below stay AGENCY_OWNER/PLATFORM_OWNER-only.
+router.get('/', requireHrRole('HR_ADMIN', 'HR_AUDITOR'), async (req, res, next) => {
   try {
     const grants = await prisma.hrRoleGrant.findMany({
       where: { agencyId: req.hrAgencyId, revokedAt: null },
