@@ -133,7 +133,12 @@ router.get('/schedule/mine', async (req, res, next) => {
     const where = { employeeProfileId: own.id, status: { not: 'CANCELLED' } };
     if (req.query.start) where.workDate = { ...(where.workDate || {}), gte: new Date(req.query.start) };
     if (req.query.end) where.workDate = { ...(where.workDate || {}), lte: new Date(req.query.end) };
-    const shifts = await prisma.hrShiftAssignment.findMany({ where, include: { shiftTemplate: true }, orderBy: { workDate: 'asc' }, take: 200 });
+    const shifts = await prisma.hrShiftAssignment.findMany({
+      where,
+      include: { shiftTemplate: true, swapRequests: { where: { status: 'PENDING' }, select: { id: true, status: true } } },
+      orderBy: { workDate: 'asc' },
+      take: 200,
+    });
     return res.json({ success: true, shifts });
   } catch (err) {
     next(err);

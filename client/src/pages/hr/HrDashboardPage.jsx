@@ -38,6 +38,16 @@ function startOfWeek(date) {
   const mondayOffset = weekday === 0 ? -6 : 1 - weekday;
   return addDays(d, mondayOffset);
 }
+// Always renders in the shift's own work time zone — never the
+// viewer's browser-local zone. An Agency Owner reviewing a schedule
+// isn't necessarily in the same time zone as the employee being
+// scheduled, so "09:00 AM" here must mean 9am for that employee, not
+// 9am wherever the browser happens to be. Caught by a real-browser
+// pass: without an explicit timeZone, a shift resolved for 9am Eastern
+// rendered as "01:00 PM" in a UTC-zoned browser.
+function formatShiftTime(isoString, timeZone) {
+  return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: timeZone || 'America/New_York' });
+}
 
 const CLOCK_STATE_TONE = { CLOCKED_IN: 'green', ON_BREAK: 'lime', ON_LUNCH: 'lime', CLOCKED_OUT: 'neutral' };
 const CLOCK_STATE_LABEL = { CLOCKED_IN: 'Clocked In', ON_BREAK: 'On Break', ON_LUNCH: 'On Lunch', CLOCKED_OUT: 'Clocked Out' };
@@ -102,6 +112,16 @@ export default function HrDashboardPage({ agencyId: agencyIdProp }) {
       // A Manager with no HrRoleGrant yet hits this 403 by design — HR
       // access for a Manager is something the Agency Owner delegates
       // (see Settings > HR Role Grants), not an error to retry past.
+      // Part C's own SCHEDULE/LEAVE CALENDAR tabs allow a plain manager
+      // to act/view without a grant at the API level (see scheduling.js's
+      // requireHrAdminOrManager and leave.js's open GET /leave/calendar),
+      // but this page still fronts every tab behind one combined load —
+      // reaching Backstage HR at all for a Manager requires at least an
+      // HR_AUDITOR grant from the Agency Owner, by this app's own
+      // deliberate design (see the commit that introduced `access`/
+      // `noGrant`). A dedicated manager-facing schedule view outside this
+      // gated dashboard would be a reasonable future follow-up, not
+      // something this round changes.
       if (err.status === 403 && user?.role === 'AGENCY_MANAGER') {
         setNoGrant(true);
       } else {
@@ -983,7 +1003,7 @@ function ScheduleTab({ employees, departments, agencyId, canWrite }) {
                       <div>
                         <div style={{ fontWeight: 700, fontSize: 13 }}>{fullName(s.employeeProfile?.user)}</div>
                         <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                          {new Date(s.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – {new Date(s.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {formatShiftTime(s.startAt, s.employeeProfile?.workTimeZone)} – {formatShiftTime(s.endAt, s.employeeProfile?.workTimeZone)}
                           {s.shiftTemplate ? ` · ${s.shiftTemplate.name}` : ''}
                         </div>
                       </div>

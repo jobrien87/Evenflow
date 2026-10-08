@@ -11,6 +11,15 @@ function minutesToHours(minutes) {
   return (minutes / 60).toFixed(1);
 }
 
+// Always renders in the employee's own work time zone, never the
+// viewer's browser-local zone (the viewer IS the employee here, but the
+// browser's local zone can still differ from their configured work
+// zone) — see HrDashboardPage.jsx's formatShiftTime for the same fix
+// and the real-browser bug it caught.
+function formatShiftTime(isoString, timeZone) {
+  return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: timeZone || 'America/New_York' });
+}
+
 const LEAVE_STATUS_TONE = { PENDING: 'neutral', APPROVED: 'green', DENIED: 'danger', CANCELLED: 'neutral' };
 
 const inputStyle = { padding: '8px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)' };
@@ -95,13 +104,13 @@ export default function HrMyProfilePage() {
         )}
       </Card>
 
-      <MyScheduleSection />
+      <MyScheduleSection workTimeZone={employee?.workTimeZone} />
       <MyTimeOffSection />
     </div>
   );
 }
 
-function MyScheduleSection() {
+function MyScheduleSection({ workTimeZone }) {
   const [shifts, setShifts] = useState(null);
   const [error, setError] = useState('');
   const [swapShiftId, setSwapShiftId] = useState('');
@@ -146,13 +155,14 @@ function MyScheduleSection() {
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 13 }}>{new Date(s.workDate).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                    {new Date(s.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – {new Date(s.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {formatShiftTime(s.startAt, workTimeZone)} – {formatShiftTime(s.endAt, workTimeZone)}
                     {s.shiftTemplate ? ` · ${s.shiftTemplate.name}` : ''}
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <Badge tone={s.status === 'COVERED' ? 'lime' : 'green'}>{s.status}</Badge>
-                  {s.status === 'SCHEDULED' && swapShiftId !== s.id && (
+                  {s.swapRequests?.length > 0 && <Badge tone="neutral">SWAP PENDING</Badge>}
+                  {s.status === 'SCHEDULED' && !s.swapRequests?.length && swapShiftId !== s.id && (
                     <Button size="sm" variant="secondary" onClick={() => setSwapShiftId(s.id)}>REQUEST SWAP</Button>
                   )}
                 </div>
