@@ -107,6 +107,15 @@ export default function BillboardPanel() {
           value={data.totals.soldCount}
           sub={data.historicalRecordsIncluded > 0 ? `includes ${data.historicalRecordsIncluded} historical` : undefined}
         />
+        {/* Items (sum of Sale.items/HistoricalRecord.items) is a distinct
+            count from the policy/row count above — a single policy can
+            carry several items (e.g. a multi-car or multi-line sale),
+            so this is never assumed to equal soldCount. */}
+        <StatTile
+          label="Items"
+          value={data.totals.itemCount}
+          sub={data.totals.unknownItemsCount > 0 ? `${data.totals.unknownItemsCount} unknown — needs reconciliation` : undefined}
+        />
         <StatTile label="Premium Total" value={money(data.totals.premiumCents)} />
       </div>
 
@@ -123,7 +132,9 @@ export default function BillboardPanel() {
           <ExportButton onExport={() => downloadCsv('billboard-producers', data.byProducer, [
             { key: 'firstName', label: 'First Name' },
             { key: 'lastName', label: 'Last Name' },
-            { key: 'soldCount', label: 'Sold' },
+            { key: 'soldCount', label: 'Policies Sold' },
+            { key: 'itemCount', label: 'Items' },
+            { key: 'unknownItemsCount', label: 'Unknown Items' },
             { key: (r) => (r.premiumCents / 100).toFixed(2), label: 'Premium ($)' },
           ])} />
         </div>
@@ -141,6 +152,7 @@ export default function BillboardPanel() {
               </div>
               <div style={s.rowRight}>
                 <span style={s.rowStat}>{row.soldCount} sold</span>
+                <span style={s.rowStat}>{row.itemCount} items</span>
                 <span style={s.rowStat}>{money(row.premiumCents)}</span>
               </div>
             </div>
@@ -159,7 +171,7 @@ export default function BillboardPanel() {
               label={row.label}
               value={row.soldCount}
               max={data.totals.soldCount || 1}
-              valueLabel={`${row.soldCount} · ${money(row.premiumCents)}`}
+              valueLabel={`${row.soldCount} sold · ${row.itemCount} items · ${money(row.premiumCents)}`}
             />
           ))
         )}
@@ -170,7 +182,9 @@ export default function BillboardPanel() {
           <div style={s.cardTitle}>BY VENDOR</div>
           <ExportButton onExport={() => downloadCsv('billboard-by-vendor', data.byVendor, [
             { key: 'vendorName', label: 'Vendor' },
-            { key: 'soldCount', label: 'Sold' },
+            { key: 'soldCount', label: 'Policies Sold' },
+            { key: 'itemCount', label: 'Items' },
+            { key: 'unknownItemsCount', label: 'Unknown Items' },
             { key: (r) => (r.premiumCents / 100).toFixed(2), label: 'Premium ($)' },
           ])} />
         </div>
@@ -183,7 +197,7 @@ export default function BillboardPanel() {
               label={row.vendorName}
               value={row.soldCount}
               max={data.totals.soldCount || 1}
-              valueLabel={`${row.soldCount} · ${money(row.premiumCents)}`}
+              valueLabel={`${row.soldCount} sold · ${row.itemCount} items · ${money(row.premiumCents)}`}
             />
           ))
         )}
@@ -194,7 +208,9 @@ export default function BillboardPanel() {
           <div style={s.cardTitle}>BY ZIP CODE</div>
           <ExportButton onExport={() => downloadCsv('billboard-by-zip', data.byZip, [
             { key: 'zip', label: 'Zip' },
-            { key: 'soldCount', label: 'Sold' },
+            { key: 'soldCount', label: 'Policies Sold' },
+            { key: 'itemCount', label: 'Items' },
+            { key: 'unknownItemsCount', label: 'Unknown Items' },
             { key: (r) => (r.premiumCents / 100).toFixed(2), label: 'Premium ($)' },
           ])} />
         </div>
@@ -207,7 +223,7 @@ export default function BillboardPanel() {
               label={row.zip}
               value={row.soldCount}
               max={data.totals.soldCount || 1}
-              valueLabel={`${row.soldCount} · ${money(row.premiumCents)}`}
+              valueLabel={`${row.soldCount} sold · ${row.itemCount} items · ${money(row.premiumCents)}`}
             />
           ))
         )}

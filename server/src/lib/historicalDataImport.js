@@ -30,6 +30,11 @@ const HEADER_SYNONYMS = {
   // keyword classifier below has something real to read.
   outcome: ['status', 'disposition', 'policystatus', 'leadstatus', 'stage', 'outcome', 'dataset', 'recordtype'],
   office: ['location', 'office', 'branch', 'officename'],
+  // The number of policy items/lines this record represents — distinct
+  // from the row/policy count Billboard used to conflate it with. Only
+  // ever populated when the source file has a real items-like column;
+  // never silently defaulted (see parseItemsOrNull/itemsSource below).
+  items: ['items', 'itemcount', 'numitems', 'numberofitems', 'policyitems', 'lineitems', 'unitcount'],
 };
 
 // Every known target field this parser can place a column into — used both
@@ -50,6 +55,7 @@ const FIELD_DESCRIPTIONS = {
   premiumCents: 'the dollar premium amount',
   outcome: 'the raw status/disposition/record-type text (e.g. Sale, Termination, Reinstatement)',
   office: 'the office/branch/location name this record belongs to',
+  items: 'the number of policy items/lines on this record (e.g. a multi-car or multi-line policy)',
 };
 
 // A Termination can carry its original policy's premium, which must never
@@ -147,6 +153,16 @@ function parsePremiumCentsOrNull(value) {
   return Math.round(dollars * 100);
 }
 
+// A real items count only — never fabricated. An empty/non-numeric cell
+// stays null (itemsSource stays null too), rather than guessing 1.
+function parseItemsOrNull(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const cleaned = String(value).replace(/[^0-9]/g, '');
+  if (!cleaned) return null;
+  const n = parseInt(cleaned, 10);
+  return Number.isNaN(n) ? null : n;
+}
+
 function readWorkbookRows(buffer) {
   let workbook;
   try {
@@ -218,6 +234,7 @@ function extractHistoricalRecords({ headerRow, dataRows, headerMap }) {
 
     const premiumCents = parsePremiumCentsOrNull(get('premiumCents'));
     const outcome = get('outcome') || null;
+    const items = parseItemsOrNull(get('items'));
 
     records.push({
       _sourceRow: sourceRow,
@@ -234,6 +251,8 @@ function extractHistoricalRecords({ headerRow, dataRows, headerMap }) {
       premiumCents,
       isSold: classifyIsSold(outcome, premiumCents),
       outcome,
+      items,
+      itemsSource: items !== null ? 'explicit' : null,
       // The full original row, keyed by its own literal header text — never
       // just the fields this parser recognizes, so an unmatched column
       // (e.g. "Source Batch", "Policy #") is still captured losslessly.

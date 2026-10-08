@@ -502,3 +502,41 @@ test('historicalAggregates read-time guard: a pre-existing bad row (isSold:true,
   await prisma.historicalRecord.delete({ where: { id: badRecord.id } });
   await prisma.leadImportBatch.delete({ where: { id: batch.id } });
 });
+
+// Item 4 of the production-correction round: Billboard must count policy
+// ITEMS, not rows — this is the import-time half (a recognized items
+// column populates items/itemsSource:'explicit'; an absent one leaves
+// items:null, never silently defaulted to 1).
+let itemsBatchId;
+
+function itemsCsv() {
+  const header = 'Date,First Name,Last Name,Product,Premium,Items\n';
+  const rows = [
+    `2024-06-05,Multi,Item,Auto,500,3`,
+    // no Items value for this row — items must stay null, never default to 1.
+    `2024-06-06,No,Items,Auto,400,`,
+  ];
+  return new Blob([header + rows.join('\n')], { type: 'text/csv' });
+}
+
+test('a recognized Items column populates items/itemsSource:explicit; an absent value stays null, never defaulted to 1', async () => {
+  const form = new FormData();
+  form.append('file', itemsCsv(), 'items.csv');
+  form.append('sourceSystem', 'OTHER');
+  const res = await fetch(`${baseUrl}/api/leads/historical-data-import`, { method: 'POST', headers: { Cookie: ownerCookie }, body: form });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.created, 2);
+  itemsBatchId = body.batchId;
+
+  const records = await prisma.historicalRecord.findMany({ where: { importBatchId: itemsBatchId }, orderBy: { recordDate: 'asc' } });
+  const withItems = records.find((r) => r.lastName === 'Item');
+  assert.equal(withItems.items, 3);
+  assert.equal(withItems.itemsSource, 'explicit');
+
+  const withoutItems = records.find((r) => r.lastName === 'Items');
+  assert.equal(withoutItems.items, null, 'a blank Items cell must never be guessed/defaulted to 1');
+  assert.equal(withoutItems.itemsSource, null);
+
+  await fetch(`${baseUrl}/api/leads/import-batches/${itemsBatchId}/undo`, { method: 'POST', headers: { Cookie: ownerCookie } });
+});

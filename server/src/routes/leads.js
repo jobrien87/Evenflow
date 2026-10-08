@@ -756,6 +756,8 @@ router.post('/historical-data-import', uploadSpreadsheet.single('file'), async (
             isSold: record.isSold,
             premiumCents: record.premiumCents,
             outcome: record.outcome,
+            items: record.items,
+            itemsSource: record.itemsSource,
             sourceSystem,
             rawFields: record.rawFields,
           },
