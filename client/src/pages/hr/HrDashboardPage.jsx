@@ -16,8 +16,28 @@ const TABS = [
   { key: 'departments', label: 'DEPARTMENTS' },
   { key: 'attendance', label: 'ATTENDANCE' },
   { key: 'timesheets', label: 'TIMESHEETS' },
+  { key: 'schedule', label: 'SCHEDULE' },
+  { key: 'leavePolicies', label: 'LEAVE POLICIES' },
+  { key: 'leaveCalendar', label: 'LEAVE CALENDAR' },
   { key: 'settings', label: 'SETTINGS' },
 ];
+
+const SWAP_STATUS_TONE = { PENDING: 'neutral', APPROVED: 'green', DENIED: 'danger', CANCELLED: 'neutral' };
+
+function addDays(date, n) {
+  const d = new Date(date);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d;
+}
+function toDateInput(d) {
+  return d.toISOString().slice(0, 10);
+}
+function startOfWeek(date) {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const weekday = d.getUTCDay();
+  const mondayOffset = weekday === 0 ? -6 : 1 - weekday;
+  return addDays(d, mondayOffset);
+}
 
 const CLOCK_STATE_TONE = { CLOCKED_IN: 'green', ON_BREAK: 'lime', ON_LUNCH: 'lime', CLOCKED_OUT: 'neutral' };
 const CLOCK_STATE_LABEL = { CLOCKED_IN: 'Clocked In', ON_BREAK: 'On Break', ON_LUNCH: 'On Lunch', CLOCKED_OUT: 'Clocked Out' };
@@ -146,6 +166,9 @@ export default function HrDashboardPage({ agencyId: agencyIdProp }) {
       )}
       {tab === 'attendance' && <AttendanceTab canWrite={!!access?.canWrite} />}
       {tab === 'timesheets' && <TimesheetsTab employees={employees} agencyId={agencyId} canWrite={!!access?.canWrite} />}
+      {tab === 'schedule' && <ScheduleTab employees={employees} departments={departments} agencyId={agencyId} canWrite={!!access?.canWrite} />}
+      {tab === 'leavePolicies' && <LeavePoliciesTab employees={employees} agencyId={agencyId} canWrite={!!access?.canWrite} />}
+      {tab === 'leaveCalendar' && <LeaveCalendarTab agencyId={agencyId} />}
       {tab === 'settings' && (
         <SettingsTab
           legalEmployers={legalEmployers}
@@ -513,7 +536,55 @@ function SettingsTab({ legalEmployers, roleGrants, agencyUsers, agencyId, canWri
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <LegalEmployersCard legalEmployers={legalEmployers} agencyId={agencyId} canWrite={canWrite} onChange={onChange} />
       <RoleGrantsCard roleGrants={roleGrants} agencyUsers={agencyUsers} agencyId={agencyId} canManageGrants={canManageGrants} onChange={onChange} />
+      <SchedulingSettingsCard canWrite={canWrite} />
     </div>
+  );
+}
+
+function SchedulingSettingsCard({ canWrite }) {
+  const [thresholdHours, setThresholdHours] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    api.hrSchedulingSettings()
+      .then((data) => setThresholdHours(String((data.settings?.weeklyOvertimeThresholdMinutes || 2400) / 60)))
+      .catch((err) => setError(err.data?.message || err.message || 'Could not load scheduling settings.'));
+  }, []);
+
+  async function save() {
+    setBusy(true);
+    setError('');
+    setSaved(false);
+    try {
+      await api.updateHrSchedulingSettings({ weeklyOvertimeThresholdMinutes: Math.round(Number(thresholdHours) * 60) });
+      setSaved(true);
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Could not save this setting.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <SectionHeader>SCHEDULING</SectionHeader>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+        A plain weekly-hours heads-up used only to flag a shift that pushes someone over this threshold — not a jurisdiction-aware payroll overtime calculation.
+      </div>
+      {canWrite ? (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <label style={labelStyle}>Weekly Overtime Threshold (hours)</label>
+          <input type="number" min="0" step="1" value={thresholdHours} onChange={(e) => setThresholdHours(e.target.value)} style={{ ...inputStyle, width: 90 }} />
+          <Button size="sm" onClick={save} disabled={busy}>{busy ? 'SAVING…' : 'SAVE'}</Button>
+          {saved && <span style={{ color: 'var(--success, #4caf50)', fontSize: 12 }}>Saved.</span>}
+        </div>
+      ) : (
+        <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Weekly Overtime Threshold: {thresholdHours || '—'} hours</div>
+      )}
+      {error && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 8 }}>{error}</div>}
+    </Card>
   );
 }
 
@@ -816,6 +887,569 @@ function TimesheetsTab({ employees, agencyId, canWrite }) {
                     <Button size="sm" variant="danger" onClick={() => decide(t.id, 'reject')}>REJECT</Button>
                   </>
                 )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function ScheduleTab({ employees, departments, agencyId, canWrite }) {
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  const [shifts, setShifts] = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [swapRequests, setSwapRequests] = useState([]);
+  const [error, setError] = useState('');
+  const [showCreate, setShowCreate] = useState(false);
+  const [showTemplateCreate, setShowTemplateCreate] = useState(false);
+
+  useEffect(() => {
+    load();
+  }, [weekStart, agencyId]);
+
+  async function load() {
+    setError('');
+    try {
+      const weekEnd = addDays(weekStart, 6);
+      const [shiftsRes, templatesRes, swapRes] = await Promise.all([
+        api.hrSchedule(`?start=${toDateInput(weekStart)}&end=${toDateInput(weekEnd)}${agencyId ? `&agencyId=${agencyId}` : ''}`),
+        api.hrShiftTemplates(agencyId),
+        api.hrSwapRequests(`?status=PENDING${agencyId ? `&agencyId=${agencyId}` : ''}`),
+      ]);
+      setShifts(shiftsRes.shifts || []);
+      setTemplates(templatesRes.shiftTemplates || []);
+      setSwapRequests(swapRes.swapRequests || []);
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Could not load the schedule.');
+    }
+  }
+
+  async function decideSwap(id, action) {
+    try {
+      if (action === 'approve') await api.approveHrSwapRequest(id, {});
+      else await api.denyHrSwapRequest(id);
+      load();
+    } catch (err) {
+      setError(err.data?.message || err.message || `Could not ${action} this swap request.`);
+    }
+  }
+
+  async function cancelShift(id) {
+    try {
+      await api.cancelHrShift(id);
+      load();
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Could not cancel this shift.');
+    }
+  }
+
+  const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  const shiftsByDay = days.map((d) => ({
+    date: d,
+    shifts: shifts.filter((s) => s.workDate.slice(0, 10) === toDateInput(d)),
+  }));
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <Card>
+        <SectionHeader
+          right={
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button size="sm" variant="secondary" onClick={() => setWeekStart(addDays(weekStart, -7))}>&larr; PREV WEEK</Button>
+              <Button size="sm" variant="secondary" onClick={() => setWeekStart(startOfWeek(new Date()))}>THIS WEEK</Button>
+              <Button size="sm" variant="secondary" onClick={() => setWeekStart(addDays(weekStart, 7))}>NEXT WEEK &rarr;</Button>
+              {canWrite && <Button size="sm" variant="secondary" onClick={() => setShowTemplateCreate(true)}>+ SHIFT TEMPLATE</Button>}
+              {canWrite && <Button size="sm" onClick={() => setShowCreate(true)}>+ ADD SHIFT</Button>}
+            </div>
+          }
+        >
+          SCHEDULE — {weekStart.toLocaleDateString()} – {addDays(weekStart, 6).toLocaleDateString()}
+        </SectionHeader>
+        {error && <div style={{ color: 'var(--danger)', fontSize: 12, marginBottom: 10 }}>{error}</div>}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {shiftsByDay.map(({ date, shifts: dayShifts }) => (
+            <div key={toDateInput(date)}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: 0.5, marginBottom: 4 }}>
+                {date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+              </div>
+              {dayShifts.length === 0 ? (
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic', padding: '4px 12px' }}>No shifts scheduled.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {dayShifts.map((s) => (
+                    <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--bg-sunken)', borderRadius: 'var(--radius-sm)' }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 13 }}>{fullName(s.employeeProfile?.user)}</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                          {new Date(s.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – {new Date(s.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {s.shiftTemplate ? ` · ${s.shiftTemplate.name}` : ''}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <Badge tone={s.status === 'COVERED' ? 'lime' : s.status === 'SWAPPED' ? 'neutral' : 'green'}>{s.status}</Badge>
+                        {canWrite && <Button size="sm" variant="danger" onClick={() => cancelShift(s.id)}>CANCEL</Button>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <Card>
+        <SectionHeader>PENDING SWAP REQUESTS</SectionHeader>
+        {swapRequests.length === 0 ? (
+          <EmptyState description="No pending swap requests." />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {swapRequests.map((sr) => (
+              <div key={sr.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'var(--bg-sunken)', borderRadius: 'var(--radius-sm)' }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{fullName(sr.shiftAssignment?.employeeProfile?.user)} — {new Date(sr.shiftAssignment?.workDate).toLocaleDateString()}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{sr.reason || 'No reason given'}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Badge tone={SWAP_STATUS_TONE[sr.status]}>{sr.status}</Badge>
+                  {canWrite && <Button size="sm" onClick={() => decideSwap(sr.id, 'approve')}>APPROVE</Button>}
+                  {canWrite && <Button size="sm" variant="danger" onClick={() => decideSwap(sr.id, 'deny')}>DENY</Button>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {showCreate && canWrite && (
+        <CreateShiftModal
+          employees={employees}
+          templates={templates}
+          agencyId={agencyId}
+          onClose={() => setShowCreate(false)}
+          onCreated={() => { setShowCreate(false); load(); }}
+        />
+      )}
+      {showTemplateCreate && canWrite && (
+        <CreateShiftTemplateModal
+          departments={departments}
+          agencyId={agencyId}
+          onClose={() => setShowTemplateCreate(false)}
+          onCreated={() => { setShowTemplateCreate(false); load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function CreateShiftModal({ employees, templates, agencyId, onClose, onCreated }) {
+  const [employeeProfileId, setEmployeeProfileId] = useState('');
+  const [shiftTemplateId, setShiftTemplateId] = useState('');
+  const [startTime, setStartTime] = useState('09:00');
+  const [endTime, setEndTime] = useState('17:00');
+  const [workDate, setWorkDate] = useState(toDateInput(new Date()));
+  const [useTemplate, setUseTemplate] = useState(true);
+  const [error, setError] = useState('');
+  const [warnings, setWarnings] = useState([]);
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    if (!employeeProfileId || !workDate) { setError('Pick an employee and a date.'); return; }
+    setBusy(true);
+    setError('');
+    try {
+      const payload = { employeeProfileId, workDate, agencyId: agencyId || undefined };
+      if (useTemplate && shiftTemplateId) payload.shiftTemplateId = shiftTemplateId;
+      else { payload.startTime = startTime; payload.endTime = endTime; }
+      const res = await api.createHrShift(payload);
+      if (res.warnings?.length) setWarnings(res.warnings);
+      else onCreated();
+      if (res.warnings?.length) setTimeout(onCreated, 1200);
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Could not create this shift.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="Add Shift" onClose={onClose}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <label style={labelStyle}>Employee</label>
+        <select value={employeeProfileId} onChange={(e) => setEmployeeProfileId(e.target.value)} style={selectStyle}>
+          <option value="">Select employee…</option>
+          {employees.map((e) => <option key={e.id} value={e.id}>{fullName(e.user)}</option>)}
+        </select>
+        <label style={labelStyle}>Date</label>
+        <input type="date" value={workDate} onChange={(e) => setWorkDate(e.target.value)} style={inputStyle} />
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+          <input type="checkbox" checked={useTemplate} onChange={(e) => setUseTemplate(e.target.checked)} /> Use a shift template
+        </label>
+        {useTemplate ? (
+          <select value={shiftTemplateId} onChange={(e) => setShiftTemplateId(e.target.value)} style={selectStyle}>
+            <option value="">Select template…</option>
+            {templates.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.startTime}–{t.endTime})</option>)}
+          </select>
+        ) : (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} style={inputStyle} />
+            <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} style={inputStyle} />
+          </div>
+        )}
+        {error && <div style={{ color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
+        {warnings.length > 0 && (
+          <div style={{ color: 'var(--warning, #c99a2f)', fontSize: 12 }}>
+            {warnings.includes('SHIFT_OVERLAPS_APPROVED_LEAVE') && <div>Heads up: this shift overlaps an approved leave request for this employee.</div>}
+            {warnings.includes('WEEKLY_OVERTIME_THRESHOLD_EXCEEDED') && <div>Heads up: this puts the employee over the weekly scheduling threshold.</div>}
+            <div style={{ color: 'var(--text-muted)', marginTop: 4 }}>The shift was still created — closing…</div>
+          </div>
+        )}
+        <Button onClick={submit} disabled={busy}>{busy ? 'ADDING…' : 'ADD SHIFT'}</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function CreateShiftTemplateModal({ departments, agencyId, onClose, onCreated }) {
+  const [name, setName] = useState('');
+  const [startTime, setStartTime] = useState('09:00');
+  const [endTime, setEndTime] = useState('17:00');
+  const [departmentId, setDepartmentId] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    if (!name.trim()) { setError('Name is required.'); return; }
+    setBusy(true);
+    setError('');
+    try {
+      await api.createHrShiftTemplate({ name: name.trim(), startTime, endTime, departmentId: departmentId || undefined, agencyId: agencyId || undefined });
+      onCreated();
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Could not create this shift template.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="Add Shift Template" onClose={onClose}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <label style={labelStyle}>Name</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} placeholder="e.g. Day Shift" />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} style={inputStyle} />
+          <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} style={inputStyle} />
+        </div>
+        <label style={labelStyle}>Department (optional)</label>
+        <select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} style={selectStyle}>
+          <option value="">None</option>
+          {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
+        {error && <div style={{ color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
+        <Button onClick={submit} disabled={busy}>{busy ? 'ADDING…' : 'ADD TEMPLATE'}</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function LeavePoliciesTab({ employees, agencyId, canWrite }) {
+  const [leaveTypes, setLeaveTypes] = useState([]);
+  const [policies, setPolicies] = useState([]);
+  const [requests, setRequests] = useState([]);
+  const [error, setError] = useState('');
+  const [showTypeCreate, setShowTypeCreate] = useState(false);
+  const [showPolicyCreate, setShowPolicyCreate] = useState(false);
+  const [showAssign, setShowAssign] = useState(false);
+
+  useEffect(() => {
+    load();
+  }, [agencyId]);
+
+  async function load() {
+    setError('');
+    try {
+      const [typesRes, policiesRes, requestsRes] = await Promise.all([
+        api.hrLeaveTypes(),
+        api.hrLeavePolicies(),
+        api.hrLeaveRequests('?status=PENDING'),
+      ]);
+      setLeaveTypes(typesRes.leaveTypes || []);
+      setPolicies(policiesRes.policies || []);
+      setRequests(requestsRes.requests || []);
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Could not load leave policies.');
+    }
+  }
+
+  async function decideRequest(id, action) {
+    try {
+      if (action === 'approve') await api.approveHrLeaveRequest(id);
+      else await api.denyHrLeaveRequest(id, {});
+      load();
+    } catch (err) {
+      setError(err.data?.message || err.message || `Could not ${action} this request.`);
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {error && <div style={{ color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
+
+      <Card>
+        <SectionHeader>PENDING LEAVE REQUESTS</SectionHeader>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+          A protected leave type (e.g. FMLA) is never auto-approved or auto-denied by a balance check — review it the same as any other request.
+        </div>
+        {requests.length === 0 ? (
+          <EmptyState description="No pending leave requests." />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {requests.map((r) => (
+              <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'var(--bg-sunken)', borderRadius: 'var(--radius-sm)' }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>
+                    {fullName(r.employeeProfile?.user)} — {r.leaveType.name}{r.leaveType.isProtected && <Badge tone="lime" style={{ marginLeft: 6 }}>PROTECTED</Badge>}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    {new Date(r.startDate).toLocaleDateString()} – {new Date(r.endDate).toLocaleDateString()} · {minutesToHours(r.requestedMinutes)}h{r.note ? ` · "${r.note}"` : ''}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {canWrite && <Button size="sm" onClick={() => decideRequest(r.id, 'approve')}>APPROVE</Button>}
+                  {canWrite && <Button size="sm" variant="danger" onClick={() => decideRequest(r.id, 'deny')}>DENY</Button>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card>
+        <SectionHeader right={canWrite ? <Button size="sm" onClick={() => setShowTypeCreate(true)}>+ LEAVE TYPE</Button> : <Badge tone="neutral">READ-ONLY</Badge>}>LEAVE TYPES</SectionHeader>
+        {leaveTypes.length === 0 ? (
+          <EmptyState description="No leave types configured yet." />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {leaveTypes.map((lt) => (
+              <div key={lt.id} style={{ fontSize: 13, color: 'var(--text-secondary)', display: 'flex', gap: 8, alignItems: 'center' }}>
+                {lt.name} <Badge tone={lt.isPaid ? 'green' : 'neutral'}>{lt.isPaid ? 'PAID' : 'UNPAID'}</Badge>
+                {lt.isProtected && <Badge tone="lime">PROTECTED</Badge>}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card>
+        <SectionHeader right={canWrite ? <div style={{ display: 'flex', gap: 8 }}><Button size="sm" variant="secondary" onClick={() => setShowAssign(true)}>ASSIGN EMPLOYEE</Button><Button size="sm" onClick={() => setShowPolicyCreate(true)}>+ POLICY</Button></div> : <Badge tone="neutral">READ-ONLY</Badge>}>
+          LEAVE POLICIES
+        </SectionHeader>
+        {policies.length === 0 ? (
+          <EmptyState description="No leave policies configured yet." />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {policies.map((p) => (
+              <div key={p.id} style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                {p.name} — {p.leaveType.name} · {p.accrualMethod}
+                {p.accrualAmountMinutes ? ` · ${minutesToHours(p.accrualAmountMinutes)}h/period` : ''}
+                {p.annualCapMinutes ? ` · cap ${minutesToHours(p.annualCapMinutes)}h/yr` : ''}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {showTypeCreate && canWrite && (
+        <CreateLeaveTypeModal onClose={() => setShowTypeCreate(false)} onCreated={() => { setShowTypeCreate(false); load(); }} />
+      )}
+      {showPolicyCreate && canWrite && (
+        <CreateLeavePolicyModal leaveTypes={leaveTypes} onClose={() => setShowPolicyCreate(false)} onCreated={() => { setShowPolicyCreate(false); load(); }} />
+      )}
+      {showAssign && canWrite && (
+        <AssignLeavePolicyModal employees={employees} policies={policies} onClose={() => setShowAssign(false)} onCreated={() => setShowAssign(false)} />
+      )}
+    </div>
+  );
+}
+
+function CreateLeaveTypeModal({ onClose, onCreated }) {
+  const [name, setName] = useState('');
+  const [isPaid, setIsPaid] = useState(true);
+  const [isProtected, setIsProtected] = useState(false);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    if (!name.trim()) { setError('Name is required.'); return; }
+    setBusy(true);
+    setError('');
+    try {
+      await api.createHrLeaveType({ name: name.trim(), isPaid, isProtected });
+      onCreated();
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Could not create this leave type.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="Add Leave Type" onClose={onClose}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <label style={labelStyle}>Name</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} placeholder="e.g. Vacation, Sick, FMLA" />
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+          <input type="checkbox" checked={isPaid} onChange={(e) => setIsPaid(e.target.checked)} /> Paid
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+          <input type="checkbox" checked={isProtected} onChange={(e) => setIsProtected(e.target.checked)} /> Protected (e.g. FMLA) — skips balance-denial, flagged for manual HR review, redacted on the team calendar
+        </label>
+        {error && <div style={{ color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
+        <Button onClick={submit} disabled={busy}>{busy ? 'ADDING…' : 'ADD LEAVE TYPE'}</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function CreateLeavePolicyModal({ leaveTypes, onClose, onCreated }) {
+  const [leaveTypeId, setLeaveTypeId] = useState('');
+  const [name, setName] = useState('');
+  const [accrualMethod, setAccrualMethod] = useState('FRONT_LOADED');
+  const [accrualAmountHours, setAccrualAmountHours] = useState('');
+  const [annualCapHours, setAnnualCapHours] = useState('');
+  const [carryoverCapHours, setCarryoverCapHours] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    if (!leaveTypeId || !name.trim()) { setError('Leave type and name are required.'); return; }
+    setBusy(true);
+    setError('');
+    try {
+      await api.createHrLeavePolicy({
+        leaveTypeId, name: name.trim(), accrualMethod,
+        accrualAmountMinutes: accrualAmountHours ? Math.round(Number(accrualAmountHours) * 60) : undefined,
+        annualCapMinutes: annualCapHours ? Math.round(Number(annualCapHours) * 60) : undefined,
+        carryoverCapMinutes: carryoverCapHours ? Math.round(Number(carryoverCapHours) * 60) : undefined,
+      });
+      onCreated();
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Could not create this policy.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="Add Leave Policy" onClose={onClose}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <label style={labelStyle}>Leave Type</label>
+        <select value={leaveTypeId} onChange={(e) => setLeaveTypeId(e.target.value)} style={selectStyle}>
+          <option value="">Select leave type…</option>
+          {leaveTypes.map((lt) => <option key={lt.id} value={lt.id}>{lt.name}</option>)}
+        </select>
+        <label style={labelStyle}>Policy Name</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} placeholder="e.g. Standard Vacation" />
+        <label style={labelStyle}>Accrual Method</label>
+        <select value={accrualMethod} onChange={(e) => setAccrualMethod(e.target.value)} style={selectStyle}>
+          <option value="FRONT_LOADED">Front-loaded (once per year)</option>
+          <option value="PER_PAY_PERIOD">Per pay period (semi-monthly)</option>
+          <option value="PER_HOUR_WORKED">Per hour worked</option>
+        </select>
+        <label style={labelStyle}>{accrualMethod === 'PER_HOUR_WORKED' ? 'Hours earned per hour worked' : 'Hours per accrual'}</label>
+        <input type="number" min="0" step="0.1" value={accrualAmountHours} onChange={(e) => setAccrualAmountHours(e.target.value)} style={inputStyle} />
+        <label style={labelStyle}>Annual Cap (hours, optional)</label>
+        <input type="number" min="0" step="0.1" value={annualCapHours} onChange={(e) => setAnnualCapHours(e.target.value)} style={inputStyle} />
+        <label style={labelStyle}>Carryover Cap (hours, optional)</label>
+        <input type="number" min="0" step="0.1" value={carryoverCapHours} onChange={(e) => setCarryoverCapHours(e.target.value)} style={inputStyle} />
+        {error && <div style={{ color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
+        <Button onClick={submit} disabled={busy}>{busy ? 'ADDING…' : 'ADD POLICY'}</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function AssignLeavePolicyModal({ employees, policies, onClose, onCreated }) {
+  const [employeeProfileId, setEmployeeProfileId] = useState('');
+  const [leavePolicyId, setLeavePolicyId] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    if (!employeeProfileId || !leavePolicyId) { setError('Pick an employee and a policy.'); return; }
+    setBusy(true);
+    setError('');
+    try {
+      await api.createHrLeavePolicyAssignment({ employeeProfileId, leavePolicyId });
+      onCreated();
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Could not assign this policy.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="Assign Leave Policy" onClose={onClose}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <label style={labelStyle}>Employee</label>
+        <select value={employeeProfileId} onChange={(e) => setEmployeeProfileId(e.target.value)} style={selectStyle}>
+          <option value="">Select employee…</option>
+          {employees.map((e) => <option key={e.id} value={e.id}>{fullName(e.user)}</option>)}
+        </select>
+        <label style={labelStyle}>Policy</label>
+        <select value={leavePolicyId} onChange={(e) => setLeavePolicyId(e.target.value)} style={selectStyle}>
+          <option value="">Select policy…</option>
+          {policies.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.leaveType.name})</option>)}
+        </select>
+        {error && <div style={{ color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
+        <Button onClick={submit} disabled={busy}>{busy ? 'ASSIGNING…' : 'ASSIGN'}</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function LeaveCalendarTab({ agencyId }) {
+  const [entries, setEntries] = useState(null);
+  const [error, setError] = useState('');
+  const [rangeStart] = useState(() => toDateInput(new Date()));
+  const [rangeEnd] = useState(() => toDateInput(addDays(new Date(), 60)));
+
+  useEffect(() => {
+    load();
+  }, [agencyId]);
+
+  async function load() {
+    setError('');
+    try {
+      const data = await api.hrLeaveCalendar(`?start=${rangeStart}&end=${rangeEnd}${agencyId ? `&agencyId=${agencyId}` : ''}`);
+      setEntries(data.entries || []);
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Could not load the leave calendar.');
+    }
+  }
+
+  if (error) return <EmptyState title="Could not load" description={error} action={<Button size="sm" onClick={load}>RETRY</Button>} />;
+  if (entries === null) return <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading…</div>;
+
+  return (
+    <Card>
+      <SectionHeader>LEAVE CALENDAR — NEXT 60 DAYS</SectionHeader>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+        A protected leave type (e.g. FMLA) always shows as "Approved time off" here unless you hold full HR_ADMIN authority.
+      </div>
+      {entries.length === 0 ? (
+        <EmptyState description="No approved time off in this window." />
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {entries.map((e) => (
+            <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'var(--bg-sunken)', borderRadius: 'var(--radius-sm)' }}>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>{e.employeeName}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                {new Date(e.startDate).toLocaleDateString()} – {new Date(e.endDate).toLocaleDateString()} · <Badge tone={e.isProtected ? 'lime' : 'neutral'}>{e.leaveTypeName}</Badge>
               </div>
             </div>
           ))}
