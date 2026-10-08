@@ -87,6 +87,16 @@ production deploy needs beyond "the code works":
 - `server/` — Node.js + Express + PostgreSQL (Prisma ORM)
 - `client/` — React (Vite) single-page app
 
+## Compliance and security documentation
+
+- `server/PERMISSIONS.md` — the generated, current access-control matrix
+  (what's actually enforced, not a specification).
+- `docs/policies/` — six draft policy documents (Security, Incident
+  Response, Access Control, Data Classification, Vendor Management,
+  Acceptable Use) from the SOC 2 Tier 1 readiness pass. Each is flagged
+  as needing a real, named, accountable human owner before it's more
+  than a reference draft.
+
 ## First Deployment (Render + GitHub)
 
 ### 1. Push this repo to GitHub
