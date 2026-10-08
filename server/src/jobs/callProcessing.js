@@ -9,9 +9,10 @@
 // with a durable queue; that swap doesn't change the pipeline steps below.
 
 const { prisma } = require('../lib/db');
-const { read } = require('../lib/storage');
+const { read, remove } = require('../lib/storage');
 const { transcribe } = require('../lib/transcriptionProvider');
 const { analyzeTranscript } = require('../lib/callAnalysis');
+const { redactTranscript } = require('../lib/transcriptRedaction');
 const { estimateCostMicros } = require('../lib/aiCost');
 const { notifyUser } = require('../lib/notifications');
 const { computeProducerScore, computeAgencyScore } = require('../lib/flowScore');
@@ -81,7 +82,29 @@ async function runAnalysis(callId) {
     },
   });
 
-  await setStatus(callId, 'COMPLETE');
+  // Scoring is done — the CallAnalysis row above is the permanent record
+  // from here on. Burn the recording and discard the transcript; neither
+  // is needed again, and per data-retention policy neither should exist
+  // a moment longer than it has to. A storage cleanup failure is logged
+  // but never blocks the call from reaching COMPLETE — a stray file is a
+  // follow-up for an operator, not a reason to leave scoring stuck.
+  let recordingDeletedAt = null;
+  try {
+    await remove(call.storageKey);
+    recordingDeletedAt = new Date();
+  } catch (err) {
+    console.error(`[callProcessing] failed to delete recording for call ${callId} after scoring`, err.message);
+  }
+  await prisma.call.update({
+    where: { id: callId },
+    data: {
+      status: 'COMPLETE',
+      transcript: null,
+      storageKey: null,
+      transcriptDiscardedAt: new Date(),
+      recordingDeletedAt,
+    },
+  });
 
   // A new scored call is exactly the kind of real state change that
   // should move a Flow Score — recompute now rather than on every
@@ -121,8 +144,10 @@ async function processCall(callId) {
       return;
     }
 
+    // Redact the moment a transcript is captured — a raw, unredacted
+    // transcript is never written to the database, not even transiently.
     await setStatus(callId, 'TRANSCRIBED', {
-      transcript: transcriptionResult.transcript,
+      transcript: redactTranscript(transcriptionResult.transcript),
       transcriptProvider: transcriptionResult.provider,
     });
 

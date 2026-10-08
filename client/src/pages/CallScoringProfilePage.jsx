@@ -292,7 +292,11 @@ export default function CallScoringProfilePage() {
               Status: <span style={{ color: STATUS_COLOR[selectedCall.status] }}>{selectedCall.status}</span>
             </div>
 
-            <audio style={s.audioPlayer} controls crossOrigin="use-credentials" src={api.callAudioUrl(selectedCall.id)} />
+            {selectedCall.recordingAvailable ? (
+              <audio style={s.audioPlayer} controls crossOrigin="use-credentials" src={api.callAudioUrl(selectedCall.id)} />
+            ) : (
+              <div style={s.policyNote}>Recording permanently deleted after scoring, per data retention policy.</div>
+            )}
 
             {selectedCall.status === 'FAILED' && (
               <div style={s.failureBox}>
@@ -305,10 +309,12 @@ export default function CallScoringProfilePage() {
               <div style={s.progressBox}>Processing… this updates automatically every few seconds.</div>
             )}
 
-            {!selectedCall.transcript ? (
-              <TranscriptEntry onSubmit={submitTranscript} />
-            ) : (
+            {selectedCall.transcript ? (
               <Section title="Full Transcript" content={<pre style={s.transcript}>{selectedCall.transcript}</pre>} />
+            ) : selectedCall.analysis ? (
+              <Section title="Transcript" content={<div style={s.policyNote}>Discarded after scoring, per data retention policy — this call's score, summary, and coaching breakdown below are the permanent record.</div>} />
+            ) : (
+              <TranscriptEntry onSubmit={submitTranscript} />
             )}
 
             {selectedCall.analysis && (
@@ -384,6 +390,7 @@ const s = {
   closeButton: { padding: '6px 12px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, cursor: 'pointer', fontSize: 11 },
   statusLine: { color: 'var(--text-secondary)', fontSize: 13, marginBottom: 12 },
   audioPlayer: { width: '100%', marginBottom: 16 },
+  policyNote: { color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 12, background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 6, padding: 12, marginBottom: 16, lineHeight: 1.5 },
   failureBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 14, borderRadius: 8, fontSize: 13, marginBottom: 16 },
   retryButtonFull: { display: 'block', marginTop: 10, padding: '8px 14px', background: 'var(--danger)', color: 'var(--accent-on)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
   progressBox: { background: 'var(--warning-soft)', border: '1px solid rgba(255, 184, 77, 0.4)', color: 'var(--warning)', padding: 14, borderRadius: 8, fontSize: 13 },

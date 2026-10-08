@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { redactTranscript } = require('./transcriptRedaction');
+const { redactTranscript, deepRedact } = require('./transcriptRedaction');
 
 test('redacts an SSN', () => {
   const out = redactTranscript('My SSN is 123-45-6789 for verification.');
@@ -53,4 +53,33 @@ test('redacts multiple distinct PII types in the same transcript', () => {
   assert.ok(out.includes('[REDACTED-PHONE]'));
   assert.ok(out.includes('[REDACTED-EMAIL]'));
   assert.ok(out.includes('[REDACTED-CARD]'));
+});
+
+test('deepRedact strips PII from every string leaf of a nested object/array', () => {
+  const input = {
+    summary: 'Customer SSN is 123-45-6789.',
+    objections: [{ objection: 'Price too high', note: 'Call back at 555-123-4567.' }],
+    strengths: ['Great rapport', 'Confirmed email jane@example.com'],
+    overall_score: 82,
+    review_recommended: false,
+    nested: { deeper: ['card 4111111111111111', { still: 'deeper still, no PII here' }] },
+  };
+  const out = deepRedact(input);
+  assert.ok(out.summary.includes('[REDACTED-SSN]'));
+  assert.ok(out.objections[0].note.includes('[REDACTED-PHONE]'));
+  assert.ok(out.strengths[1].includes('[REDACTED-EMAIL]'));
+  assert.ok(out.nested.deeper[0].includes('[REDACTED-CARD]'));
+  assert.equal(out.nested.deeper[1].still, 'deeper still, no PII here');
+  // Non-string leaves pass through completely unchanged.
+  assert.equal(out.overall_score, 82);
+  assert.equal(out.review_recommended, false);
+  assert.equal(out.objections[0].objection, 'Price too high');
+});
+
+test('deepRedact handles null/primitive input without throwing', () => {
+  assert.equal(deepRedact(null), null);
+  assert.equal(deepRedact(42), 42);
+  assert.equal(deepRedact(true), true);
+  assert.deepEqual(deepRedact([]), []);
+  assert.deepEqual(deepRedact({}), {});
 });

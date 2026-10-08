@@ -1657,14 +1657,29 @@ model Call {
   lead               Lead?      @relation(fields: [leadId], references: [id])
   source             CallSource @default(MANUAL_UPLOAD)
   filename           String
-  storageKey         String
+  // Null once the raw audio has been permanently deleted ("burned") after
+  // scoring completes — see recordingDeletedAt and jobs/callProcessing.js's
+  // runAnalysis(). A non-null value is the only thing that makes the
+  // recording readable/playable; GET /calls/:id/audio refuses once this
+  // is null, regardless of status.
+  storageKey         String?
   mimeType           String?
   fileSizeBytes      Int?
   durationSeconds    Int?
   status             CallStatus @default(UPLOADED)
   failureReason      String?
+  // Transient only. Redacted (lib/transcriptRedaction.js) the moment it's
+  // captured — whether from an automatic transcription provider or a
+  // human pasting it in — so a raw, unredacted transcript is never
+  // written here even momentarily. Permanently nulled out the moment
+  // scoring completes (see transcriptDiscardedAt); the CallAnalysis row
+  // is the durable record from that point on, never this field.
   transcript         String?
   transcriptProvider String?
+  // Set together, once, the moment runAnalysis() successfully creates the
+  // CallAnalysis row for this call — never touched again after that.
+  recordingDeletedAt    DateTime?
+  transcriptDiscardedAt DateTime?
   // The Bunny Stream video GUID for this call's video recording, if the
   // uploader has one (uploaded directly in the Bunny.net dashboard — never
   // re-uploaded or re-hosted by this app). Played via Bunny's own iframe

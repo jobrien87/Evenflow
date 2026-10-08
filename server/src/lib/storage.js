@@ -45,6 +45,22 @@ async function read(storageKey) {
   return fs.readFileSync(path.join(UPLOAD_DIR, storageKey));
 }
 
+// Permanently deletes a stored file — the "burn after use" step in the call
+// pipeline (see jobs/callProcessing.js's runAnalysis). Idempotent: a
+// missing file is treated as already-removed, never an error, since the
+// caller's intent ("this should not exist anymore") is already satisfied.
+async function remove(storageKey) {
+  if (!storageKey) return;
+  if (isObjectStorageConfigured()) {
+    throw new Error('Real object storage delete not implemented, see save() for the same note.');
+  }
+  try {
+    fs.unlinkSync(path.join(UPLOAD_DIR, storageKey));
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+  }
+}
+
 function storageHealth() {
   if (isObjectStorageConfigured()) {
     return { status: 'NOT_CONFIGURED', reason: 'Object storage env vars are set but no real adapter is implemented in this build.' };
@@ -52,4 +68,4 @@ function storageHealth() {
   return { status: 'LOCAL_DISK', reason: 'Using local disk storage, NOT durable on Render (ephemeral filesystem). Fine for development only.' };
 }
 
-module.exports = { save, read, storageHealth, isObjectStorageConfigured };
+module.exports = { save, read, remove, storageHealth, isObjectStorageConfigured };

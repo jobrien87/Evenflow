@@ -97,3 +97,27 @@ test('analyzeTranscript redacts obvious PII from the transcript before it ever r
   assert.ok(sentTranscript.includes('[REDACTED-EMAIL]'));
   assert.ok(sentTranscript.includes('[REDACTED-CARD]'));
 });
+
+test('analyzeTranscript redacts PII the model echoes back in its own output (defense in depth)', async (t) => {
+  process.env.ANTHROPIC_API_KEY = 'test-key-not-real';
+  // A real LLM is only ever given a redacted transcript, but nothing
+  // technically stops it from restating a structured PII pattern in its
+  // own generated text — simulate that worst case directly.
+  const echoingAnalysis = {
+    ...VALID_ANALYSIS,
+    summary: 'Customer provided SSN 123-45-6789 for verification before discussing auto coverage.',
+    objections: [{ objection: 'Wanted a callback', handled_well: true, note: 'Call back at 555-123-4567.' }],
+    coaching_opportunities: ['Confirm email jane@example.com was captured correctly'],
+  };
+  mockFetchOnce(t, { text: JSON.stringify(echoingAnalysis) });
+
+  const result = await analyzeTranscript('producer: hi, this is...');
+  assert.equal(result.available, true);
+  assert.ok(result.analysis.summary.includes('[REDACTED-SSN]'));
+  assert.ok(!result.analysis.summary.includes('123-45-6789'));
+  assert.ok(result.analysis.objections[0].note.includes('[REDACTED-PHONE]'));
+  assert.ok(result.analysis.coaching_opportunities[0].includes('[REDACTED-EMAIL]'));
+  // Non-string fields are completely unaffected by the redaction pass.
+  assert.equal(result.analysis.overall_score, 78);
+  assert.equal(result.analysis.review_recommended, false);
+});

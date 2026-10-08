@@ -4,10 +4,10 @@ const { z } = require('zod');
 const { prisma } = require('../lib/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
-const { save, storageHealth } = require('../lib/storage');
+const { save, read, storageHealth } = require('../lib/storage');
 const { validateAudioUpload } = require('../lib/fileValidation');
 const { enqueueCallProcessing, enqueueAnalysis } = require('../jobs/callProcessing');
-const { read } = require('../lib/storage');
+const { redactTranscript } = require('../lib/transcriptRedaction');
 const { requireSalesStudioAccess } = require('../lib/entitlements');
 const { computeDrillScore, computeCoachingBreakdown } = require('../lib/callScoring');
 const bunnyStream = require('../lib/bunnyStream');
@@ -19,12 +19,19 @@ router.use(requireSalesStudioAccess);
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } });
 
-// bunnyEmbedUrl is only ever computed, never stored — so it always
-// reflects the current BUNNY_STREAM_LIBRARY_ID and is simply absent
-// (not a broken link) when a call has no video or Bunny isn't configured.
-function withBunnyEmbed(call) {
+// Every call row returned to a client goes through here — never the raw
+// Prisma object. Two things always happen: bunnyEmbedUrl is computed
+// fresh (never stored, so it's never a broken link); and storageKey (an
+// internal storage reference, not something a client has any use for)
+// is stripped and replaced with the boolean recordingAvailable, so a
+// client can render "recording deleted after scoring" honestly without
+// ever seeing the key itself.
+function presentCall(call) {
+  if (!call) return call;
+  const { storageKey, ...rest } = call;
   return {
-    ...call,
+    ...rest,
+    recordingAvailable: Boolean(storageKey),
     bunnyEmbedUrl: call.bunnyVideoId && bunnyStream.isConfigured() ? bunnyStream.embedUrl(call.bunnyVideoId) : null,
   };
 }
@@ -73,7 +80,7 @@ router.get('/', async (req, res, next) => {
 
     // Drill Score — computed from the AI's existing dimensionScores, not
     // a second analysis pass. See lib/callScoring.js.
-    const callsWithDrillScore = calls.map((call) => withBunnyEmbed({
+    const callsWithDrillScore = calls.map((call) => presentCall({
       ...call,
       drillScore: call.analysis ? computeDrillScore(call.analysis.dimensionScores)?.drillScore ?? null : null,
     }));
@@ -211,7 +218,7 @@ router.get('/:id', async (req, res, next) => {
       return res.status(403).json({ success: false, error: 'FORBIDDEN' });
     }
     const drill = call.analysis ? computeDrillScore(call.analysis.dimensionScores) : null;
-    return res.json({ success: true, call: withBunnyEmbed({ ...call, drillScore: drill?.drillScore ?? null, drillCategoryScores: drill?.categoryScores ?? null }) });
+    return res.json({ success: true, call: presentCall({ ...call, drillScore: drill?.drillScore ?? null, drillCategoryScores: drill?.categoryScores ?? null }) });
   } catch (err) {
     next(err);
   }
@@ -223,6 +230,12 @@ router.get('/:id/audio', async (req, res, next) => {
     if (!call) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
     if (req.user.role !== 'PLATFORM_OWNER' && call.agencyId !== req.user.agencyId) {
       return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    if (!call.storageKey) {
+      return res.status(410).json({
+        success: false, error: 'RECORDING_DELETED',
+        message: 'This recording was permanently deleted after scoring completed, per data retention policy.',
+      });
     }
     const buffer = await read(call.storageKey);
     res.set('Content-Type', call.mimeType || 'application/octet-stream');
@@ -253,13 +266,21 @@ router.patch('/:id/transcript', requireRole('PRODUCER', 'AGENCY_MANAGER', 'AGENC
     if (req.user.role !== 'PLATFORM_OWNER' && call.agencyId !== req.user.agencyId) {
       return res.status(403).json({ success: false, error: 'FORBIDDEN' });
     }
+    if (call.status === 'COMPLETE') {
+      return res.status(409).json({
+        success: false, error: 'ALREADY_SCORED',
+        message: 'This call has already been scored. Its transcript was discarded after scoring, per data retention policy.',
+      });
+    }
     if (call.transcript) {
       return res.status(409).json({ success: false, error: 'TRANSCRIPT_EXISTS', message: 'This call already has a transcript.' });
     }
 
+    // Redact before this ever touches the database — same rule as the
+    // automatic transcription path (see jobs/callProcessing.js).
     const updated = await prisma.call.update({
       where: { id: call.id },
-      data: { transcript: parsed.data.transcript, transcriptProvider: 'manual', status: 'TRANSCRIBED', failureReason: null },
+      data: { transcript: redactTranscript(parsed.data.transcript), transcriptProvider: 'manual', status: 'TRANSCRIBED', failureReason: null },
     });
 
     await recordAudit({
@@ -270,7 +291,7 @@ router.patch('/:id/transcript', requireRole('PRODUCER', 'AGENCY_MANAGER', 'AGENC
 
     enqueueAnalysis(call.id);
 
-    return res.json({ success: true, call: updated });
+    return res.json({ success: true, call: presentCall(updated) });
   } catch (err) {
     next(err);
   }
@@ -316,7 +337,7 @@ router.patch('/:id/video', requireRole('PRODUCER', 'AGENCY_MANAGER', 'AGENCY_OWN
       correlationId: req.correlationId,
     });
 
-    return res.json({ success: true, call: withBunnyEmbed(updated) });
+    return res.json({ success: true, call: presentCall(updated) });
   } catch (err) {
     next(err);
   }
@@ -335,7 +356,7 @@ router.delete('/:id/video', requireRole('PRODUCER', 'AGENCY_MANAGER', 'AGENCY_OW
       action: 'call.video_removed', entityType: 'Call', entityId: call.id,
       correlationId: req.correlationId,
     });
-    return res.json({ success: true, call: withBunnyEmbed(updated) });
+    return res.json({ success: true, call: presentCall(updated) });
   } catch (err) {
     next(err);
   }
@@ -423,7 +444,7 @@ router.post('/', requireRole('PRODUCER', 'AGENCY_MANAGER', 'AGENCY_OWNER'), uplo
 
     enqueueCallProcessing(call.id);
 
-    return res.status(201).json({ success: true, call });
+    return res.status(201).json({ success: true, call: presentCall(call) });
   } catch (err) {
     next(err);
   }

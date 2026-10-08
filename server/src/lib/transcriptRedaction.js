@@ -35,4 +35,21 @@ function redactTranscript(transcript) {
   return out;
 }
 
-module.exports = { redactTranscript };
+// Recursively applies redactTranscript to every string leaf in an object/
+// array — defense in depth against a downstream LLM echoing a piece of
+// structured PII (an SSN, phone, email, card number) back verbatim inside
+// its own generated output (a summary, a quoted objection, a coaching
+// note). Non-string leaves (booleans, numbers, null) pass through
+// unchanged.
+function deepRedact(value) {
+  if (typeof value === 'string') return redactTranscript(value);
+  if (Array.isArray(value)) return value.map(deepRedact);
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const [key, v] of Object.entries(value)) out[key] = deepRedact(v);
+    return out;
+  }
+  return value;
+}
+
+module.exports = { redactTranscript, deepRedact };

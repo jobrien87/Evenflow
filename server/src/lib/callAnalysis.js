@@ -1,6 +1,6 @@
 const { z } = require('zod');
 const { callEd, isConfigured } = require('./aiProvider');
-const { redactTranscript } = require('./transcriptRedaction');
+const { redactTranscript, deepRedact } = require('./transcriptRedaction');
 
 const SCORING_DIMENSIONS = [
   'Opening', 'Rapport', 'Discovery', 'Needs Analysis', 'Question Quality',
@@ -79,7 +79,11 @@ async function analyzeTranscript(transcript) {
 
   return {
     available: true,
-    analysis: validated.data,
+    // Defense in depth: the model is only ever given a redacted transcript,
+    // but nothing stops it from echoing a structured PII pattern back in
+    // its own generated text (a summary, a quoted objection) — redact its
+    // output too before it's ever persisted.
+    analysis: deepRedact(validated.data),
     model: result.model,
     inputTokens: result.inputTokens,
     outputTokens: result.outputTokens,
