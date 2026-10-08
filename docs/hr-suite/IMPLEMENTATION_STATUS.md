@@ -31,16 +31,53 @@ deployment has occurred or is authorized by this work.
 
 ## Phase 1 — detailed status
 
-### Part A — Foundation
-- [ ] Schema: `HrDepartment`, `HrPosition`, `HrLegalEmployer`,
+### Part A — Foundation — COMPLETE, verified, committed
+- [x] Schema: `HrDepartment`, `HrPosition`, `HrLegalEmployer`,
   `HrEmployeeProfile`, `HrEmploymentHistoryEvent`, `HrRole` enum,
-  `HrRoleGrant`
-- [ ] Backend: `hrAuth.js` (`requireHrRole`), employees/departments/
-  positions/legalEmployers/roleGrants/overview routes
-- [ ] Client: Backstage HR nav, Overview/Employees/Departments/Settings
-  pages, minimal My HR entry
-- [ ] Tests: cross-tenant denial, HR_AUDITOR read-only, grant revoke,
-  AGENCY_OWNER implicit access, employment-history-event correctness
+  `HrRoleGrant`. Additive-only; `npx prisma db push` succeeded clean.
+- [x] Backend: `server/src/middleware/hrAuth.js` (`requireHrRole`,
+  `hasHrRole`); `server/src/routes/hr/{departments,positions,
+  legalEmployers,roleGrants,employees,overview}.js` + `hr/index.js`
+  composer (mounts `requireAuth` + `requireModuleEnabled('hrEnabled')`
+  once); mounted at `/api/hr` in `app.js`. `GET /hr/employees/me` is a
+  self-service, no-HR-role-required route for the My HR page.
+- [x] Client: `Backstage HR` nav item (Agency Owner/Manager, secondary
+  section) → `client/src/pages/hr/HrDashboardPage.jsx` (tabbed Overview/
+  Employees/Departments/Settings[Legal Employers + Role Grants], at
+  `/agency/hr`); Platform Owner reaches the same page per-agency via a
+  "BACKSTAGE HR →" link on `AgencyDetailPage.jsx` → `/platform/agencies/
+  :agencyId/hr`; `My HR` nav item (Producer/Telemarketer) →
+  `client/src/pages/hr/HrMyProfilePage.jsx` (self-service, honest
+  "hasn't been set up yet" empty state) at `/producer/my-hr` and
+  `/telemarketer/my-hr`. `client/src/lib/api.js` has the full `hr*`
+  wrapper-function set.
+- [x] Tests: `server/src/routes/hrFoundation.test.js` (real-DB/HTTP, 8
+  cases) — `Agency.hrEnabled` module gate, AGENCY_OWNER implicit access
+  with no grant row, HR_AUDITOR read-only + immediate loss of access on
+  revoke, only AGENCY_OWNER/PLATFORM_OWNER can mint a grant (not even an
+  HR_ADMIN grant-holder can), cross-agency denial, optimistic-concurrency
+  PATCH (stale version → 409) + exact employment-history-event rows
+  (including a true no-op PATCH writing zero new history events),
+  `GET /hr/employees/me` self-service shape, `GET /hr/overview`
+  aggregates. `npm test`: 358/358 passing (350 baseline + 8 new, zero
+  regressions). `npm run build` (client): clean. Real-browser Playwright
+  check of both the Owner dashboard and the Producer My HR page: both
+  render correctly with no console errors from this feature.
+
+**Real-world note for a future session**: the server test suite's npm
+script (`node --test src/**/*.test.js`) is expanded by the shell before
+Node sees it, and this shell has `globstar` off — so a test file nested
+more than one directory deep under `src/` (e.g. the original
+`src/routes/hr/hr.test.js` location) is silently never run, by `npm
+test` locally OR in CI (GitHub Actions' default `bash` also has
+globstar off). This was caught by hand (comparing the test count before
+and after adding the file) and fixed by keeping all HR route tests flat
+at `server/src/routes/hrFoundation.test.js`, matching every other route
+test file's existing convention — never nest a new `*.test.js` file
+under `src/routes/hr/` or any other subdirectory without first fixing
+this glob gap (e.g. switching the npm script to rely on Node's own
+built-in recursive test discovery) — Part B/C's own test files must stay
+flat under `server/src/` too, for the same reason.
 
 ### Part B — Time & Attendance (read-only consumer of TimeClockEntry)
 - [ ] Schema: `HrTimesheet`, `HrTimesheetSegment`, `HrAttendanceException`
@@ -113,6 +150,16 @@ None yet — nothing has been built.
 
 ## Next required action
 
-Begin Phase 1 Part A: schema migration (`HrDepartment` through
-`HrRoleGrant`), then backend, client, tests, in that order — per the
-plan at `/root/.claude/plans/root-claude-uploads-f963d8da-f76a-598c-adaptive-shore.md`.
+Part A is complete and verified (358/358 server tests, clean client
+build, real-browser check). Begin Phase 1 Part B — Time & Attendance:
+schema (`HrTimesheet`/`HrTimesheetSegment`/`HrAttendanceException`),
+then `server/src/lib/hrTimesheetBuilder.js` (the one function allowed to
+read `TimeClockEntry`, strictly read-only — never writes to it, a
+regression test must assert this literally), the
+`hrAttendanceDetection.js` periodic job (never auto-classifies a
+no-call/no-show — only ever creates an `OPEN` candidate row for a human
+to resolve), `timeAttendance.js` routes, then client, then tests — per
+the plan at
+`/root/.claude/plans/root-claude-uploads-f963d8da-f76a-598c-adaptive-shore.md`.
+Remember the test-file-location gap noted above before adding any new
+`*.test.js` file.

@@ -18,12 +18,14 @@ export const NAV_BY_ROLE = {
     { label: 'Sales Studio', to: '/producer/sales-studio', icon: 'trophy', primary: true, dataTour: 'nav-sales-studio' },
     { label: 'Moshpit', to: '/producer/moshpit', icon: 'flame', primary: true, dataTour: 'nav-moshpit' },
     { label: 'Goals', to: '/producer/goals', icon: 'flag', dataTour: 'nav-goals' },
+    { label: 'My HR', to: '/producer/my-hr', icon: 'briefcase', dataTour: 'nav-my-hr' },
     { label: 'Break Room', to: '/producer/break-room', icon: 'gamepad', dataTour: 'nav-break-room' },
   ],
   TELEMARKETER: [
     { label: 'Home', to: '/telemarketer', icon: 'home', primary: true, dataTour: 'nav-home' },
     { label: 'Drills', to: '/telemarketer/drills', icon: 'sparkle', primary: true, dataTour: 'nav-drills' },
     { label: 'Tasks', to: '/telemarketer/tasks', icon: 'checklist', dataTour: 'nav-tasks' },
+    { label: 'My HR', to: '/telemarketer/my-hr', icon: 'briefcase', dataTour: 'nav-my-hr' },
     { label: 'Break Room', to: '/telemarketer/break-room', icon: 'gamepad', dataTour: 'nav-break-room' },
   ],
   // Ordered per the user's specified sequence: Main Stage, Moshpit, Live
@@ -46,6 +48,7 @@ export const NAV_BY_ROLE = {
     { label: 'Vendors', to: '/agency/vendors', icon: 'vendor', dataTour: 'nav-vendors' },
     { label: 'Financials', to: '/agency/financials', icon: 'dollar', dataTour: 'nav-financials', excludeRoles: ['AGENCY_MANAGER'] },
     { label: 'Back Catalog', to: '/agency/back-catalog', icon: 'archive', secondary: true, dataTour: 'nav-back-catalog' },
+    { label: 'Backstage HR', to: '/agency/hr', icon: 'briefcase', secondary: true, dataTour: 'nav-backstage-hr' },
     { label: 'Roster Settings', to: '/agency/roster-settings', icon: 'handshake', secondary: true, dataTour: 'nav-roster-settings' },
     { label: 'Billing', to: '/agency/billing', icon: 'card', secondary: true, dataTour: 'nav-billing' },
     { label: 'Support', to: '/agency/support', icon: 'support', secondary: true, dataTour: 'nav-support' },

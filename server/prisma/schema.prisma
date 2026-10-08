@@ -385,6 +385,15 @@ model User {
   salesAssigned             Sale[]                    @relation("SaleAssignedTo")
   salesCreated              Sale[]                    @relation("SaleCreatedBy")
 
+  // Backstage HR (docs/hr-suite/) — additive, never a second identity:
+  // HrEmployeeProfile is a 1:1 extension of this same User row.
+  hrEmployeeProfile         HrEmployeeProfile?
+  hrEmployeesManaged        HrEmployeeProfile[]       @relation("HrEmployeeManager")
+  hrDepartmentsManaged      HrDepartment[]            @relation("HrDepartmentManager")
+  hrEmploymentHistoryEventsRecorded HrEmploymentHistoryEvent[] @relation("HrHistoryRecordedBy")
+  hrRoleGrantsHeld          HrRoleGrant[]             @relation("HrRoleGrantUser")
+  hrRoleGrantsGiven         HrRoleGrant[]             @relation("HrRoleGrantGrantedBy")
+
   @@index([agencyId])
   @@index([role])
 }
@@ -482,6 +491,11 @@ model Agency {
   // leaderboardScope: {office, agency} } — null = lib/breakRoom.js's
   // seeded default applies, same null-fallback precedent as priorityRules.
   breakRoomSettings      Json?
+  // Backstage HR (docs/hr-suite/) — off by default, like coachingEnabled/
+  // transfersEnabled, since this is a large module being rolled out
+  // incrementally rather than a core always-on feature. A Platform Owner
+  // or Agency Owner turns it on per agency via HR Settings.
+  hrEnabled              Boolean      @default(false)
   transferPaused         Boolean      @default(false)
   transferDailyCap       Int?
   transferStates         String[]     @default([])
@@ -570,6 +584,14 @@ model Agency {
   breakRoomHighScores      BreakRoomHighScore[]
   breakRoomAchievements    BreakRoomAchievement[]
   sales                    Sale[]
+
+  // Backstage HR (docs/hr-suite/)
+  hrDepartments            HrDepartment[]
+  hrPositions              HrPosition[]
+  hrLegalEmployers         HrLegalEmployer[]
+  hrEmployeeProfiles       HrEmployeeProfile[]
+  hrEmploymentHistoryEvents HrEmploymentHistoryEvent[]
+  hrRoleGrants             HrRoleGrant[]
 }
 
 enum BoberdooSyncStatus {
@@ -2439,4 +2461,166 @@ model BreakRoomPlatformSettings {
   id                       String   @id @default("singleton")
   globalLeaderboardEnabled Boolean  @default(false)
   updatedAt                DateTime @updatedAt
+}
+
+// ======================================================================
+// BACKSTAGE HR — Phase 1 Part A: Foundation
+// ======================================================================
+// See docs/hr-suite/EXISTING_SYSTEM_AUDIT.md and
+// docs/hr-suite/IMPLEMENTATION_STATUS.md. Every model below is additive;
+// nothing here touches the existing time clock (TimeClockEntry), Break
+// Room, or lead-routing models/logic. HrEmployeeProfile is deliberately a
+// 1:1 extension of the real User row (keyed by userId @unique), never a
+// second employee identity — email/name/role/status/agencyId stay on
+// User as the single source of truth.
+
+model HrDepartment {
+  id                 String        @id @default(uuid())
+  agencyId           String
+  agency             Agency        @relation(fields: [agencyId], references: [id])
+  name               String
+  parentDepartmentId String?
+  parentDepartment   HrDepartment? @relation("HrDeptHierarchy", fields: [parentDepartmentId], references: [id])
+  childDepartments   HrDepartment[] @relation("HrDeptHierarchy")
+  managerId          String?
+  manager            User?         @relation("HrDepartmentManager", fields: [managerId], references: [id])
+  isActive           Boolean       @default(true)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  positions          HrPosition[]
+  employeeProfiles   HrEmployeeProfile[]
+
+  @@index([agencyId])
+  @@index([parentDepartmentId])
+}
+
+model HrPosition {
+  id           String        @id @default(uuid())
+  agencyId     String
+  agency       Agency        @relation(fields: [agencyId], references: [id])
+  title        String
+  departmentId String?
+  department   HrDepartment? @relation(fields: [departmentId], references: [id])
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  employeeProfiles HrEmployeeProfile[]
+
+  @@index([agencyId])
+  @@index([departmentId])
+}
+
+// Jurisdiction is deliberately a free-form country/region pair, not an
+// enum — Phase 1 is U.S.-only by decision (see IMPLEMENTATION_STATUS.md),
+// but this shape means a future jurisdiction never requires a schema
+// rework, only a new row.
+model HrLegalEmployer {
+  id                  String   @id @default(uuid())
+  agencyId            String
+  agency              Agency   @relation(fields: [agencyId], references: [id])
+  legalName           String
+  jurisdictionCountry String   // ISO 3166-1 alpha-2, e.g. "US"
+  jurisdictionRegion  String?  // e.g. a US state code
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  employeeProfiles HrEmployeeProfile[]
+
+  @@index([agencyId])
+}
+
+model HrEmployeeProfile {
+  id                    String    @id @default(uuid())
+  userId                String    @unique
+  user                  User      @relation(fields: [userId], references: [id])
+  agencyId              String
+  agency                Agency    @relation(fields: [agencyId], references: [id])
+  legalEmployerId       String?
+  legalEmployer         HrLegalEmployer? @relation(fields: [legalEmployerId], references: [id])
+  employeeNumber        String?
+  // Only set when different from User.firstName/lastName (the real
+  // legal name on file) — most of the time this stays null and the
+  // display name on User is also the legal name.
+  legalFirstName        String?
+  legalLastName         String?
+  personalEmail         String?
+  // Free text in Phase 1 (e.g. "FULL_TIME", "PART_TIME", "CONTRACTOR") —
+  // not an enum yet, since the real category set depends on the
+  // jurisdiction/legal review the Payroll phase requires.
+  employmentType        String?
+  workerClassification  String?
+  hireDate              DateTime?
+  originalHireDate      DateTime?
+  terminationDate       DateTime?
+  departmentId          String?
+  department            HrDepartment? @relation(fields: [departmentId], references: [id])
+  positionId            String?
+  position              HrPosition?   @relation(fields: [positionId], references: [id])
+  managerId             String?
+  manager               User?     @relation("HrEmployeeManager", fields: [managerId], references: [id])
+  workTimeZone           String?
+  onboardingStatus      String    @default("NOT_STARTED")
+  offboardingStatus     String    @default("NOT_STARTED")
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  // Optimistic concurrency for the profile-edit route.
+  version                Int       @default(1)
+
+  employmentHistory      HrEmploymentHistoryEvent[]
+
+  @@index([agencyId])
+  @@index([departmentId])
+  @@index([positionId])
+  @@index([managerId])
+}
+
+// Append-only — never edited or deleted once written, mirroring this
+// schema's established "never destroy history" convention (see
+// TelemarketerAssignment's own comment for the same precedent).
+model HrEmploymentHistoryEvent {
+  id                String   @id @default(uuid())
+  employeeProfileId String
+  employeeProfile   HrEmployeeProfile @relation(fields: [employeeProfileId], references: [id])
+  agencyId          String
+  agency            Agency   @relation(fields: [agencyId], references: [id])
+  // DEPARTMENT_CHANGE | MANAGER_CHANGE | POSITION_CHANGE | STATUS_CHANGE | LOCATION_CHANGE
+  changeType        String
+  effectiveFrom     DateTime @default(now())
+  previousValue     Json?
+  newValue          Json?
+  recordedById      String
+  recordedBy        User     @relation("HrHistoryRecordedBy", fields: [recordedById], references: [id])
+  createdAt         DateTime @default(now())
+
+  @@index([employeeProfileId])
+  @@index([agencyId])
+}
+
+// Additive HR authorization layer on top of a user's real Role — never a
+// new top-level Role enum value (see IMPLEMENTATION_STATUS.md's
+// "Decisions made" for why). PLATFORM_OWNER and AGENCY_OWNER always
+// implicitly have HR_ADMIN authority for their own agency with no grant
+// row required; this table is for delegating that authority to anyone
+// else.
+enum HrRole {
+  HR_ADMIN
+  HR_AUDITOR
+}
+
+model HrRoleGrant {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation("HrRoleGrantUser", fields: [userId], references: [id])
+  agencyId    String
+  agency      Agency    @relation(fields: [agencyId], references: [id])
+  hrRole      HrRole
+  grantedById String
+  grantedBy   User      @relation("HrRoleGrantGrantedBy", fields: [grantedById], references: [id])
+  grantedAt   DateTime  @default(now())
+  revokedAt   DateTime?
+
+  @@unique([userId, agencyId, hrRole])
+  @@index([agencyId])
 }

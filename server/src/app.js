@@ -41,6 +41,7 @@ const recordStoreRoutes = require('./routes/recordStore');
 const breakRoomRoutes = require('./routes/breakRoom');
 const rosterRoutes = require('./routes/roster');
 const salesRoutes = require('./routes/sales');
+const hrRoutes = require('./routes/hr');
 
 const app = express();
 
@@ -98,6 +99,7 @@ app.use('/api/record-store', recordStoreRoutes);
 app.use('/api/roster', rosterRoutes);
 app.use('/api/break-room', breakRoomRoutes);
 app.use('/api/sales', salesRoutes);
+app.use('/api/hr', hrRoutes);
 // Public, vendor-authenticated Direct POST API — versioned per spec.
 app.use('/api/v1', vendorApiRoutes);
 

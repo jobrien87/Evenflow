@@ -393,4 +393,27 @@ export const api = {
   startImpersonation: (targetUserId) => request('/impersonation/start', { method: 'POST', body: { targetUserId } }),
   endImpersonation: () => request('/impersonation/end', { method: 'POST' }),
   searchUsersForImpersonation: (q) => request(`/impersonation/search-users?q=${encodeURIComponent(q)}`),
+
+  // Backstage HR — Phase 1 Part A: Foundation. `agencyId` is appended as a
+  // query param only for PLATFORM_OWNER callers (every other role is
+  // locked server-side to their own agency, so it's a no-op query param
+  // for them).
+  hrOverview: (agencyId = '') => request(`/hr/overview${agencyId ? `?agencyId=${agencyId}` : ''}`),
+  hrEmployees: (params = '') => request(`/hr/employees${params}`),
+  hrEmployeeDetail: (id) => request(`/hr/employees/${id}`),
+  hrMyEmployeeProfile: () => request('/hr/employees/me'),
+  createHrEmployee: (payload) => request('/hr/employees', { method: 'POST', body: payload }),
+  updateHrEmployee: (id, payload) => request(`/hr/employees/${id}`, { method: 'PATCH', body: payload }),
+  hrDepartments: (agencyId = '') => request(`/hr/departments${agencyId ? `?agencyId=${agencyId}` : ''}`),
+  createHrDepartment: (payload) => request('/hr/departments', { method: 'POST', body: payload }),
+  updateHrDepartment: (id, payload) => request(`/hr/departments/${id}`, { method: 'PATCH', body: payload }),
+  hrPositions: (agencyId = '') => request(`/hr/positions${agencyId ? `?agencyId=${agencyId}` : ''}`),
+  createHrPosition: (payload) => request('/hr/positions', { method: 'POST', body: payload }),
+  updateHrPosition: (id, payload) => request(`/hr/positions/${id}`, { method: 'PATCH', body: payload }),
+  hrLegalEmployers: (agencyId = '') => request(`/hr/legal-employers${agencyId ? `?agencyId=${agencyId}` : ''}`),
+  createHrLegalEmployer: (payload) => request('/hr/legal-employers', { method: 'POST', body: payload }),
+  updateHrLegalEmployer: (id, payload) => request(`/hr/legal-employers/${id}`, { method: 'PATCH', body: payload }),
+  hrRoleGrants: (agencyId = '') => request(`/hr/role-grants${agencyId ? `?agencyId=${agencyId}` : ''}`),
+  createHrRoleGrant: (payload) => request('/hr/role-grants', { method: 'POST', body: payload }),
+  revokeHrRoleGrant: (id) => request(`/hr/role-grants/${id}/revoke`, { method: 'POST' }),
 };

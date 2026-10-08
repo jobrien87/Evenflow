@@ -179,6 +179,7 @@ export default function AgencyDetailPage() {
       <SectionHeader
         right={
           <div style={{ display: 'flex', gap: 8 }}>
+            <Link to={`/platform/agencies/${agency.id}/hr`}><Button variant="secondary" size="sm">BACKSTAGE HR →</Button></Link>
             <Button variant="secondary" size="sm" onClick={() => setShowInvite(true)}>+ INVITE OWNER/MANAGER</Button>
             <Button variant="secondary" size="sm" onClick={() => setShowEdit(true)}>EDIT SETTINGS</Button>
           </div>
