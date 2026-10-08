@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { SectionHeader, Badge } from '../ui';
+import { parseZipRangePaste, validateZipRangeBatch } from '../lib/zipRangeParse';
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
@@ -21,6 +22,9 @@ export default function OfficesPanel() {
   const [zipRanges, setZipRanges] = useState([]);
   const [newRangeStart, setNewRangeStart] = useState('');
   const [newRangeEnd, setNewRangeEnd] = useState('');
+  const [allOffices, setAllOffices] = useState([]); // full GET /offices result, for sibling cross-office overlap checks
+  const [pasteText, setPasteText] = useState('');
+  const [pastePreview, setPastePreview] = useState(null);
   const [isDefaultOffice, setIsDefaultOffice] = useState(false);
   const [routingMode, setRoutingMode] = useState('ROUND_ROBIN');
   const [geoError, setGeoError] = useState('');
@@ -41,6 +45,7 @@ export default function OfficesPanel() {
     setLoadError('');
     try {
       const data = await api.offices();
+      setAllOffices(data.offices || []);
       const found = (data.offices || []).find((o) => o.id === officeId);
       if (!found) {
         setLoadError('Office not found.');
@@ -93,6 +98,39 @@ export default function OfficesPanel() {
     setZipRanges([...zipRanges, { start, end }]);
     setNewRangeStart('');
     setNewRangeEnd('');
+  }
+
+  function runPreview(parsedRanges, rowErrors, officeNamesSeen) {
+    const validation = validateZipRangeBatch({
+      parsedRanges,
+      existingRanges: zipRanges,
+      siblingOffices: allOffices.filter((o) => o.id !== officeId),
+    });
+    setPastePreview({ ...validation, rowErrors, officeNamesSeen });
+  }
+
+  function previewPaste() {
+    const { ranges, rowErrors, officeNamesSeen } = parseZipRangePaste(pasteText);
+    runPreview(ranges, rowErrors, officeNamesSeen);
+  }
+
+  function removeFromPreview(index) {
+    if (!pastePreview) return;
+    const remaining = pastePreview.toAdd.filter((_, i) => i !== index);
+    runPreview(remaining, pastePreview.rowErrors, pastePreview.officeNamesSeen);
+  }
+
+  function commitPreview() {
+    if (!pastePreview || !pastePreview.isValid) return;
+    setZipRanges([...zipRanges, ...pastePreview.toAdd]);
+    setGeoError('');
+    setPasteText('');
+    setPastePreview(null);
+  }
+
+  function clearPaste() {
+    setPasteText('');
+    setPastePreview(null);
   }
 
   async function saveGeography() {
@@ -183,6 +221,62 @@ export default function OfficesPanel() {
             <input style={s.miniInput} placeholder="End (32399)" value={newRangeEnd} onChange={(e) => setNewRangeEnd(e.target.value)} />
             <button style={s.smallButton} onClick={addZipRange} type="button">+ ADD RANGE</button>
           </div>
+
+          <div style={s.pasteDivider}>OR PASTE A LIST</div>
+          <textarea
+            style={s.pasteTextarea}
+            placeholder={'One zip or range per line (32008 or 32013-32024)\nor paste CSV columns: Office, Start ZIP, End ZIP'}
+            value={pasteText}
+            onChange={(e) => setPasteText(e.target.value)}
+          />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button style={s.smallButton} type="button" disabled={!pasteText.trim()} onClick={previewPaste}>PREVIEW</button>
+            <button style={s.smallButtonOutline} type="button" onClick={clearPaste}>CLEAR</button>
+          </div>
+
+          {pastePreview && (
+            <div style={s.previewBox}>
+              {pastePreview.toAdd.length === 0 && pastePreview.rowErrors.length === 0 ? (
+                <div style={s.hint}>Nothing to preview.</div>
+              ) : (
+                <>
+                  <div style={s.previewHeader}>
+                    Office: {office.name} — {pastePreview.toAdd.length} new range(s), {pastePreview.resultingCount} total after adding
+                  </div>
+                  {pastePreview.rowErrors.map((e, i) => (
+                    <div key={`rowerr-${i}`} style={s.formError}>{e.message}</div>
+                  ))}
+                  {(pastePreview.duplicatesInPaste.length + pastePreview.duplicatesOfExisting.length) > 0 && (
+                    <div style={s.hint}>{pastePreview.duplicatesInPaste.length + pastePreview.duplicatesOfExisting.length} duplicate range(s) ignored.</div>
+                  )}
+                  {pastePreview.overlapsWithinPaste.map((o, i) => (
+                    <div key={`ovp-${i}`} style={s.formError}>Zip range {o.a.start}-{o.a.end} overlaps with {o.b.start}-{o.b.end} in this paste.</div>
+                  ))}
+                  {pastePreview.overlapsWithExisting.map((o, i) => (
+                    <div key={`ove-${i}`} style={s.formError}>Zip range {o.pasted.start}-{o.pasted.end} overlaps with this office's existing range {o.existing.start}-{o.existing.end}.</div>
+                  ))}
+                  {pastePreview.overlapsWithOtherOffices.map((o, i) => (
+                    <div key={`ovo-${i}`} style={s.formError}>Zip range {o.pasted.start}-{o.pasted.end} overlaps with office "{o.office.name}".</div>
+                  ))}
+                  {pastePreview.capExceeded && (
+                    <div style={s.formError}>This would bring the office to {pastePreview.resultingCount} ranges — the limit is 50. Remove some before adding.</div>
+                  )}
+                  {pastePreview.officeNamesSeen.length > 1 && (
+                    <div style={s.hint}>This paste includes rows for multiple offices ({pastePreview.officeNamesSeen.join(', ')}) — they'll still all be added to {office.name} unless removed below.</div>
+                  )}
+                  {pastePreview.toAdd.map((r, i) => (
+                    <div key={`add-${i}`} style={s.rangeRow}>
+                      <span>{r.start} – {r.end}</span>
+                      <button style={s.smallButtonOutline} onClick={() => removeFromPreview(i)}>REMOVE</button>
+                    </div>
+                  ))}
+                  <button style={s.submitButton} type="button" disabled={!pastePreview.isValid} onClick={commitPreview}>
+                    ADD {pastePreview.toAdd.length} RANGE(S) TO LIST
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         <div style={s.fieldBlock}>
@@ -264,6 +358,10 @@ const s = {
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', flex: 1 },
   miniInput: { padding: '8px 10px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', width: 110 },
   rangeRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border-hairline)', fontSize: 13 },
+  pasteDivider: { color: 'var(--text-muted)', fontSize: 11, fontWeight: 700, letterSpacing: 1, margin: '12px 0 8px' },
+  pasteTextarea: { width: '100%', minHeight: 90, padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: 13, marginBottom: 8, resize: 'vertical' },
+  previewBox: { marginTop: 12, padding: 12, background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 8 },
+  previewHeader: { fontWeight: 700, fontSize: 13, marginBottom: 8 },
   checkboxLabel: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-primary)', cursor: 'pointer' },
   smallButton: { padding: '8px 12px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 11, whiteSpace: 'nowrap' },
   smallButtonOutline: { padding: '6px 10px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, cursor: 'pointer', fontSize: 11 },
