@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { Card, SectionHeader, StatTile, BarRow, Badge, Button, ExportButton, EmptyState, TrendChart, MonthSelector } from '../ui';
@@ -29,6 +29,10 @@ export default function BillboardPanel() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [showAddSale, setShowAddSale] = useState(false);
+  // Guards against a slow earlier request resolving after a faster, newer
+  // one and clobbering its result (e.g. rapidly switching periods) — only
+  // the response from the most recently fired request is ever applied.
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     load();
@@ -42,6 +46,7 @@ export default function BillboardPanel() {
   }
 
   async function load() {
+    const requestId = ++requestIdRef.current;
     setError('');
     try {
       const params = new URLSearchParams({ period });
@@ -52,6 +57,7 @@ export default function BillboardPanel() {
         params.set('year', String(selectedYear));
       }
       const res = await api.billboard(`?${params.toString()}`);
+      if (requestId !== requestIdRef.current) return;
       setData(res);
       // Adopt the server's own default exactly once per period switch
       // (while still null) — never on every load, since a fresh object
@@ -61,6 +67,7 @@ export default function BillboardPanel() {
       if (period === 'month' && !selectedMonth && res.selectedMonth) setSelectedMonth(res.selectedMonth);
       if (period === 'year' && !selectedYear && res.selectedYear) setSelectedYear(res.selectedYear);
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       setError(err.data?.message || 'Could not load the Billboard. Try refreshing.');
     }
   }

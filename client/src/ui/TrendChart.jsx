@@ -16,7 +16,20 @@ import { money } from '../lib/format';
 // for an all-years year bucket).
 export default function TrendChart({ series, height = 180 }) {
   const [hoverIndex, setHoverIndex] = useState(null);
-  if (!series || series.length < 2) return null;
+  if (!series || series.length === 0) return null;
+
+  // A single data point (e.g. All Years with only one year of real sales
+  // on record) has nothing to draw a line between — show a plain stat
+  // callout instead of silently rendering nothing.
+  if (series.length === 1) {
+    const [only] = series;
+    return (
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '8px 0' }}>
+        <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--text-primary)' }}>{money(only.premiumCents)}</div>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>{only.label || only.date}</div>
+      </div>
+    );
+  }
 
   const leftMargin = 56;
   const bottomMargin = 24;
