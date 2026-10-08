@@ -44,6 +44,7 @@ test('normalizeCity trims and uppercases', () => {
 const suffix = Date.now();
 let agencyId;
 let producerIds = [];
+let managerId;
 let roundRobinVendorId;
 let selectedVendorId;
 let moshpitVendorId;
@@ -61,6 +62,14 @@ before(async () => {
     )
   );
   producerIds = producers.map((p) => p.id).sort();
+
+  // A selling AGENCY_MANAGER (e.g. Julie-style) — real production credit
+  // and real Alpha-seat routing must reach her, but never plain round
+  // robin, which she never opted into.
+  const manager = await prisma.user.create({
+    data: { email: `manager-${suffix}@test.local`, firstName: 'Selling', lastName: 'Manager', role: 'AGENCY_MANAGER', status: 'ACTIVE', agencyId },
+  });
+  managerId = manager.id;
 
   const roundRobinVendor = await prisma.vendor.create({
     data: { name: 'RR Vendor', email: 'rr@test.local', agencyId, product: 'Auto', distributionMode: 'ROUND_ROBIN' },
@@ -88,7 +97,7 @@ after(async () => {
   await prisma.lead.deleteMany({ where: { agencyId } });
   await prisma.vendor.deleteMany({ where: { agencyId } });
   await prisma.office.deleteMany({ where: { agencyId } });
-  await prisma.user.deleteMany({ where: { id: { in: producerIds } } });
+  await prisma.user.deleteMany({ where: { id: { in: [...producerIds, managerId] } } });
   await prisma.agency.delete({ where: { id: agencyId } });
   await prisma.$disconnect();
 });
@@ -255,4 +264,66 @@ test('resolveManualAssignment OFFICE_SPLIT/ALPHA_SPLIT routes the same way as th
 
   await prisma.office.delete({ where: { id: office.id } });
   await prisma.user.update({ where: { id: producerIds[2] }, data: { officeId: null } });
+});
+
+// Item 9 of the production-correction round: a prior change over-broadened
+// officeRoundRobinAssignee to include AGENCY_MANAGER, silently enrolling a
+// selling manager into ordinary round-robin lead flow she never opted
+// into. Reverted to PRODUCER-only; a manager's only real path to routed
+// leads is an explicit Alpha-split seat.
+test('an agency-wide ROUND_ROBIN vendor never assigns to a manager', async () => {
+  const vendor = await prisma.vendor.findUnique({ where: { id: roundRobinVendorId } });
+  for (let i = 0; i < 6; i++) {
+    const result = await prisma.$transaction((tx) => resolveVendorAssignment(tx, vendor));
+    assert.notEqual(result.assignedToId, managerId, 'the agency-wide round-robin pool must never include a manager');
+  }
+});
+
+test('an office on plain ROUND_ROBIN never assigns to its own manager, even when she is the only person there', async () => {
+  const office = await prisma.office.create({
+    data: { agencyId, name: 'Manager-Only RR Office', isDefaultOffice: true, routingMode: 'ROUND_ROBIN' },
+  });
+  await prisma.user.update({ where: { id: managerId }, data: { officeId: office.id } });
+
+  const vendor = await prisma.vendor.findUnique({ where: { id: officeSplitVendorId } });
+  const result = await prisma.$transaction((tx) => resolveVendorAssignment(tx, vendor, { lastName: 'Adams' }));
+  assert.equal(result.assignedToId, null, 'a manager-only office on plain ROUND_ROBIN has no eligible PRODUCER, so it must fall through to the Moshpit, never auto-assign to her');
+  assert.equal(result.mode, 'MOSHPIT');
+
+  await prisma.office.delete({ where: { id: office.id } });
+  await prisma.user.update({ where: { id: managerId }, data: { officeId: null } });
+});
+
+test('a manager-only office (zero producers, one manager holding a real Alpha seat) is still a valid candidate for the legacy no-geography-match fallback, and routes to her via ALPHA_SPLIT', async () => {
+  const office = await prisma.office.create({
+    data: { agencyId, name: 'Manager Alpha Office', routingMode: 'ALPHA_SPLIT' },
+  });
+  await prisma.user.update({ where: { id: managerId }, data: { officeId: office.id } });
+  await prisma.officeAlphaAssignment.create({ data: { officeId: office.id, userId: managerId, letters: [], isFallback: true } });
+
+  // No zip/city match anywhere -> falls to fetchOfficesWithActiveAgents's
+  // legacy cross-office candidacy check, which must see this office (it
+  // has a real active manager) rather than treat it as empty.
+  const vendor = await prisma.vendor.findUnique({ where: { id: officeSplitVendorId } });
+  const result = await prisma.$transaction((tx) => resolveVendorAssignment(tx, vendor, { zip: '00000', lastName: 'Zimmerman' }));
+  assert.equal(result.assignedToId, managerId, 'the manager-only office must be a real fallback candidate and route to her via her Alpha seat');
+  assert.equal(result.mode, 'OFFICE_SPLIT');
+
+  await prisma.officeAlphaAssignment.deleteMany({ where: { officeId: office.id } });
+  await prisma.office.delete({ where: { id: office.id } });
+  await prisma.user.update({ where: { id: managerId }, data: { officeId: null } });
+});
+
+test('SELECTED_AGENTS and the manual-import agency-wide pool remain producer-only, never including a manager', async () => {
+  const selectedVendor = await prisma.vendor.create({
+    data: { name: 'Selected Incl Manager', email: `selmgr-${suffix}@test.local`, agencyId, product: 'Auto', distributionMode: 'SELECTED_AGENTS', selectedAgentIds: [producerIds[0], managerId] },
+  });
+  for (let i = 0; i < 4; i++) {
+    const result = await prisma.$transaction((tx) => resolveVendorAssignment(tx, selectedVendor));
+    assert.notEqual(result.assignedToId, managerId, 'even when a manager is explicitly selected, SELECTED_AGENTS stays producer-only by design');
+  }
+  await prisma.vendor.delete({ where: { id: selectedVendor.id } });
+
+  const manualResult = await prisma.$transaction((tx) => resolveManualAssignment(tx, { agencyId, mode: 'ROUND_ROBIN', cursor: 0 }));
+  assert.notEqual(manualResult.assignedToId, managerId);
 });

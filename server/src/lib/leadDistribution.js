@@ -14,15 +14,21 @@ function pickAgentIndex(cursor, candidateCount) {
   return normalizedCursor;
 }
 
-// Offices that currently have at least one ACTIVE producer — shared by
-// every OFFICE_SPLIT caller (vendor-sourced and manual/bulk-import alike)
-// as the legacy cross-office fallback when no office's geography rules
-// match a given lead, in the same sorted-id candidate order every other
-// mode uses.
+// Offices that currently have at least one ACTIVE producer OR selling
+// manager — shared by every OFFICE_SPLIT caller (vendor-sourced and
+// manual/bulk-import alike) as the legacy cross-office fallback when no
+// office's geography rules match a given lead, in the same sorted-id
+// candidate order every other mode uses. This is a pure candidacy check
+// ("does this office have anyone at all"), not a pool-enrollment
+// decision — a manager-only office (e.g. one manager holding a real
+// Alpha seat, zero producers) must still be visible here, or it's
+// invisible to this fallback entirely. Whether she actually receives the
+// lead is still governed downstream by the office's own routingMode
+// (officeAlphaAssignee/officeRoundRobinAssignee below).
 async function fetchOfficesWithActiveAgents(tx, agencyId) {
   const offices = await tx.office.findMany({
     where: { agencyId },
-    include: { users: { where: { role: 'PRODUCER', status: 'ACTIVE' }, select: { id: true }, orderBy: { id: 'asc' } } },
+    include: { users: { where: { role: { in: ['PRODUCER', 'AGENCY_MANAGER'] }, status: 'ACTIVE' }, select: { id: true }, orderBy: { id: 'asc' } } },
     orderBy: { id: 'asc' },
   });
   return offices.filter((o) => o.users.length > 0);
@@ -145,10 +151,15 @@ async function officeAlphaAssignee(tx, { office, lastName }) {
 
 // Stage 2 for an office whose routingMode is ROUND_ROBIN: plain round robin
 // over that office's own ACTIVE producers, keyed to the office's own
-// cursor (not derived from any vendor).
+// cursor (not derived from any vendor). PRODUCER only, deliberately — a
+// prior change over-broadened this to also include AGENCY_MANAGER, which
+// would silently enroll a selling manager into ordinary round-robin lead
+// flow she never opted into. A manager's only path to receiving routed
+// leads is an explicit Alpha-split seat (officeAlphaAssignee above),
+// never plain round robin.
 async function officeRoundRobinAssignee(tx, { office }) {
   const activeProducers = await tx.user.findMany({
-    where: { officeId: office.id, role: { in: ['PRODUCER', 'AGENCY_MANAGER'] }, status: 'ACTIVE' },
+    where: { officeId: office.id, role: 'PRODUCER', status: 'ACTIVE' },
     select: { id: true },
     orderBy: { id: 'asc' },
   });
