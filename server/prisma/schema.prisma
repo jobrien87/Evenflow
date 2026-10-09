@@ -1200,6 +1200,12 @@ model Sale {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // The one RevenueEvent posted from this Sale's premium, if any — unique
+  // so a correction (PATCH) or void always updates/removes this same row
+  // instead of risking a second, duplicate-credit RevenueEvent. See
+  // lib/financialEvents.js's syncSaleRevenueEvent.
+  revenueEvent RevenueEvent?
+
   @@index([agencyId, saleDate])
   @@index([assignedToId])
   @@index([customerId])
@@ -1754,6 +1760,12 @@ model RevenueEvent {
   agency      Agency?            @relation(fields: [agencyId], references: [id])
   transferId  String?
   transfer    Transfer?          @relation(fields: [transferId], references: [id])
+  // Set only for a sourceType:SALE row — the Sale this revenue was posted
+  // from. Unique so an edit/void can always find and update/delete this
+  // exact row (upsert-by-saleId) rather than ever creating a second one
+  // for the same Sale. Null for every other category/sourceType.
+  saleId      String?            @unique
+  sale        Sale?              @relation(fields: [saleId], references: [id])
   category    RevenueCategory
   sourceType  RevenueSourceType?
   amountCents Int

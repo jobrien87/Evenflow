@@ -1,5 +1,6 @@
 const express = require('express');
 const multer = require('multer');
+const rateLimit = require('express-rate-limit');
 const { z } = require('zod');
 const { prisma } = require('../lib/db');
 const { requireAuth, requireRole, scopeAgencyId } = require('../middleware/auth');
@@ -32,6 +33,11 @@ const uploadSpreadsheet = multer({ storage: multer.memoryStorage(), limits: { fi
 // a bulk upload picks one of these for the whole batch rather than a
 // second, parallel vocabulary.
 const DISTRIBUTION_MODES = ['ROUND_ROBIN', 'SELECTED_AGENTS', 'MOSHPIT', 'ALPHA_SPLIT', 'OFFICE_SPLIT'];
+
+// GET /leads/search is a deliberately widened, agency-wide PII read
+// surface (see the route itself) — rate-limited defense in depth,
+// mirroring recordStore.js's mutationLimiter shape.
+const searchLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
 
 // List leads — always server-side scoped to the caller's agency (never trust client agencyId).
 router.get('/', async (req, res, next) => {
@@ -1267,6 +1273,73 @@ function authorizeLeadAccess(req, lead, { write = false } = {}) {
   }
   return { ok: true };
 }
+
+// Find an older/closed lead by name, phone, or email — e.g. a returning
+// prospect a producer doesn't remember the status of, or who was
+// originally worked by a different producer. Registered BEFORE
+// GET /:leadId so Express doesn't treat "search" as a :leadId value.
+//
+// Deliberately, narrowly widened read scope: the default GET / list
+// restricts a PRODUCER to their own assignedToId, by design — but that
+// would make this feature useless for its one real purpose (finding a
+// record regardless of who originally worked it). So this endpoint
+// scopes every allowed role, Producer included, by agencyId alone, same
+// as Owner/Manager already get on the default list. It is pure summary
+// data (status + assigned producer's name, no full lead detail) and a
+// pure read — no field on Lead is ever written here, so finding or
+// opening a result can never reassign or reactivate it. Full click-
+// through detail is still governed entirely by the existing, unchanged
+// authorizeLeadAccess below (a Producer can only open the full record
+// for their own lead; Owner/Manager/Platform Owner always could).
+router.get('/search', searchLimiter, requireRole('PRODUCER', 'AGENCY_MANAGER', 'AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const agencyId = scopeAgencyId(req);
+    if (req.user.role === 'PLATFORM_OWNER' && !agencyId) {
+      return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+    }
+
+    const q = (req.query.q || '').trim();
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const pageSize = Math.min(Math.max(parseInt(req.query.pageSize, 10) || 25, 1), 100);
+    if (q.length < 2) {
+      return res.json({ success: true, leads: [], page, pageSize, total: 0 });
+    }
+
+    const phoneNormalized = normalizePhone(q);
+    const email = normalizeEmail(q);
+    const where = {
+      agencyId,
+      // Deliberately NOT archivedAt:null — unlike the default list, this
+      // is a lookup tool meant to surface older/closed/archived leads too.
+      customer: {
+        OR: [
+          { firstName: { contains: q, mode: 'insensitive' } },
+          { lastName: { contains: q, mode: 'insensitive' } },
+          ...(phoneNormalized ? [{ phoneNormalized: { contains: phoneNormalized } }] : []),
+          ...(email ? [{ email: { contains: email, mode: 'insensitive' } }] : [{ email: { contains: q, mode: 'insensitive' } }]),
+        ],
+      },
+    };
+
+    const [leads, total] = await Promise.all([
+      prisma.lead.findMany({
+        where,
+        include: {
+          customer: { select: { id: true, firstName: true, lastName: true, phoneNormalized: true, email: true } },
+          assignedTo: { select: { id: true, firstName: true, lastName: true } },
+        },
+        orderBy: { receivedAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.lead.count({ where }),
+    ]);
+
+    return res.json({ success: true, leads, page, pageSize, total });
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.get('/:leadId', async (req, res, next) => {
   try {

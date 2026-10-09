@@ -31,6 +31,7 @@ import SupportPanel from './pages/SupportPanel';
 import AgencyBillingPanel from './pages/AgencyBillingPanel';
 import GoalsPanel from './pages/GoalsPanel';
 import RosterSettingsPanel from './pages/RosterSettingsPanel';
+import ClosedSalesPanel from './pages/ClosedSalesPanel';
 import RecordStorePanel from './pages/RecordStorePanel';
 import RecordStoreAdminPanel from './pages/RecordStoreAdminPanel';
 import HrDashboardPage from './pages/hr/HrDashboardPage';
@@ -106,6 +107,7 @@ export default function App() {
           <Route path="producer/opportunities" element={<OpportunitiesPanel />} />
           <Route path="producer/moshpit" element={<MoshpitPanel />} />
           <Route path="producer/my-leads" element={<MyLeadsPanel />} />
+          <Route path="producer/my-sales" element={<ClosedSalesPanel />} />
           <Route path="producer/goals" element={<GoalsPanel />} />
           <Route path="producer/my-hr" element={<HrMyProfilePage />} />
           <Route path="producer/break-room" element={<BreakRoomPanel />} />
@@ -132,6 +134,7 @@ export default function App() {
           <Route path="agency/leads" element={<AgencyLeadsPanel />} />
           <Route path="agency/goals" element={<GoalsPanel />} />
           <Route path="agency/billboard" element={<BillboardPanel />} />
+          <Route path="agency/closed-sales" element={<ClosedSalesPanel />} />
           <Route path="agency/record-store" element={<RecordStorePanel />} />
           <Route path="agency/hr" element={<HrDashboardPage />} />
           <Route path="agency/producers/:userId" element={<ProducerDetailPage />} />

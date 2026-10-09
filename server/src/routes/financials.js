@@ -47,10 +47,11 @@ router.get('/summary', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req
       // shown here, per the agency owner's own requirement.
       sumHistoricalPremium({ agencyId, from, to }),
       countHistoricalSold({ agencyId, from, to }),
-      // Add Closed Sale (standalone) rows DO post a real RevenueEvent on
-      // creation (see financialEvents.js's recordManualSaleRevenue), so
-      // their premium is already inside revenueAgg above — only the COUNT
-      // needs adding here, not the premium a second time.
+      // Add Closed Sale (standalone) rows DO post a real RevenueEvent,
+      // kept in sync on every create/correct/void (see financialEvents.js's
+      // syncSaleRevenueEvent), so their premium is already inside
+      // revenueAgg above — only the COUNT needs adding here, not the
+      // premium a second time.
       countSales({ agencyId, from, to }),
     ]);
 

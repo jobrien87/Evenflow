@@ -30,18 +30,54 @@ function toCents(value) {
   return Math.round(n * 100);
 }
 
+function fromCents(cents) {
+  if (cents === null || cents === undefined) return '';
+  return (cents / 100).toFixed(2);
+}
+
+function toDateInput(value) {
+  if (!value) return '';
+  return new Date(value).toISOString().slice(0, 10);
+}
+
+// Builds the edit-mode form directly from a real Sale row (as returned
+// by GET /sales / PATCH /sales/:id) — cents back to dollar strings, ISO
+// dates back to YYYY-MM-DD, matching emptyForm's exact field shape.
+function formFromSale(sale) {
+  return {
+    firstName: sale.firstName || '', lastName: sale.lastName || '', businessName: sale.businessName || '',
+    customerTitle: sale.customerTitle || '', customerSuffix: sale.customerSuffix || '',
+    phone: '', email: '', zip: sale.zip || '', state: sale.state || '',
+    saleDate: toDateInput(sale.saleDate), issuedDate: toDateInput(sale.issuedDate),
+    effectiveDate: toDateInput(sale.effectiveDate), expirationDate: toDateInput(sale.expirationDate),
+    carrier: sale.carrier || '', policyType: sale.policyType || '', productFamily: sale.productFamily || PRODUCTS[0],
+    policyNumber: sale.policyNumber || '',
+    premiumCents: fromCents(sale.premiumCents), revenueCents: fromCents(sale.revenueCents), items: String(sale.items ?? 1),
+    leadSource: sale.leadSource || '', priorCarrier: sale.priorCarrier || '', reason: sale.reason || '', notes: sale.notes || '',
+    officeId: sale.officeId || '', assignedToId: sale.assignedToId || '',
+  };
+}
+
 // Add Closed Sale — the one real production/revenue entry, standalone or
 // linked back to a real Lead via `leadId` (set by the post-disposition
 // "log as Closed Sale" nudge in LeadDetailModal.jsx, which also supplies
 // `prefill` from that Lead's own rich sale-detail fields). Single-producer
 // entry only this round (split credit/points/onboarding side effects are
 // explicitly out of scope, per the spec).
-export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill }) {
+//
+// Pass `sale` (a real Sale row) to open this in edit mode instead of
+// create mode — the form is pre-filled from it and submit PATCHes the
+// existing row rather than creating a new one. Phone/email aren't part
+// of the editable Sale fields (they live on the linked Customer, set only
+// at creation), so those two inputs are intentionally left blank in edit
+// mode rather than guessed at.
+export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill, sale }) {
   const { user } = useAuth();
+  const isEdit = Boolean(sale);
   const isProducer = user?.role === 'PRODUCER';
   const [producers, setProducers] = useState([]);
   const [offices, setOffices] = useState([]);
-  const [form, setForm] = useState(emptyForm(prefill));
+  const [form, setForm] = useState(isEdit ? formFromSale(sale) : emptyForm(prefill));
   const [clientRequestId, setClientRequestId] = useState(crypto.randomUUID());
   const [duplicates, setDuplicates] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -66,8 +102,11 @@ export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill }
     const premiumCents = toCents(form.premiumCents);
     const revenueCents = toCents(form.revenueCents);
     return {
-      clientRequestId,
-      leadId: leadId || undefined,
+      // A correction never carries a create-time idempotency key or a
+      // leadId — the server already ignores leadId on PATCH (a sale can
+      // never be relinked to a different lead), so it's left out here
+      // rather than sent and silently dropped.
+      ...(isEdit ? {} : { clientRequestId, leadId: leadId || undefined }),
       firstName: form.firstName,
       lastName: form.lastName,
       businessName: form.businessName || undefined,
@@ -104,7 +143,9 @@ export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill }
     setError('');
     setSaving(true);
     try {
-      const res = await api.createSale(buildPayload(confirmDuplicate));
+      const res = isEdit
+        ? await api.updateSale(sale.id, buildPayload(confirmDuplicate))
+        : await api.createSale(buildPayload(confirmDuplicate));
       setDuplicates(null);
       setSavedCount((c) => c + 1);
       onSaved?.(res.sale);
@@ -126,10 +167,14 @@ export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill }
   }
 
   const policyTypes = form.carrier ? policyTypesForCarrier(form.carrier) : [];
+  const modalTitle = isEdit ? 'EDIT CLOSED SALE' : `ADD CLOSED SALE${savedCount > 0 ? ` (${savedCount} saved)` : ''}`;
 
   return (
-    <Modal onClose={onClose} title={`ADD CLOSED SALE${savedCount > 0 ? ` (${savedCount} saved)` : ''}`} maxWidth={720}>
+    <Modal onClose={onClose} title={modalTitle} maxWidth={720}>
       {error && <div style={s.error}>{error}</div>}
+      {isEdit && sale.leadId && (
+        <div style={s.linkedLeadNote}>Linked to a Lead — this connection can&rsquo;t be changed here.</div>
+      )}
 
       {duplicates ? (
         <div>
@@ -257,10 +302,12 @@ export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill }
 
           <div style={s.footerRow}>
             <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>CANCEL</Button>
-            <Button type="button" variant="secondary" onClick={(e) => submit(e, { addAnother: true })} disabled={saving}>
-              {saving ? 'SAVING…' : 'SAVE & ADD ANOTHER'}
-            </Button>
-            <Button type="submit" disabled={saving}>{saving ? 'SAVING…' : 'SAVE'}</Button>
+            {!isEdit && (
+              <Button type="button" variant="secondary" onClick={(e) => submit(e, { addAnother: true })} disabled={saving}>
+                {saving ? 'SAVING…' : 'SAVE & ADD ANOTHER'}
+              </Button>
+            )}
+            <Button type="submit" disabled={saving}>{saving ? 'SAVING…' : isEdit ? 'SAVE CHANGES' : 'SAVE'}</Button>
           </div>
         </form>
       )}
@@ -270,6 +317,7 @@ export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill }
 
 const s = {
   error: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 12, borderRadius: 8, fontSize: 13, marginBottom: 14 },
+  linkedLeadNote: { background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', padding: '8px 12px', borderRadius: 6, fontSize: 12, marginBottom: 14 },
   grid2: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 18 },
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 13, width: '100%' },
   labeled: { display: 'flex', flexDirection: 'column', gap: 4 },

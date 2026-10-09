@@ -5,6 +5,7 @@ import { Card, Badge, Button, SectionHeader, StatTile, DateRangeFilter, EmptySta
 import { resolveDateRange } from '../lib/dateRange';
 import LeadDetailModal from './LeadDetailModal';
 import AddClosedSaleModal from './AddClosedSaleModal';
+import LeadSearchBox from './LeadSearchBox';
 
 const PERIODS = [
   { key: 'month', label: 'This month', from: () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); } },
@@ -98,6 +99,10 @@ export default function MyLeadsPanel() {
       {showAddSale && (
         <AddClosedSaleModal onClose={() => setShowAddSale(false)} onSaved={load} />
       )}
+
+      <div style={{ marginBottom: 18 }}>
+        <LeadSearchBox />
+      </div>
 
       {error && (
         <div style={s.loadErrorBox}>

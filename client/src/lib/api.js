@@ -38,6 +38,7 @@ export const api = {
   startMyDay: () => request('/start-my-day'),
 
   leads: (params = '') => request(`/leads${params}`),
+  searchLeads: (params = '') => request(`/leads/search${params}`),
   leadDetail: (id) => request(`/leads/${id}`),
   leadFunnel: (params = '') => request(`/leads/funnel${params}`),
   leadsSnapshot: (params = '') => request(`/leads/snapshot${params}`),

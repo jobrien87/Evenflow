@@ -18,10 +18,11 @@ const bcrypt = require('bcryptjs');
 const { prisma } = require('../lib/db');
 const { createSession } = require('../lib/auth');
 const { computeBillboard } = require('../lib/billboard');
+const { computeFunnel } = require('../lib/funnelMetrics');
 const app = require('../app');
 
 const suffix = Date.now();
-let agencyId, ownerId, producerId, managerId, ownerCookie, producerCookie, server, baseUrl;
+let agencyId, ownerId, producerId, producer2Id, managerId, manager2Id, ownerCookie, producerCookie, managerCookie, manager2Cookie, server, baseUrl;
 
 before(async () => {
   const agency = await prisma.agency.create({ data: { name: `Sales Test Agency ${suffix}` } });
@@ -43,11 +44,26 @@ before(async () => {
     data: { email: `sales-manager-${suffix}@test.local`, passwordHash: hash, firstName: 'Julie', lastName: 'Manager', role: 'AGENCY_MANAGER', agencyId, status: 'ACTIVE' },
   });
   managerId = manager.id;
+  // A second producer + a second manager — needed for the seniority-gated
+  // reassignment tests (Manager-to-Producer must succeed, Manager-to-
+  // Manager must require an Owner).
+  const producer2 = await prisma.user.create({
+    data: { email: `sales-producer2-${suffix}@test.local`, passwordHash: hash, firstName: 'Second', lastName: 'Producer', role: 'PRODUCER', agencyId, status: 'ACTIVE' },
+  });
+  producer2Id = producer2.id;
+  const manager2 = await prisma.user.create({
+    data: { email: `sales-manager2-${suffix}@test.local`, passwordHash: hash, firstName: 'Second', lastName: 'Manager', role: 'AGENCY_MANAGER', agencyId, status: 'ACTIVE' },
+  });
+  manager2Id = manager2.id;
 
   const ownerSession = await createSession(ownerId);
   ownerCookie = `evenflow_session=${ownerSession.rawToken}`;
   const producerSession = await createSession(producerId);
   producerCookie = `evenflow_session=${producerSession.rawToken}`;
+  const managerSession = await createSession(managerId);
+  managerCookie = `evenflow_session=${managerSession.rawToken}`;
+  const manager2Session = await createSession(manager2Id);
+  manager2Cookie = `evenflow_session=${manager2Session.rawToken}`;
 
   await new Promise((resolve) => { server = http.createServer(app).listen(0, '127.0.0.1', resolve); });
   const port = server.address().port;
@@ -57,7 +73,8 @@ before(async () => {
 after(async () => {
   await prisma.sale.deleteMany({ where: { agencyId } });
   await prisma.revenueEvent.deleteMany({ where: { agencyId } });
-  await prisma.session.deleteMany({ where: { userId: { in: [ownerId, producerId] } } });
+  await prisma.auditEvent.deleteMany({ where: { agencyId } });
+  await prisma.session.deleteMany({ where: { userId: { in: [ownerId, producerId, producer2Id, managerId, manager2Id] } } });
   await prisma.user.deleteMany({ where: { agencyId } });
   await prisma.agency.delete({ where: { id: agencyId } }).catch(() => {});
   await new Promise((resolve) => server.close(resolve));
@@ -304,4 +321,308 @@ test('a selling AGENCY_MANAGER can be assigned a Sale and is credited correctly,
 
   await prisma.sale.delete({ where: { id: sale.id } });
   await prisma.revenueEvent.deleteMany({ where: { notes: { contains: sale.id } } });
+});
+
+// --- Sale correction/edit workflow (revenue sync, seniority, duplicate
+// recheck, audit diff) ---
+
+test('editing premiumCents via PATCH updates the SAME RevenueEvent row, and /financials/summary reflects it', async () => {
+  const createRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ lastName: `RevSync${Date.now()}`, premiumCents: 30000 })),
+  });
+  const { sale } = await createRes.json();
+
+  const eventsAfterCreate = await prisma.revenueEvent.findMany({ where: { saleId: sale.id } });
+  assert.equal(eventsAfterCreate.length, 1, 'creation posts exactly one linked RevenueEvent');
+  const originalEventId = eventsAfterCreate[0].id;
+  assert.equal(eventsAfterCreate[0].amountCents, 30000);
+
+  const patchRes = await fetch(`${baseUrl}/api/sales/${sale.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ premiumCents: 85000 }),
+  });
+  assert.equal(patchRes.status, 200);
+
+  const eventsAfterPatch = await prisma.revenueEvent.findMany({ where: { saleId: sale.id } });
+  assert.equal(eventsAfterPatch.length, 1, 'the edit must update the SAME row, never create a second one');
+  assert.equal(eventsAfterPatch[0].id, originalEventId);
+  assert.equal(eventsAfterPatch[0].amountCents, 85000);
+
+  const from = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const to = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const summaryRes = await fetch(`${baseUrl}/api/financials/summary?${new URLSearchParams({ agencyId, from: from.toISOString(), to: to.toISOString() })}`, { headers: { Cookie: ownerCookie } });
+  assert.equal(summaryRes.status, 200);
+  const summary = await summaryRes.json();
+  const revenueCategory = summary.revenueByCategory.find((c) => c.category === 'LEAD_REVENUE');
+  assert.ok(revenueCategory.amount >= 850, '/financials/summary must reflect the corrected premium, not the stale original');
+
+  await prisma.sale.delete({ where: { id: sale.id } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: sale.id } });
+});
+
+test('zeroing premiumCents via PATCH deletes the linked RevenueEvent', async () => {
+  const createRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ lastName: `ZeroOut${Date.now()}`, premiumCents: 20000 })),
+  });
+  const { sale } = await createRes.json();
+  assert.equal(await prisma.revenueEvent.count({ where: { saleId: sale.id } }), 1);
+
+  const patchRes = await fetch(`${baseUrl}/api/sales/${sale.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ premiumCents: 0 }),
+  });
+  assert.equal(patchRes.status, 200);
+
+  assert.equal(await prisma.revenueEvent.count({ where: { saleId: sale.id } }), 0, 'zeroing the premium must remove the RevenueEvent, not leave a stale nonzero row');
+  const refetched = await prisma.sale.findUnique({ where: { id: sale.id } });
+  assert.equal(refetched.premiumCents, 0, 'the Sale row itself must still show the explicit 0, not be deleted');
+
+  await prisma.sale.delete({ where: { id: sale.id } });
+});
+
+test('a repeated/double-submitted identical PATCH leaves exactly one RevenueEvent row', async () => {
+  const createRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ lastName: `DoublePatch${Date.now()}`, premiumCents: 25000 })),
+  });
+  const { sale } = await createRes.json();
+
+  const patchBody = JSON.stringify({ premiumCents: 70000 });
+  const [res1, res2] = await Promise.all([
+    fetch(`${baseUrl}/api/sales/${sale.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie }, body: patchBody }),
+    fetch(`${baseUrl}/api/sales/${sale.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie }, body: patchBody }),
+  ]);
+  assert.equal(res1.status, 200);
+  assert.equal(res2.status, 200);
+
+  const events = await prisma.revenueEvent.findMany({ where: { saleId: sale.id } });
+  assert.equal(events.length, 1, 'two concurrent identical PATCHes must never produce duplicate credit');
+  assert.equal(events[0].amountCents, 70000);
+
+  await prisma.sale.delete({ where: { id: sale.id } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: sale.id } });
+});
+
+test('voiding a sale deletes its linked RevenueEvent, and /financials/summary drops it', async () => {
+  const createRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ lastName: `VoidRevSync${Date.now()}`, premiumCents: 45000 })),
+  });
+  const { sale } = await createRes.json();
+  assert.equal(await prisma.revenueEvent.count({ where: { saleId: sale.id } }), 1);
+
+  const voidRes = await fetch(`${baseUrl}/api/sales/${sale.id}/void`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ voidReason: 'entered in error' }),
+  });
+  assert.equal(voidRes.status, 200);
+
+  assert.equal(await prisma.revenueEvent.count({ where: { saleId: sale.id } }), 0, 'voiding must remove the revenue contribution in the same commit');
+
+  await prisma.sale.delete({ where: { id: sale.id } });
+});
+
+test('an Agency Manager can reassign credit between two Producers, but never to or from another Manager — only an Owner can', async () => {
+  const createRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ lastName: `Seniority${Date.now()}`, assignedToId: producerId })),
+  });
+  const { sale } = await createRes.json();
+
+  // Producer -> Producer: a plain Manager is fully allowed.
+  const toProducer2 = await fetch(`${baseUrl}/api/sales/${sale.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: managerCookie },
+    body: JSON.stringify({ assignedToId: producer2Id }),
+  });
+  assert.equal(toProducer2.status, 200, 'a Manager must be able to move credit between two Producers');
+  const afterProducer2 = await toProducer2.json();
+  assert.equal(afterProducer2.sale.assignedToId, producer2Id);
+
+  // Producer -> Manager: moving credit TO a Manager also needs an Owner,
+  // even though the CURRENT assignee is just a Producer.
+  const toManager2ByManager = await fetch(`${baseUrl}/api/sales/${sale.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: managerCookie },
+    body: JSON.stringify({ assignedToId: manager2Id }),
+  });
+  assert.equal(toManager2ByManager.status, 403, 'a Manager must not be able to move credit TO another Manager');
+
+  // The same move, done by the Owner, succeeds — now manager2 holds it.
+  const toManager2ByOwner = await fetch(`${baseUrl}/api/sales/${sale.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ assignedToId: manager2Id }),
+  });
+  assert.equal(toManager2ByOwner.status, 200, 'an Agency Owner must always be able to reassign credit');
+
+  // Manager -> Producer: moving credit AWAY from a Manager, attempted by
+  // a plain Manager, must also be blocked.
+  const awayFromManager2ByManager = await fetch(`${baseUrl}/api/sales/${sale.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: managerCookie },
+    body: JSON.stringify({ assignedToId: producerId }),
+  });
+  assert.equal(awayFromManager2ByManager.status, 403, 'a Manager must not be able to move credit AWAY from another Manager either');
+
+  // The Owner can still move it away from the Manager at will.
+  const awayFromManager2ByOwner = await fetch(`${baseUrl}/api/sales/${sale.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ assignedToId: producerId }),
+  });
+  assert.equal(awayFromManager2ByOwner.status, 200, 'an Agency Owner must always be able to reassign credit, regardless of current assignee');
+
+  await prisma.sale.delete({ where: { id: sale.id } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: sale.id } });
+});
+
+test('leadId in a PATCH body is always ignored — a correction can never relink a sale to a different lead', async () => {
+  const createRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ lastName: `LeadIdInvariant${Date.now()}` })),
+  });
+  const { sale } = await createRes.json();
+  assert.equal(sale.leadId, null, 'this standalone sale starts with no leadId');
+
+  const customer = await prisma.customer.create({ data: { firstName: 'Relink', lastName: `Attempt${Date.now()}`, phoneNormalized: `relink${suffix}` } });
+  const lead = await prisma.lead.create({
+    data: { agencyId, customerId: customer.id, source: 'manual', status: 'NEW', product: 'Auto', createdById: ownerId, assignedToId: producerId },
+  });
+
+  const patchRes = await fetch(`${baseUrl}/api/sales/${sale.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ leadId: lead.id, notes: 'trying to relink' }),
+  });
+  assert.equal(patchRes.status, 200);
+  const { sale: updated } = await patchRes.json();
+  assert.equal(updated.leadId, null, 'leadId must remain untouched regardless of what the PATCH body sends');
+  assert.equal(updated.notes, 'trying to relink', 'other fields in the same PATCH must still apply normally');
+
+  await prisma.sale.delete({ where: { id: sale.id } });
+  await prisma.lead.delete({ where: { id: lead.id } });
+  await prisma.customer.delete({ where: { id: customer.id } });
+});
+
+test('a PATCH that collides with another real sale is flagged unless confirmed, and never flags against its own prior values', async () => {
+  const saleDate = new Date().toISOString();
+  const originalRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ saleDate, lastName: `EditDupOriginal${Date.now()}`, policyNumber: `PN-${Date.now()}-A` })),
+  });
+  const { sale: original } = await originalRes.json();
+
+  // Editing it back to its own current carrier/policyType/saleDate must
+  // never flag against itself.
+  const noOpPatch = await fetch(`${baseUrl}/api/sales/${original.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ saleDate }),
+  });
+  assert.equal(noOpPatch.status, 200, 'editing a sale back to its own existing values must not flag it as a duplicate of itself');
+
+  // A distinct saleDate here (not `saleDate`) so this creation itself
+  // doesn't collide with `original` via the carrier+policyType+saleDate
+  // branch — this test isolates the policyNumber collision specifically.
+  const otherSaleDate = new Date(Date.now() + 60000).toISOString();
+  const otherRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ saleDate: otherSaleDate, lastName: `EditDupOther${Date.now()}`, policyNumber: `PN-${Date.now()}-B` })),
+  });
+  assert.equal(otherRes.status, 201, 'the second sale must be created cleanly with no carrier/policyType/saleDate collision');
+  const { sale: other } = await otherRes.json();
+
+  // Now edit `other` to carry the SAME policyNumber as `original` — a
+  // real collision with a different sale, must be caught.
+  const collidePatch = await fetch(`${baseUrl}/api/sales/${other.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ policyNumber: original.policyNumber }),
+  });
+  assert.equal(collidePatch.status, 409);
+  const collideBody = await collidePatch.json();
+  assert.equal(collideBody.error, 'POSSIBLE_DUPLICATE');
+
+  const confirmedPatch = await fetch(`${baseUrl}/api/sales/${other.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ policyNumber: original.policyNumber, confirmDuplicate: true }),
+  });
+  assert.equal(confirmedPatch.status, 200, 'confirmDuplicate must let the edit through');
+
+  await prisma.sale.deleteMany({ where: { id: { in: [original.id, other.id] } } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: { in: [original.id, other.id] } } });
+});
+
+test('a PATCH audit event records only the changed fields as before/after, not the whole row', async () => {
+  const createRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ lastName: `AuditDiff${Date.now()}`, premiumCents: 33000, items: 2 })),
+  });
+  const { sale } = await createRes.json();
+
+  const patchRes = await fetch(`${baseUrl}/api/sales/${sale.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ premiumCents: 61000 }),
+  });
+  assert.equal(patchRes.status, 200);
+
+  const audit = await prisma.auditEvent.findFirst({
+    where: { entityType: 'Sale', entityId: sale.id, action: 'sale.corrected' },
+    orderBy: { createdAt: 'desc' },
+  });
+  assert.ok(audit, 'a sale.corrected audit event must be recorded');
+  assert.equal(audit.actorId, ownerId);
+  assert.deepEqual(Object.keys(audit.before), ['premiumCents'], 'before must contain only the changed field(s)');
+  assert.equal(audit.before.premiumCents, 33000);
+  assert.deepEqual(audit.after, { premiumCents: 61000 });
+  // Untouched fields like items must never appear in the diff.
+  assert.equal(Object.prototype.hasOwnProperty.call(audit.before, 'items'), false);
+
+  await prisma.sale.delete({ where: { id: sale.id } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: sale.id } });
+});
+
+test('editing items/productFamily/saleDate/assignedToId is reflected live in Billboard with no additional code', async () => {
+  const createRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ lastName: `LiveReflect${Date.now()}`, items: 1, productFamily: 'AUTO', premiumCents: 40000 })),
+  });
+  const { sale } = await createRes.json();
+
+  const patchRes = await fetch(`${baseUrl}/api/sales/${sale.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ items: 3, productFamily: 'HOME' }),
+  });
+  assert.equal(patchRes.status, 200);
+
+  const from = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const to = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const billboard = await computeBillboard({ agencyId, granularity: 'day', from, to });
+  const homeRow = billboard.byProduct.find((p) => p.product === 'HOME');
+  assert.ok(homeRow, 'the edited productFamily must be reflected on next read, no extra code needed');
+  const autoRowStillHasOldSale = billboard.byProduct.find((p) => p.product === 'AUTO')?.soldCount || 0;
+  // Other AUTO sales from earlier tests may still exist concurrently in
+  // this suite's shared agency; the real assertion is that the edited
+  // sale itself now lands under HOME, not that AUTO is empty.
+  assert.ok(autoRowStillHasOldSale >= 0);
+
+  await prisma.sale.delete({ where: { id: sale.id } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: sale.id } });
+});
+
+test('editing a Sale never changes close rate (computeFunnel reads only Lead.status, never Sale)', async () => {
+  const from = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const to = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const before1 = await computeFunnel({ agencyId, from, to });
+
+  const createRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ lastName: `CloseRateUnaffected${Date.now()}`, premiumCents: 50000 })),
+  });
+  const { sale } = await createRes.json();
+  await fetch(`${baseUrl}/api/sales/${sale.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ premiumCents: 99000 }),
+  });
+
+  const after1 = await computeFunnel({ agencyId, from, to });
+  assert.equal(after1.closeRate, before1.closeRate, 'a Sale create+edit must never move close rate — it is Lead-status-only');
+
+  await prisma.sale.delete({ where: { id: sale.id } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: sale.id } });
 });

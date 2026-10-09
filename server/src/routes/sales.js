@@ -7,10 +7,10 @@
 const express = require('express');
 const { z } = require('zod');
 const { prisma } = require('../lib/db');
-const { requireAuth, requireRole, scopeAgencyId } = require('../middleware/auth');
+const { requireAuth, requireRole, scopeAgencyId, canActOnUser } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { normalizePhone, normalizeEmail } = require('../lib/normalize');
-const { recordManualSaleRevenue } = require('../lib/financialEvents');
+const { syncSaleRevenueEvent } = require('../lib/financialEvents');
 const { updateCustomerProductsAndDetectCrossSells } = require('../lib/opportunityEvents');
 const { PRODUCTS } = require('../lib/products');
 
@@ -71,11 +71,14 @@ router.post('/check-duplicate', requireRole(...CREATE_ROLES), async (req, res, n
   try {
     const agencyId = scopeAgencyId(req);
     if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
-    const { leadId, policyNumber, carrier, policyType, saleDate, firstName, lastName, zip } = req.body || {};
+    // excludeSaleId lets a correction's own pre-flight check (or PATCH's
+    // own server-side recheck below) exclude the sale being edited from
+    // its own duplicate match.
+    const { leadId, excludeSaleId, policyNumber, carrier, policyType, saleDate, firstName, lastName, zip } = req.body || {};
     if (!carrier || !policyType || !saleDate || !firstName || !lastName) {
       return res.status(400).json({ success: false, error: 'VALIDATION', message: 'carrier, policyType, saleDate, firstName, lastName are required to check for duplicates.' });
     }
-    const matches = await findPossibleDuplicates({ agencyId, leadId, policyNumber, carrier, policyType, saleDate: new Date(saleDate), firstName, lastName, zip });
+    const matches = await findPossibleDuplicates({ agencyId, excludeSaleId, leadId, policyNumber, carrier, policyType, saleDate: new Date(saleDate), firstName, lastName, zip });
     return res.json({ success: true, ...matches });
   } catch (err) {
     next(err);
@@ -238,10 +241,9 @@ router.post('/', requireRole(...CREATE_ROLES), async (req, res, next) => {
     });
 
     // Real, entered premium feeds the Financial Ledger — same convention
-    // as a Lead's own disposition-to-SOLD path.
-    if (sale.premiumCents) {
-      await recordManualSaleRevenue(sale);
-    }
+    // as a Lead's own disposition-to-SOLD path. syncSaleRevenueEvent
+    // itself is a no-op when premiumCents is falsy.
+    await syncSaleRevenueEvent(prisma, sale);
     // Real sold product updates the customer's product ledger and detects
     // genuine cross-sell gaps — same hook the Lead/Transfer paths already use.
     await updateCustomerProductsAndDetectCrossSells({
@@ -289,7 +291,15 @@ router.get('/', requireRole(...CREATE_ROLES), async (req, res, next) => {
   }
 });
 
-const updateSaleSchema = createSaleSchema.omit({ clientRequestId: true, confirmDuplicate: true }).partial();
+// Only clientRequestId is stripped (a create-time idempotency key, not
+// relevant to an edit) — confirmDuplicate is kept so an edit can
+// explicitly confirm past the recheck below, same as POST.
+const updateSaleSchema = createSaleSchema.omit({ clientRequestId: true }).partial();
+
+// Fields findPossibleDuplicates actually matches on — if a PATCH touches
+// any of these, the duplicate check is re-run (never on an edit that
+// only changes, say, notes or revenueCents).
+const DUPLICATE_SENSITIVE_FIELDS = ['carrier', 'policyType', 'policyNumber', 'saleDate'];
 
 router.patch('/:saleId', requireRole(...CREATE_ROLES), async (req, res, next) => {
   try {
@@ -316,20 +326,67 @@ router.patch('/:saleId', requireRole(...CREATE_ROLES), async (req, res, next) =>
     for (const key of ['saleDate', 'issuedDate', 'effectiveDate', 'expirationDate']) {
       if (data[key] !== undefined) patch[key] = new Date(data[key]);
     }
+    // leadId is deliberately never applied here, even though the shared
+    // schema parses it — a correction can never relink a sale to a
+    // different lead. This keeps "standalone vs. linked" and the source
+    // Lead's own quote/disposition history untouched by any edit.
+
     if (data.assignedToId !== undefined && req.user.role !== 'PRODUCER') {
-      const assignee = await prisma.user.findUnique({ where: { id: data.assignedToId } });
+      const assignee = await prisma.user.findUnique({ where: { id: data.assignedToId }, select: { id: true, agencyId: true, role: true } });
       if (!assignee || assignee.agencyId !== sale.agencyId) {
         return res.status(400).json({ success: false, error: 'INVALID_PRODUCER' });
+      }
+      // An Agency Manager may freely move credit between producers, but
+      // reassigning credit involving another Manager or the Agency Owner
+      // needs the same seniority this app already requires for every
+      // other one-account-acts-on-another action (password reset,
+      // deactivation) — canActOnUser, not a flat role check. Owner and
+      // Platform Owner are unconditionally allowed, as elsewhere.
+      if (req.user.role === 'AGENCY_MANAGER') {
+        const currentAssignee = await prisma.user.findUnique({ where: { id: sale.assignedToId }, select: { role: true } });
+        const canReassign = canActOnUser('AGENCY_MANAGER', currentAssignee?.role) && canActOnUser('AGENCY_MANAGER', assignee.role);
+        if (!canReassign) {
+          return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'Reassigning credit involving another manager or the agency owner requires an Agency Owner.' });
+        }
       }
       patch.assignedToId = data.assignedToId;
     }
 
-    const updated = await prisma.sale.update({ where: { id: sale.id }, data: patch });
+    // Re-run the same duplicate check POST uses, excluding this sale
+    // itself, whenever the edit touches a field the check matches on —
+    // never trust a client-side-only check for something this
+    // consequential, same discipline as create.
+    if (DUPLICATE_SENSITIVE_FIELDS.some((key) => data[key] !== undefined)) {
+      const merged = { ...sale, ...patch };
+      const duplicates = await findPossibleDuplicates({
+        agencyId: sale.agencyId, excludeSaleId: sale.id, leadId: sale.leadId,
+        policyNumber: merged.policyNumber, carrier: merged.carrier, policyType: merged.policyType,
+        saleDate: merged.saleDate, firstName: merged.firstName, lastName: merged.lastName, zip: merged.zip,
+      });
+      const hasDuplicates = duplicates.sales.length > 0 || duplicates.historicalRecords.length > 0;
+      if (hasDuplicates && !data.confirmDuplicate) {
+        return res.status(409).json({ success: false, error: 'POSSIBLE_DUPLICATE', message: 'A similar sale already exists. Review and confirm to proceed.', ...duplicates });
+      }
+    }
 
+    // The sale update and its revenue-ledger sync must never drift apart
+    // — paired in one transaction so a premium correction (or a change
+    // that zeroes it out) always lands with its RevenueEvent in the same
+    // commit.
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.sale.update({ where: { id: sale.id }, data: patch });
+      await syncSaleRevenueEvent(tx, u);
+      return u;
+    });
+
+    // Audit only the fields that actually changed, not a full before/
+    // after row dump — directly answers "what changed," matching
+    // agencies.js's own PATCH pattern.
+    const before = Object.fromEntries(Object.keys(patch).map((key) => [key, sale[key]]));
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role, agencyId: sale.agencyId,
       action: 'sale.corrected', entityType: 'Sale', entityId: sale.id,
-      before: sale, after: updated, correlationId: req.correlationId,
+      before, after: patch, correlationId: req.correlationId,
     });
 
     return res.json({ success: true, sale: updated });
@@ -355,9 +412,16 @@ router.post('/:saleId/void', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLAT
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
     }
-    const updated = await prisma.sale.update({
-      where: { id: sale.id },
-      data: { voidedAt: new Date(), voidedById: req.user.id, voidReason: parsed.data.voidReason },
+    // Paired in one transaction, same as PATCH above — voiding a sale
+    // must remove its revenue contribution in the same commit, never
+    // leave a stale RevenueEvent behind.
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.sale.update({
+        where: { id: sale.id },
+        data: { voidedAt: new Date(), voidedById: req.user.id, voidReason: parsed.data.voidReason },
+      });
+      await syncSaleRevenueEvent(tx, u);
+      return u;
     });
 
     await recordAudit({

@@ -6,6 +6,7 @@ import { Button, LeadTypeIcon, EmptyState } from '../ui';
 import LeadDetailModal from './LeadDetailModal';
 import BulkLeadUploadBox from './BulkLeadUploadBox';
 import AddClosedSaleModal from './AddClosedSaleModal';
+import LeadSearchBox from './LeadSearchBox';
 
 // Extracted out of AgencyOwnerDashboard (Main Stage) into its own "Leads"
 // tab — same real data/actions (bulk upload, manual add, the leads list,
@@ -104,6 +105,10 @@ export default function AgencyLeadsPanel() {
       {showAddSale && (
         <AddClosedSaleModal onClose={() => setShowAddSale(false)} onSaved={load} />
       )}
+
+      <div style={{ marginBottom: 18 }}>
+        <LeadSearchBox />
+      </div>
       {showAddLead && (
         <form onSubmit={addLead} style={s.form}>
           <input style={s.input} placeholder="First name" value={leadForm.firstName} onChange={(e) => setLeadForm({ ...leadForm, firstName: e.target.value })} required />

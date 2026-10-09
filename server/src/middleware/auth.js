@@ -79,7 +79,11 @@ function requireRole(...roles) {
 function scopeAgencyId(req) {
   if (req.user.role === 'PLATFORM_OWNER') {
     // Platform owner may specify an agencyId via query/param/body; otherwise null = all.
-    return req.query.agencyId || req.params.agencyId || req.body.agencyId || null;
+    // req.body is undefined (not {}) for any request express.json() didn't
+    // parse — true for every plain GET this app's own client ever sends,
+    // since it only sets Content-Type/body when there IS a body — so this
+    // must never assume req.body exists.
+    return req.query.agencyId || req.params.agencyId || req.body?.agencyId || null;
   }
   // Every other role is hard-locked to their own agency, no matter what the client sends.
   return req.user.agencyId;

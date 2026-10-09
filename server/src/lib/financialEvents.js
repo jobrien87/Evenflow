@@ -15,27 +15,42 @@ async function recordVendorLeadCost(lead, vendor) {
   });
 }
 
-// Called when a standalone Sale (Add Closed Sale) is created with a real
-// entered premium — the one and only production-crediting path. A Lead
-// reaching SOLD (whole-lead disposition or a per-product quote) and an
-// Opportunity reaching WON are queue/pipeline dispositions only now —
+// Called whenever a standalone Sale (Add Closed Sale) is created,
+// corrected, or voided — the one and only production-crediting path. A
+// Lead reaching SOLD (whole-lead disposition or a per-product quote) and
+// an Opportunity reaching WON are queue/pipeline dispositions only now —
 // neither posts revenue directly; an actual closed sale always goes
 // through here, counted once, real-money-only (never a fabricated
 // commission rate).
-async function recordManualSaleRevenue(sale) {
-  if (!sale.agencyId || !sale.premiumCents) return null;
-  return prisma.revenueEvent.create({
-    data: {
+//
+// Idempotent by design: RevenueEvent.saleId is unique, so this always
+// updates/removes the one existing row for a given Sale rather than ever
+// creating a second one — what makes a repeated/double-submitted
+// correction, or a correction followed by a void, safe against posting
+// duplicate credit. `db` may be the global `prisma` client or a `tx`
+// transaction client, so this can run standalone (create) or paired
+// atomically with the Sale write itself (PATCH, void).
+async function syncSaleRevenueEvent(db, sale) {
+  if (sale.voidedAt || !sale.premiumCents) {
+    await db.revenueEvent.deleteMany({ where: { saleId: sale.id } });
+    return null;
+  }
+  const notes = `Manual closed-sale entry: ${sale.carrier} ${sale.policyType} for ${sale.firstName} ${sale.lastName} (sale ${sale.id})`;
+  return db.revenueEvent.upsert({
+    where: { saleId: sale.id },
+    create: {
       agencyId: sale.agencyId,
+      saleId: sale.id,
       category: 'LEAD_REVENUE',
       sourceType: 'SALE',
       amountCents: sale.premiumCents,
-      notes: `Manual closed-sale entry: ${sale.carrier} ${sale.policyType} for ${sale.firstName} ${sale.lastName} (sale ${sale.id})`,
+      notes,
     },
+    update: { amountCents: sale.premiumCents, notes },
   });
 }
 
 module.exports = {
   recordVendorLeadCost,
-  recordManualSaleRevenue,
+  syncSaleRevenueEvent,
 };
