@@ -70,6 +70,11 @@ services:
       # (no trailing slash). The client calls this URL directly for all /api requests.
       - key: VITE_API_BASE_URL
         sync: false
+      # Where a signed-out user is sent (e.g. https://evenflow.live, once the
+      # marketing site's custom domain is live — falls back to the real
+      # evenflow-marketing Render URL in code if unset). No trailing slash.
+      - key: VITE_MARKETING_URL
+        sync: false
     routes:
       - type: rewrite
         source: /*

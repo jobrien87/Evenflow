@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { useTeamChatUnread } from '../lib/useTeamChatUnread';
+import { goToMarketingSite } from '../lib/marketingUrl';
 import { mainNavForRole, secondaryNavForRole, teamChatNavPath } from './navConfig';
 import { Icon, Button, ComingSoonModal, Logo } from '../ui';
 import NotificationBell from '../pages/NotificationBell';
@@ -79,7 +80,7 @@ export default function Sidebar({ onTakeTour }) {
           style={{ width: '100%' }}
           onClick={async () => {
             await logout();
-            navigate('/login');
+            goToMarketingSite();
           }}
         >
           <Icon name="logout" size={14} style={{ marginRight: 6 }} />

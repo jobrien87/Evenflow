@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
+import { goToMarketingSite } from '../lib/marketingUrl';
 import { mainNavForRole, secondaryNavForRole } from './navConfig';
 import { Icon, Button, ComingSoonModal, Logo } from '../ui';
 
@@ -77,7 +78,7 @@ export default function MobileDrawer({ open, onClose, onTakeTour }) {
             style={{ width: '100%' }}
             onClick={async () => {
               await logout();
-              navigate('/login');
+              goToMarketingSite();
             }}
           >
             <Icon name="logout" size={14} style={{ marginRight: 6 }} />
