@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { useAuth } from './lib/AuthContext';
 import { basePathForRole } from './layout/navConfig';
 import RoleGate from './layout/RoleGate';
@@ -33,6 +33,8 @@ import GoalsPanel from './pages/GoalsPanel';
 import RosterSettingsPanel from './pages/RosterSettingsPanel';
 import RecordStorePanel from './pages/RecordStorePanel';
 import RecordStoreAdminPanel from './pages/RecordStoreAdminPanel';
+import HrDashboardPage from './pages/hr/HrDashboardPage';
+import HrMyProfilePage from './pages/hr/HrMyProfilePage';
 
 import AgenciesPanel from './pages/AgenciesPanel';
 import AgencyDetailPage from './pages/AgencyDetailPage';
@@ -56,6 +58,14 @@ function RequireAuth() {
 function RoleRedirect() {
   const { user } = useAuth();
   return <Navigate to={basePathForRole(user?.role)} replace />;
+}
+
+// Platform Owner's per-agency Backstage HR view — the agencyId comes from
+// the URL (reached via the "BACKSTAGE HR →" link on AgencyDetailPage),
+// since a Platform Owner has no single agency of their own to default to.
+function PlatformAgencyHr() {
+  const { agencyId } = useParams();
+  return <HrDashboardPage agencyId={agencyId} />;
 }
 
 // Drills, Call Coaching, and Training all live inside Sales Studio now,
@@ -97,6 +107,7 @@ export default function App() {
           <Route path="producer/moshpit" element={<MoshpitPanel />} />
           <Route path="producer/my-leads" element={<MyLeadsPanel />} />
           <Route path="producer/goals" element={<GoalsPanel />} />
+          <Route path="producer/my-hr" element={<HrMyProfilePage />} />
           <Route path="producer/break-room" element={<BreakRoomPanel />} />
           <Route path="producer/break-room/play/:gameType" element={<BreakRoomPlayPage />} />
         </Route>
@@ -122,6 +133,7 @@ export default function App() {
           <Route path="agency/goals" element={<GoalsPanel />} />
           <Route path="agency/billboard" element={<BillboardPanel />} />
           <Route path="agency/record-store" element={<RecordStorePanel />} />
+          <Route path="agency/hr" element={<HrDashboardPage />} />
           <Route path="agency/producers/:userId" element={<ProducerDetailPage />} />
           <Route path="agency/sales-studio/call-scoring/:userId" element={<CallScoringProfilePage />} />
         </Route>
@@ -137,6 +149,7 @@ export default function App() {
           <Route path="platform/drills/:courseId/:lessonId" element={<DrillDetailPage />} />
           <Route path="platform/tasks" element={<TasksPanel />} />
           <Route path="platform/agencies/:agencyId" element={<AgencyDetailPage />} />
+          <Route path="platform/agencies/:agencyId/hr" element={<PlatformAgencyHr />} />
           <Route path="platform/telemarketers" element={<TelemarketersPanel />} />
           <Route path="platform/financials" element={<FinancialsPanel />} />
           <Route path="platform/support" element={<SupportPanel />} />
@@ -151,6 +164,7 @@ export default function App() {
           <Route path="telemarketer/drills" element={<DrillLibraryPanel />} />
           <Route path="telemarketer/drills/:courseId/:lessonId" element={<DrillDetailPage />} />
           <Route path="telemarketer/tasks" element={<TasksPanel />} />
+          <Route path="telemarketer/my-hr" element={<HrMyProfilePage />} />
           <Route path="telemarketer/break-room" element={<BreakRoomPanel />} />
           <Route path="telemarketer/break-room/play/:gameType" element={<BreakRoomPlayPage />} />
         </Route>

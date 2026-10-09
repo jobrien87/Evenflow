@@ -39,6 +39,7 @@ const ENTITLEMENT_FIELDS = [
   { key: 'coachingEnabled', label: 'Sales Studio (unlocked)' },
   { key: 'salesStudioGateEnabled', label: 'Sales Studio gate enforced (off = always open)' },
   { key: 'breakRoomEnabled', label: 'Break Room Arcade' },
+  { key: 'hrEnabled', label: 'Backstage HR' },
 ];
 
 export default function AgencyDetailPage() {
@@ -179,6 +180,7 @@ export default function AgencyDetailPage() {
       <SectionHeader
         right={
           <div style={{ display: 'flex', gap: 8 }}>
+            <Link to={`/platform/agencies/${agency.id}/hr`}><Button variant="secondary" size="sm">BACKSTAGE HR →</Button></Link>
             <Button variant="secondary" size="sm" onClick={() => setShowInvite(true)}>+ INVITE OWNER/MANAGER</Button>
             <Button variant="secondary" size="sm" onClick={() => setShowEdit(true)}>EDIT SETTINGS</Button>
           </div>

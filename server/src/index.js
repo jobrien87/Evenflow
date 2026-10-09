@@ -3,6 +3,8 @@ const { checkStaleLeads } = require('./lib/staleLeadReminders');
 const { recomputeAllLeadPriorities } = require('./lib/leadPriorityRecompute');
 const { checkFirstAttemptSla } = require('./lib/firstAttemptSlaAlerts');
 const { checkAgentOfMonth } = require('./lib/agentOfMonth');
+const { startHrAttendanceDetectionJob } = require('./jobs/hrAttendanceDetection');
+const { startHrLeaveAccrualJob } = require('./lib/hrLeaveAccrual');
 
 const PORT = process.env.PORT || 4000;
 
@@ -37,3 +39,13 @@ setInterval(() => {
 setInterval(() => {
   checkAgentOfMonth().catch((err) => console.error('[agentOfMonth] check failed', err.message));
 }, 6 * 60 * 60 * 1000);
+
+// Backstage HR — read-only TimeClockEntry anomaly detection (forgotten
+// clock-outs only, in Part B's scope). See jobs/hrAttendanceDetection.js.
+startHrAttendanceDetectionJob();
+
+// Backstage HR Phase 1 Part C — idempotent leave-accrual posting. See
+// lib/hrLeaveAccrual.js; a deterministic idempotencyKey means a redundant
+// hourly check just confirms "already posted" and no-ops, same pattern
+// as agentOfMonth.js above.
+startHrLeaveAccrualJob();

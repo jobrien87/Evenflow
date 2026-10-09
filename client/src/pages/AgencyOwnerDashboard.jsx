@@ -196,8 +196,11 @@ export default function AgencyOwnerDashboard() {
 
       <section style={s.section}>
         <div style={s.settingsRow}>
-          <Button variant="primary" size="sm" onClick={() => setShowAnnounce(true)}>+ ANNOUNCEMENT</Button>
-          <Button variant="secondary" size="sm" onClick={() => setShowSettings(true)}>AGENCY SETTINGS</Button>
+          <Button variant="secondary" size="sm" onClick={() => navigate('/agency/hr')}>BACKSTAGE HR</Button>
+          <div style={s.settingsRowRight}>
+            <Button variant="primary" size="sm" onClick={() => setShowAnnounce(true)}>+ ANNOUNCEMENT</Button>
+            <Button variant="secondary" size="sm" onClick={() => setShowSettings(true)}>AGENCY SETTINGS</Button>
+          </div>
         </div>
         <div style={isMobile ? s.topStacked : s.topSplit}>
           <FlowScoreCard scope="agency" agencyId={user?.agencyId} title="AGENCY FLOW SCORE" onViewReport={() => setShowReport(true)} />
@@ -407,7 +410,8 @@ const s = {
   editUserError: { color: 'var(--danger)', fontSize: 12, width: '100%', marginTop: 4 },
   hint: { color: 'var(--text-muted)', fontSize: 12, marginBottom: 10 },
   section: { marginBottom: 32 },
-  settingsRow: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginBottom: 8 },
+  settingsRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8 },
+  settingsRowRight: { display: 'flex', gap: 8 },
   topSplit: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'stretch' },
   topStacked: { display: 'flex', flexDirection: 'column', gap: 20 },
   inlineEditForm: { display: 'flex', gap: 8, alignItems: 'center', padding: '8px 14px', background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 8, marginTop: -4, marginBottom: 8 },
