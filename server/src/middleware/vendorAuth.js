@@ -31,4 +31,18 @@ async function requireVendorAuth(req, res, next) {
   next();
 }
 
-module.exports = { requireVendorAuth };
+// Scopes a vendor's credential to exactly one inbound contract (lead POST
+// vs. appointment-booking webhook) so a leaked/misused key for one can
+// never authenticate the other — least privilege, defense in depth on top
+// of the key itself already being vendor-scoped. Must run after
+// requireVendorAuth (reads req.vendor).
+function requireIntegrationType(type) {
+  return (req, res, next) => {
+    if (req.vendor.integrationType !== type) {
+      return res.status(403).json({ success: false, error: 'WRONG_INTEGRATION_TYPE', message: `This credential is not authorized for this endpoint — it is scoped to integration type ${req.vendor.integrationType}, not ${type}.` });
+    }
+    next();
+  };
+}
+
+module.exports = { requireVendorAuth, requireIntegrationType };

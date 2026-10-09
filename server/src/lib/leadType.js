@@ -11,8 +11,13 @@ const VENDOR_CATEGORY_TO_LEAD_TYPE = {
   OTHER: 'MANUAL',
 };
 
-function deriveLeadType({ isLiveTransfer, vendorCategory }) {
+function deriveLeadType({ isLiveTransfer, vendorCategory, vendorIntegrationType }) {
   if (isLiveTransfer) return 'TRANSFER';
+  // Checked before the category map: a vendor backed by an external
+  // calendar/booking webhook (e.g. HighLevel) is identified by its
+  // booking channel, not its marketing category — regardless of what
+  // VendorCategory it's otherwise configured with.
+  if (vendorIntegrationType === 'APPOINTMENT_WEBHOOK') return 'AI_APPOINTMENT';
   if (vendorCategory) return VENDOR_CATEGORY_TO_LEAD_TYPE[vendorCategory] || 'MANUAL';
   return 'MANUAL';
 }

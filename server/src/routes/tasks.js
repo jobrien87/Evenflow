@@ -130,6 +130,22 @@ router.post('/:taskId/complete', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', '
 
     const updated = await prisma.task.update({ where: { id: task.id }, data });
 
+    // Mirror a COMPLETED/CANCELLED task onto its linked Appointment, if
+    // any — keeps the two in sync without ever touching Lead.status or
+    // any production/revenue path. A SNOOZED task has no Appointment
+    // equivalent, so it's left alone.
+    if (parsed.data.status === 'COMPLETED' || parsed.data.status === 'CANCELLED') {
+      const linkedAppointment = await prisma.appointment.findUnique({ where: { taskId: task.id }, select: { id: true } });
+      if (linkedAppointment) {
+        await prisma.appointment.update({
+          where: { id: linkedAppointment.id },
+          data: parsed.data.status === 'COMPLETED'
+            ? { status: 'COMPLETED' }
+            : { status: 'CANCELLED', cancelledAt: new Date() },
+        });
+      }
+    }
+
     await recordAudit({
       actorId: req.user.id,
       actorRole: req.user.role,

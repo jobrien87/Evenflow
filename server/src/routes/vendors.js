@@ -4,7 +4,7 @@ const { prisma } = require('../lib/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { generateCredential } = require('../lib/vendorAuth');
-const { buildPostingInstructions } = require('../lib/postingInstructions');
+const { buildPostingInstructions, buildAppointmentWebhookInstructions } = require('../lib/postingInstructions');
 const { sendVendorPostingEmail } = require('../lib/email');
 const { notifyAgencyOwners } = require('../lib/notifications');
 
@@ -57,6 +57,17 @@ router.get('/', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'),
 });
 
 const VENDOR_CATEGORIES = ['PAID_AD', 'DIRECT_MAIL', 'META_AD', 'INTERNET', 'OTHER'];
+const VENDOR_INTEGRATION_TYPES = ['LEAD_POST', 'APPOINTMENT_WEBHOOK'];
+
+// Picks the right vendor-facing setup doc by integrationType — a
+// lead-POST vendor and an appointment-webhook vendor have entirely
+// different endpoints/payload shapes, so there are two builders, never
+// one parameterized hack.
+function instructionsFor(vendor, credential, appApiUrl) {
+  return vendor.integrationType === 'APPOINTMENT_WEBHOOK'
+    ? buildAppointmentWebhookInstructions({ vendor, credential, appApiUrl })
+    : buildPostingInstructions({ vendor, credential, appApiUrl });
+}
 
 const createVendorSchema = z.object({
   agencyId: z.string().uuid().optional(),
@@ -70,6 +81,20 @@ const createVendorSchema = z.object({
   // inherits this as its Lead.leadType (see lib/leadType.js), which drives
   // the configurable priority queue (Agency.priorityRules).
   category: z.enum(VENDOR_CATEGORIES).optional(),
+  // Which inbound contract this vendor's credential may authenticate
+  // against — default LEAD_POST preserves every existing caller's
+  // behavior. APPOINTMENT_WEBHOOK is for a calendar/booking integration
+  // (e.g. HighLevel); highLevelLocationId/highLevelCalendarId are only
+  // meaningful (and enforced) for that type.
+  integrationType: z.enum(VENDOR_INTEGRATION_TYPES).optional(),
+  highLevelLocationId: z.string().min(1).optional(),
+  highLevelCalendarId: z.string().min(1).optional(),
+  // When true, the vendor/source record is created WITHOUT generating or
+  // emailing any credential — the source classification and routing
+  // record exist and are fully usable immediately; credential issuance is
+  // deferred to the separate, explicitly-gated POST /:id/generate-credential
+  // call. Default false preserves today's existing one-step behavior.
+  deferCredential: z.boolean().optional().default(false),
 });
 
 router.post('/', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res, next) => {
@@ -91,42 +116,66 @@ router.post('/', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res,
       const { valid } = await validateSelectedAgentIds(agencyId, selectedAgentIds);
       if (!valid) return res.status(400).json({ success: false, error: 'INVALID_AGENTS', message: 'One or more selected agents are not active producers in this agency.' });
     }
+    const integrationType = parsed.data.integrationType || 'LEAD_POST';
+
+    const vendorData = {
+      name: parsed.data.name,
+      email: parsed.data.email,
+      agencyId,
+      product: parsed.data.product,
+      status: 'PENDING',
+      createdById: req.user.id,
+      costPerLeadCents: parsed.data.costPerLeadCents ?? null,
+      distributionMode,
+      selectedAgentIds,
+      category,
+      integrationType,
+      highLevelLocationId: parsed.data.highLevelLocationId ?? null,
+      highLevelCalendarId: parsed.data.highLevelCalendarId ?? null,
+    };
+
+    // deferCredential: create only the Vendor row — the source
+    // classification and routing record is immediately real and usable
+    // (visible in the vendor list, assignable as a Lead.vendorId, used
+    // for routing/reporting) with zero VendorCredential row ever created.
+    // No key is generated and no email is sent. Credential issuance is
+    // isolated to the separate, explicitly-gated POST /:id/generate-credential
+    // call below — never a side effect of this route.
+    if (parsed.data.deferCredential) {
+      const vendor = await prisma.vendor.create({ data: vendorData });
+      await recordAudit({
+        actorId: req.user.id, actorRole: req.user.role, agencyId,
+        action: 'vendor.created', entityType: 'Vendor', entityId: vendor.id,
+        after: { name: vendor.name, product: vendor.product, integrationType }, correlationId: req.correlationId,
+      });
+      return res.status(201).json({
+        success: true,
+        vendor,
+        apiKey: null,
+        instructions: null,
+        credentialDeferred: true,
+        emailStatus: 'DEFERRED',
+      });
+    }
 
     const { prefix, rawKey, secretHash } = generateCredential();
 
     const { vendor, credential } = await prisma.$transaction(async (tx) => {
-      const vendor = await tx.vendor.create({
-        data: {
-          name: parsed.data.name,
-          email: parsed.data.email,
-          agencyId,
-          product: parsed.data.product,
-          status: 'PENDING',
-          createdById: req.user.id,
-          costPerLeadCents: parsed.data.costPerLeadCents ?? null,
-          distributionMode,
-          selectedAgentIds,
-          category,
-        },
-      });
+      const vendor = await tx.vendor.create({ data: vendorData });
       const credential = await tx.vendorCredential.create({
         data: { vendorId: vendor.id, keyPrefix: prefix, secretHash },
       });
       return { vendor, credential };
     });
 
-    const instructions = buildPostingInstructions({
-      vendor,
-      credential: { rawKey },
-      appApiUrl: process.env.SERVER_URL || 'http://localhost:4000',
-    });
+    const instructions = instructionsFor(vendor, { rawKey }, process.env.SERVER_URL || 'http://localhost:4000');
 
     const emailResult = await sendVendorPostingEmail({ to: parsed.data.email, instructions });
 
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role, agencyId,
       action: 'vendor.created', entityType: 'Vendor', entityId: vendor.id,
-      after: { name: vendor.name, product: vendor.product }, correlationId: req.correlationId,
+      after: { name: vendor.name, product: vendor.product, integrationType }, correlationId: req.correlationId,
     });
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role, agencyId,
@@ -156,7 +205,7 @@ router.get('/:id', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER
     if (req.user.role !== 'PLATFORM_OWNER' && vendor.agencyId !== req.user.agencyId) {
       return res.status(403).json({ success: false, error: 'FORBIDDEN' });
     }
-    const instructions = buildPostingInstructions({ vendor, credential: null, appApiUrl: process.env.SERVER_URL || 'http://localhost:4000' });
+    const instructions = instructionsFor(vendor, null, process.env.SERVER_URL || 'http://localhost:4000');
     return res.json({ success: true, vendor, instructions });
   } catch (err) {
     next(err);
@@ -183,6 +232,43 @@ router.post('/:id/rotate-credential', requireRole('AGENCY_OWNER', 'PLATFORM_OWNE
     });
 
     return res.json({ success: true, apiKey: rawKey, credentialId: credential.id });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// The one, explicitly-gated place a credential is ever generated and
+// emailed for a vendor created with deferCredential:true. Distinct from
+// /rotate-credential (which replaces an existing one) — this route is
+// strictly for a vendor's FIRST-ever credential issuance, so the two
+// never get confused in the audit trail. Never triggered automatically
+// by anything else — only a direct call to this route, which only
+// happens when a human explicitly confirms it (e.g. clicking "Generate
+// & email API key" in the UI).
+router.post('/:id/generate-credential', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const vendor = await prisma.vendor.findUnique({ where: { id: req.params.id }, include: { credentials: { select: { id: true } } } });
+    if (!vendor) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (req.user.role !== 'PLATFORM_OWNER' && vendor.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    if (vendor.credentials.length > 0) {
+      return res.status(409).json({ success: false, error: 'CREDENTIAL_ALREADY_EXISTS', message: 'This vendor already has a credential — use rotate-credential instead.' });
+    }
+
+    const { prefix, rawKey, secretHash } = generateCredential();
+    const credential = await prisma.vendorCredential.create({ data: { vendorId: vendor.id, keyPrefix: prefix, secretHash } });
+
+    const instructions = instructionsFor(vendor, { rawKey }, process.env.SERVER_URL || 'http://localhost:4000');
+    const emailResult = await sendVendorPostingEmail({ to: vendor.email, instructions });
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: vendor.agencyId,
+      action: 'vendor.credential_generated', entityType: 'VendorCredential', entityId: credential.id,
+      correlationId: req.correlationId,
+    });
+
+    return res.status(201).json({ success: true, apiKey: rawKey, instructions, emailStatus: emailResult.status });
   } catch (err) {
     next(err);
   }

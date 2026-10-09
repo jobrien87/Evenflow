@@ -104,3 +104,69 @@ test('a MOSHPIT vendor cannot be PATCHed to category PAID_AD while staying MOSHP
   });
   assert.equal(patchRes.status, 400);
 });
+
+// Covers the "After Hours Appts" source-setup requirement: the source
+// classification/routing record can be created and is immediately real
+// and usable, with zero VendorCredential row ever created — credential
+// generation is a separate, explicitly-gated call.
+test('deferCredential:true creates only the Vendor row — zero credentials, no email, and the record is immediately usable', async () => {
+  const res = await fetch(`${baseUrl}/api/vendors`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({
+      name: 'After Hours Appts', email: 'josh@yield-marketing.com', product: 'General', category: 'OTHER',
+      distributionMode: 'SELECTED_AGENTS', integrationType: 'APPOINTMENT_WEBHOOK',
+      highLevelLocationId: 'QeKX5JBMkzbS89a21NNp', highLevelCalendarId: 'dMUoqFqTICQSgdTlWixO',
+      deferCredential: true,
+    }),
+  });
+  assert.equal(res.status, 201);
+  const body = await res.json();
+  assert.equal(body.apiKey, null, 'no raw key may ever be returned for a deferred vendor');
+  assert.equal(body.instructions, null);
+  assert.equal(body.credentialDeferred, true);
+  assert.equal(body.emailStatus, 'DEFERRED');
+  assert.equal(body.vendor.integrationType, 'APPOINTMENT_WEBHOOK');
+  assert.equal(body.vendor.highLevelLocationId, 'QeKX5JBMkzbS89a21NNp');
+
+  const credCount = await prisma.vendorCredential.count({ where: { vendorId: body.vendor.id } });
+  assert.equal(credCount, 0, 'deferCredential must create zero VendorCredential rows');
+
+  // The source record is immediately real/usable regardless of the
+  // missing credential — visible via GET /vendors/:id.
+  const getRes = await fetch(`${baseUrl}/api/vendors/${body.vendor.id}`, { headers: { Cookie: ownerCookie } });
+  assert.equal(getRes.status, 200);
+  const getBody = await getRes.json();
+  assert.equal(getBody.vendor.id, body.vendor.id);
+  assert.equal(getBody.instructions.integrationType, 'APPOINTMENT_WEBHOOK', 'instructions must describe the appointment-webhook contract, not the lead-POST one, for this vendor');
+
+  const auditRow = await prisma.auditEvent.findFirst({ where: { entityId: body.vendor.id, action: 'vendor.created' } });
+  assert.ok(auditRow, 'vendor.created must still be audited even when credential issuance is deferred');
+  const credentialAudit = await prisma.auditEvent.findFirst({ where: { entityId: body.vendor.id, action: 'vendor.credential_generated' } });
+  assert.equal(credentialAudit, null, 'no credential_generated audit entry may exist until the separate generate-credential call');
+});
+
+test('POST /:id/generate-credential is the one place a credential is ever issued for a deferred vendor; a second call 409s', async () => {
+  const createRes = await fetch(`${baseUrl}/api/vendors`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ name: 'Deferred Cred Vendor', email: `dcv-${suffix}@test.local`, product: 'General', deferCredential: true }),
+  });
+  const created = await createRes.json();
+  assert.equal(await prisma.vendorCredential.count({ where: { vendorId: created.vendor.id } }), 0);
+
+  const genRes = await fetch(`${baseUrl}/api/vendors/${created.vendor.id}/generate-credential`, {
+    method: 'POST', headers: { Cookie: ownerCookie },
+  });
+  assert.equal(genRes.status, 201);
+  const genBody = await genRes.json();
+  assert.ok(genBody.apiKey, 'a real raw key must be returned exactly once, here');
+  assert.equal(await prisma.vendorCredential.count({ where: { vendorId: created.vendor.id } }), 1);
+
+  const secondRes = await fetch(`${baseUrl}/api/vendors/${created.vendor.id}/generate-credential`, {
+    method: 'POST', headers: { Cookie: ownerCookie },
+  });
+  assert.equal(secondRes.status, 409);
+  assert.equal((await secondRes.json()).error, 'CREDENTIAL_ALREADY_EXISTS');
+  assert.equal(await prisma.vendorCredential.count({ where: { vendorId: created.vendor.id } }), 1, 'the 409 must not create a second credential');
+});

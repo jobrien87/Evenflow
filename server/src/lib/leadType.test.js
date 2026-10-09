@@ -15,6 +15,17 @@ test('deriveLeadType: falls back to MANUAL with no signal at all', () => {
   assert.equal(deriveLeadType({}), 'MANUAL');
 });
 
+test('deriveLeadType: an APPOINTMENT_WEBHOOK vendor always yields AI_APPOINTMENT, regardless of category, unless it is a live transfer', () => {
+  assert.equal(deriveLeadType({ vendorIntegrationType: 'APPOINTMENT_WEBHOOK', vendorCategory: 'OTHER' }), 'AI_APPOINTMENT');
+  assert.equal(deriveLeadType({ vendorIntegrationType: 'APPOINTMENT_WEBHOOK', vendorCategory: 'PAID_AD' }), 'AI_APPOINTMENT');
+  assert.equal(deriveLeadType({ isLiveTransfer: true, vendorIntegrationType: 'APPOINTMENT_WEBHOOK' }), 'TRANSFER');
+});
+
+test('deriveLeadType: a plain LEAD_POST vendor (or no integrationType at all) is unaffected by the AI_APPOINTMENT branch', () => {
+  assert.equal(deriveLeadType({ vendorIntegrationType: 'LEAD_POST', vendorCategory: 'PAID_AD' }), 'PAID_AD');
+  assert.equal(deriveLeadType({ vendorCategory: 'OTHER' }), 'MANUAL');
+});
+
 test('applyBulkUploadCategory: Winback/Cross-Sell set leadTypeOverride, never product', () => {
   assert.deepEqual(applyBulkUploadCategory('WINBACK'), { leadTypeOverride: 'WINBACK' });
   assert.deepEqual(applyBulkUploadCategory('CROSS_SELL'), { leadTypeOverride: 'CROSS_SELL' });

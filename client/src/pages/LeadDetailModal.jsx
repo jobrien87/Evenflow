@@ -369,6 +369,7 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
           )}
         </div>
         <div style={s.headerBadges}>
+          {lead.leadType === 'AI_APPOINTMENT' && <Badge tone="accent">After Hours Appts</Badge>}
           {lead.product && <Badge tone="neutral">{lead.product}</Badge>}
           {lead.crossSellHaveProduct && (
             <Badge tone="neutral">Has {PRODUCT_META[lead.crossSellHaveProduct]?.label || lead.crossSellHaveProduct}</Badge>

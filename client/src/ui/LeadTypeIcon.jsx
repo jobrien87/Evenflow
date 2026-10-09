@@ -28,7 +28,7 @@ export default function LeadTypeIcon({ type, product, crossSellHaveProduct, size
     if (needMeta) {
       const title = `Cross-Sell — ${needMeta.label}${haveMeta ? ` (has ${haveMeta.label})` : ''}`;
       return (
-        <span title={title} style={{ display: 'inline-flex', alignItems: 'center', position: 'relative', color: tone.fg, flexShrink: 0, ...style }}>
+        <span role="img" aria-label={title} title={title} style={{ display: 'inline-flex', alignItems: 'center', position: 'relative', color: tone.fg, flexShrink: 0, ...style }}>
           <Icon name={needMeta.icon} size={size} />
           <span style={{ position: 'absolute', right: -4, bottom: -4, color: 'var(--accent)', background: 'var(--bg-elevated)', borderRadius: '50%', display: 'inline-flex', padding: 1 }}>
             <Icon name="exchange" size={Math.round(size * 0.6)} />
@@ -39,7 +39,7 @@ export default function LeadTypeIcon({ type, product, crossSellHaveProduct, size
   }
 
   return (
-    <span title={meta.label} style={{ display: 'inline-flex', alignItems: 'center', color: tone.fg, flexShrink: 0, ...style }}>
+    <span role="img" aria-label={meta.label} title={meta.label} style={{ display: 'inline-flex', alignItems: 'center', color: tone.fg, flexShrink: 0, ...style }}>
       <Icon name={meta.icon} size={size} />
     </span>
   );

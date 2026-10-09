@@ -13,6 +13,10 @@ export const LEAD_TYPE_META = {
   MANUAL: { label: 'Manual / Organic', icon: 'pencil', tone: 'neutral' },
   WINBACK: { label: 'Winback', icon: 'refresh', tone: 'accent' },
   CROSS_SELL: { label: 'Cross-Sell', icon: 'tag', tone: 'accent' },
+  // AI-booked phone appointment synced in from an external calendar
+  // provider (After Hours Appts) — one fixed color everywhere this type
+  // renders, per the accessible-icon convention this file already uses.
+  AI_APPOINTMENT: { label: 'After Hours Appts', icon: 'calendar', tone: 'accent' },
 };
 
 export const LEAD_TYPE_LABELS = Object.fromEntries(

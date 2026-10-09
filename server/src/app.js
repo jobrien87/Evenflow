@@ -20,6 +20,8 @@ const telemarketerRoutes = require('./routes/telemarketers');
 const transferRoutes = require('./routes/transfers');
 const vendorRoutes = require('./routes/vendors');
 const vendorApiRoutes = require('./routes/vendorApi');
+const highlevelWebhookRoutes = require('./routes/highlevelWebhook');
+const appointmentRoutes = require('./routes/appointments');
 const financialRoutes = require('./routes/financials');
 const edRoutes = require('./routes/ed');
 const supportRoutes = require('./routes/support');
@@ -78,6 +80,7 @@ app.use('/api/start-my-day', startMyDayRoutes);
 app.use('/api/telemarketers', telemarketerRoutes);
 app.use('/api/transfers', transferRoutes);
 app.use('/api/vendors', vendorRoutes);
+app.use('/api/appointments', appointmentRoutes);
 app.use('/api/offices', officeRoutes);
 app.use('/api/financials', financialRoutes);
 app.use('/api/ed', edRoutes);
@@ -100,6 +103,7 @@ app.use('/api/break-room', breakRoomRoutes);
 app.use('/api/sales', salesRoutes);
 // Public, vendor-authenticated Direct POST API — versioned per spec.
 app.use('/api/v1', vendorApiRoutes);
+app.use('/api/v1', highlevelWebhookRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ success: false, error: 'NOT_FOUND', correlationId: req.correlationId });

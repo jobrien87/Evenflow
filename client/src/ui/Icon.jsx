@@ -58,6 +58,10 @@ const PATHS = {
   // cross-sell combo badge (distinct from transfer's train-signal shape
   // and refresh's circular arrows).
   exchange: 'M3 8h14m0 0l-4-4m4 4l-4 4M21 16H7m0 0l4-4m-4 4l4 4',
+  // A calendar/date-book glyph — box outline, a horizontal divider under
+  // the header row, and two binding tabs — used to mark a lead whose
+  // first contact was an AI-booked phone appointment (After Hours Appts).
+  calendar: 'M4 5h16v15H4V5zM4 10h16M8 3v4M16 3v4',
 };
 
 export default function Icon({ name, size = 18, style }) {

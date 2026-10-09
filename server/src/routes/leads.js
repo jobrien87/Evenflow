@@ -1318,6 +1318,24 @@ router.post('/:leadId/reassign', async (req, res, next) => {
     if (!lead) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
     if (forbidden) return res.status(403).json({ success: false, error: 'FORBIDDEN' });
 
+    // A lead with an open (non-terminal) Appointment must only ever be
+    // reassigned through POST /api/appointments/:appointmentId/reassign,
+    // which keeps Task/Appointment/Lead assignment in lockstep — this
+    // broader, older route has no appointment-sync logic at all, and
+    // letting both routes write Lead.assignedToId independently risks the
+    // three going out of sync.
+    const openAppointment = await prisma.appointment.findFirst({
+      where: { leadId: lead.id, status: { notIn: ['CANCELLED', 'COMPLETED'] } },
+      select: { id: true },
+    });
+    if (openAppointment) {
+      return res.status(409).json({
+        success: false, error: 'HAS_OPEN_APPOINTMENT',
+        message: 'This lead has an open appointment — use POST /api/appointments/:appointmentId/reassign instead.',
+        appointmentId: openAppointment.id,
+      });
+    }
+
     const previousAssigneeId = lead.assignedToId;
     if (!previousAssigneeId) {
       return res.status(400).json({ success: false, error: 'NOT_ASSIGNED', message: 'This lead has no current assignee — use claim instead.' });

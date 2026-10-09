@@ -2,7 +2,7 @@ const express = require('express');
 const { z } = require('zod');
 const { v4: uuidv4 } = require('uuid');
 const { prisma } = require('../lib/db');
-const { requireVendorAuth } = require('../middleware/vendorAuth');
+const { requireVendorAuth, requireIntegrationType } = require('../middleware/vendorAuth');
 const { checkVendorRateLimit } = require('../lib/vendorRateLimit');
 const { normalizePhone, normalizeEmail } = require('../lib/normalize');
 const { scoreLead } = require('../lib/priority');
@@ -51,8 +51,10 @@ async function logTransaction({ vendorId, method, endpoint, statusCode, startedA
   }
 }
 
-// POST /api/v1/leads — the Direct POST endpoint.
-router.post('/leads', requireVendorAuth, async (req, res) => {
+// POST /api/v1/leads — the Direct POST endpoint. Scoped to LEAD_POST
+// credentials only — an APPOINTMENT_WEBHOOK vendor's key (e.g. HighLevel)
+// must never be usable here, and vice versa (see requireIntegrationType).
+router.post('/leads', requireVendorAuth, requireIntegrationType('LEAD_POST'), async (req, res) => {
   const startedAt = Date.now();
   const correlationId = req.correlationId || uuidv4();
   const endpoint = '/api/v1/leads';

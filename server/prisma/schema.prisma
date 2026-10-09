@@ -196,12 +196,28 @@ enum VendorCategory {
   OTHER
 }
 
+// Scopes a Vendor's credential to exactly one inbound contract so a
+// leaked/misused key for one can never authenticate the other (least
+// privilege, defense in depth — not the only guard). Default LEAD_POST
+// preserves every existing Vendor row's behavior unchanged; a vendor
+// backed by a calendar/booking webhook (e.g. HighLevel) is created with
+// APPOINTMENT_WEBHOOK instead.
+enum VendorIntegrationType {
+  LEAD_POST
+  APPOINTMENT_WEBHOOK
+}
+
 // Coarse lead-source category the configurable priority engine
 // (lib/priority.js) ranks against Agency.priorityRules.typeRank. Derived
 // automatically at creation — never picked by hand. INTERNET: vendor-API
 // real-time internet leads (Vendor.category INTERNET). REFERRAL: a lead
 // referred by an existing customer, set via the bulk-upload category
-// picker or a manual disposition, never vendor-derived.
+// picker or a manual disposition, never vendor-derived. AI_APPOINTMENT:
+// a lead whose first contact was an AI-booked phone appointment synced in
+// from an external calendar provider (Vendor.integrationType
+// APPOINTMENT_WEBHOOK) — set regardless of the vendor's category, since
+// the booking channel is what identifies this lead type, not a marketing
+// category.
 enum LeadType {
   TRANSFER
   REFERRAL
@@ -212,6 +228,7 @@ enum LeadType {
   MANUAL
   WINBACK
   CROSS_SELL
+  AI_APPOINTMENT
 }
 
 enum RevenueCategory {
@@ -384,6 +401,8 @@ model User {
   officeAlphaAssignments    OfficeAlphaAssignment[]
   salesAssigned             Sale[]                    @relation("SaleAssignedTo")
   salesCreated              Sale[]                    @relation("SaleCreatedBy")
+  appointmentsHosted        Appointment[]             @relation("AppointmentHost")
+  appointmentsAssigned      Appointment[]             @relation("AppointmentAssignee")
 
   @@index([agencyId])
   @@index([role])
@@ -570,6 +589,7 @@ model Agency {
   breakRoomHighScores      BreakRoomHighScore[]
   breakRoomAchievements    BreakRoomAchievement[]
   sales                    Sale[]
+  appointments             Appointment[]
 }
 
 enum BoberdooSyncStatus {
@@ -895,6 +915,7 @@ model Lead {
   activities    LeadActivity[]
   productQuotes LeadProductQuote[]
   sales         Sale[]
+  appointments  Appointment[]
 
   @@unique([vendorId, externalLeadId])
   @@index([agencyId])
@@ -1226,10 +1247,141 @@ model Task {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
+  // Virtual back-relation only — the physical FK lives on Appointment.taskId
+  // (see below), so Task itself gains no new column for the 6 other task
+  // types that will always have no appointment.
+  appointment Appointment?
+
   @@index([agencyId])
   @@index([assignedToId])
   @@index([status])
   @@index([dueAt])
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CANCELLED
+  NO_SHOW
+  COMPLETED
+}
+
+// Mirrors Agency.boberdooSyncStatus's existing "local state can drift from
+// a real external system" precedent. NEEDS_ATTENTION is what GET
+// /appointments surfaces to the owner for resolution — a stale/out-of-
+// order webhook event, or a booking with no eligible assignee.
+enum AppointmentSyncStatus {
+  OK
+  NEEDS_ATTENTION
+}
+
+// A real booking synced in from an external calendar/booking provider
+// (e.g. HighLevel, via an AI voice agent like Retell). Deliberately a
+// dedicated model rather than fields bolted onto Task: a lead can be
+// rebooked after a cancellation/no-show (multiple Appointment rows over
+// time, full history preserved), and HighLevel's calendar-host identity
+// is a different concept from EF's internal follow-up assignee — keeping
+// them as separate fields on a dedicated row is what makes "EF
+// reassignment must never silently change the HighLevel host" a
+// structural guarantee rather than a convention to remember.
+model Appointment {
+  id       String @id @default(uuid())
+  agencyId String
+  agency   Agency @relation(fields: [agencyId], references: [id])
+  leadId   String
+  lead     Lead   @relation(fields: [leadId], references: [id])
+  vendorId String
+  vendor   Vendor @relation(fields: [vendorId], references: [id])
+
+  // Appointment owns the FK so Task gets zero new columns (standard
+  // Prisma 1:1 — the owning side holds @relation(fields:...)).
+  taskId String? @unique
+  task   Task?   @relation(fields: [taskId], references: [id])
+
+  // Plain string, matching Lead.source's existing looseness — a second
+  // booking provider never needs a schema migration to be represented.
+  provider           String  @default("highlevel")
+  providerLocationId String
+  providerCalendarId String
+  // HighLevel's own appointment id — identifies ONE booking across
+  // create/reschedule/cancel events; the idempotency key for this row
+  // together with vendorId.
+  providerBookingId String
+  providerContactId String?
+  // A different external id than providerBookingId — one Retell call can
+  // produce one booking, kept separately rather than conflated.
+  retellCallId String?
+
+  startAt         DateTime // UTC
+  endAt           DateTime // UTC
+  timeZone        String   @default("America/New_York")
+  durationMinutes Int      @default(30)
+
+  status         AppointmentStatus @default(SCHEDULED)
+  // Raw HighLevel status string, kept verbatim alongside the normalized
+  // enum above for debugging.
+  providerStatus String?
+  // The resolved "as-of" timestamp of the last event actually APPLIED to
+  // this row — the out-of-order guard. An incoming event with an
+  // earlier-or-equal timestamp is logged (HighLevelWebhookEvent) but never
+  // allowed to regress status/times, regardless of HTTP arrival order.
+  providerUpdatedAt DateTime?
+
+  // Written ONLY by the webhook handler, never by the EF reassignment
+  // route (routes/appointments.js) — the structural guarantee behind
+  // "must not silently change the HighLevel host."
+  hostUserId       String?
+  hostUser         User?   @relation("AppointmentHost", fields: [hostUserId], references: [id])
+  hostExternalName String?
+
+  // EF-side internal follow-up ownership — mirrored onto
+  // Task.assignedToId and Lead.assignedToId atomically on reassignment.
+  // Deliberately a separate concept from hostUserId above.
+  assignedToId String?
+  assignedTo   User?   @relation("AppointmentAssignee", fields: [assignedToId], references: [id])
+
+  syncStatus AppointmentSyncStatus @default(OK)
+  // e.g. 'NO_ELIGIBLE_ASSIGNEE', 'STALE_EVENT_IGNORED', 'WEAK_CONTACT_MATCH'
+  syncIssue String?
+
+  createdAt     DateTime  @default(now()) // immutable intake timestamp
+  updatedAt     DateTime  @updatedAt
+  cancelledAt   DateTime?
+  rescheduledAt DateTime?
+
+  @@unique([vendorId, providerBookingId])
+  @@index([agencyId])
+  @@index([leadId])
+  @@index([vendorId])
+  @@index([assignedToId])
+  @@index([status])
+  @@index([syncStatus])
+  @@index([startAt])
+}
+
+// Idempotency + forensic ledger for inbound HighLevel appointment
+// webhooks. Deviates from StripeEvent's minimal {id,type,processedAt}
+// shape deliberately: HighLevel offers no dashboard to re-fetch a failed
+// event, so this row must itself be the durable, owner-visible failure
+// record a "failed syncs must be visible, not silently lost" requirement
+// needs.
+model HighLevelWebhookEvent {
+  id                String   @id // HighLevel's own event id when present, else a deterministic fingerprint (see routes/highlevelWebhook.js)
+  vendorId          String
+  vendor            Vendor   @relation(fields: [vendorId], references: [id])
+  type              String   // raw event_type string, verbatim
+  providerBookingId String?
+  payload           Json     // full raw webhook body
+  receivedAt        DateTime @default(now())
+  // Null = not yet successfully processed; a retried delivery of a
+  // failed/mid-flight event is safely re-attempted since the business
+  // logic (find-or-update keyed on vendorId+providerBookingId) is
+  // convergent, not destructive.
+  processedAt     DateTime?
+  processingError String?
+
+  @@index([vendorId])
+  @@index([providerBookingId])
+  @@index([processedAt])
 }
 
 // A single clock-in-to-clock-out shift, with an optional lunch break inside
@@ -1494,11 +1646,25 @@ model Vendor {
   // vendor inherits this as its Lead.leadType (see createLeadRecord).
   category VendorCategory @default(OTHER)
 
-  credentials       VendorCredential[]
-  leads             Lead[]
-  apiTransactions   ApiTransaction[]
-  costEvents        CostEvent[]
-  historicalRecords HistoricalRecord[]
+  // Which inbound contract this vendor's credential may authenticate
+  // against (see middleware/vendorAuth.js's requireIntegrationType guard).
+  // Default LEAD_POST preserves every existing vendor's behavior.
+  integrationType VendorIntegrationType @default(LEAD_POST)
+  // Only meaningful when integrationType is APPOINTMENT_WEBHOOK — the
+  // exact HighLevel location/calendar this vendor's webhook is scoped to,
+  // enforced (not just documented) on every inbound event so a
+  // mis-pointed or copy-pasted HighLevel workflow can never post
+  // appointments under this vendor's identity for the wrong calendar.
+  highLevelLocationId String?
+  highLevelCalendarId String?
+
+  credentials            VendorCredential[]
+  leads                  Lead[]
+  apiTransactions        ApiTransaction[]
+  costEvents             CostEvent[]
+  historicalRecords      HistoricalRecord[]
+  appointments           Appointment[]
+  highLevelWebhookEvents HighLevelWebhookEvent[]
 
   @@index([agencyId])
 }
