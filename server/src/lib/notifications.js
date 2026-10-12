@@ -18,7 +18,14 @@ async function notifyUser({ userId, agencyId, type, severity = 'INFO', title, bo
     data: { userId, agencyId, type, severity, title, body, relatedEntityType, relatedEntityId },
   });
 
-  const emailEnabled = !pref || pref.emailEnabled;
+  // Team-room messages, stale-lead nudges, and speed-to-lead alerts
+  // belong in the app only, regardless of severity or email preferences.
+  // Lead/Transfer chat and other notification emails keep their existing
+  // behavior, including the recipient's email preference.
+  const inAppOnly = type === 'lead.stale'
+    || type === 'lead.first_attempt_overdue'
+    || (type === 'chat.message' && relatedEntityType === 'AGENCY');
+  const emailEnabled = !inAppOnly && (!pref || pref.emailEnabled);
   if (emailEnabled && isConfigured()) {
     try {
       const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
