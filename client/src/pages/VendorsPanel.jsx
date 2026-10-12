@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import { vendorProductOptions } from '../lib/vendorProducts';
 import { StatTile, BarRow, SectionHeader, Badge } from '../ui';
 
 const VENDOR_CATEGORIES = [
@@ -246,8 +247,8 @@ export default function VendorsPanel() {
         <form onSubmit={submit} style={s.form}>
           <input style={s.input} placeholder="Vendor name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
           <input style={s.input} type="email" placeholder="Vendor email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
-          <select style={s.input} value={form.product} onChange={(e) => setForm({ ...form, product: e.target.value })}>
-            <option>Auto</option><option>Home</option><option>Life</option><option>Health</option>
+          <select aria-label="Vendor product" style={s.input} value={form.product} onChange={(e) => setForm({ ...form, product: e.target.value })}>
+            {vendorProductOptions(form.product).map((product) => <option key={product} value={product}>{product}</option>)}
           </select>
           <select
             style={s.input}
@@ -339,8 +340,8 @@ export default function VendorsPanel() {
             <div style={s.editForm}>
               <input style={s.input} value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} placeholder="Name" />
               <input style={s.input} type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} placeholder="Email" />
-              <select style={s.input} value={editForm.product} onChange={(e) => setEditForm({ ...editForm, product: e.target.value })}>
-                <option>Auto</option><option>Home</option><option>Life</option><option>Health</option>
+              <select aria-label="Edit vendor product" style={s.input} value={editForm.product} onChange={(e) => setEditForm({ ...editForm, product: e.target.value })}>
+                {vendorProductOptions(editForm.product).map((product) => <option key={product} value={product}>{product}</option>)}
               </select>
               <select
                 style={s.input}

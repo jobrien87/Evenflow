@@ -116,7 +116,7 @@ export default function AgencyLeadsPanel() {
           <input style={s.input} placeholder="Phone" value={leadForm.phone} onChange={(e) => setLeadForm({ ...leadForm, phone: e.target.value })} />
           <input style={s.input} type="email" placeholder="Email (optional)" value={leadForm.email} onChange={(e) => setLeadForm({ ...leadForm, email: e.target.value })} />
           <select style={s.input} value={leadForm.product} onChange={(e) => setLeadForm({ ...leadForm, product: e.target.value })}>
-            <option>Auto</option><option>Home</option><option>Home and Auto Bundle</option><option>Life</option><option>Health</option>
+            <option>Auto</option><option>Home</option><option>Home and Auto Bundle</option><option>Life</option><option>Health</option><option>Boat</option><option>Motorcycle</option>
           </select>
           <select style={s.input} value={leadForm.assignedToId} onChange={(e) => setLeadForm({ ...leadForm, assignedToId: e.target.value })}>
             <option value="">Unassigned</option>

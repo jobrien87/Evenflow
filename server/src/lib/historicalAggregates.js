@@ -7,6 +7,7 @@
 // lib/billboard.js, runningReport.js, performanceBreakdown.js) — they are
 // never a second, parallel report surface of their own.
 const { prisma } = require('./db');
+const { reportingProductKey } = require('./products');
 const { zonedYearMonthDay } = require('./timezone');
 
 // recordDate is stored as UTC-midnight-of-calendar-date (see
@@ -142,7 +143,7 @@ async function historicalByProduct({ agencyId, from, to, assignedToId, timeZone 
     // Matches performanceBreakdown.js's own "Unspecified" fallback key, so
     // a historical row with no product merges into the same row as a live
     // lead with no product, rather than showing as a separate bucket.
-    const key = r.product || 'Unspecified';
+    const key = reportingProductKey(r.product);
     if (!byProduct[key]) byProduct[key] = { premiumCents: 0, count: 0 };
     byProduct[key].premiumCents += r.premiumCents || 0;
     byProduct[key].count += 1;

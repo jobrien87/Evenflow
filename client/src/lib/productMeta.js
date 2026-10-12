@@ -9,6 +9,8 @@ export const PRODUCT_META = {
   LIFE: { label: 'Life', icon: 'heart' },
   HEALTH: { label: 'Health', icon: 'pulse' },
   COMMERCIAL: { label: 'Commercial', icon: 'briefcase' },
+  BOAT: { label: 'Boat', icon: 'tag' },
+  MOTORCYCLE: { label: 'Motorcycle', icon: 'tag' },
 };
 
 export const PRODUCTS = Object.keys(PRODUCT_META);

@@ -4,7 +4,7 @@
 // already expects ('Auto', 'Home', 'Life') so a product marked SOLD here
 // feeds the exact same cross-sell gap detection a Transfer-sourced sale
 // already does.
-const PRODUCTS = ['AUTO', 'HOME', 'RENTERS', 'LIFE', 'HEALTH', 'COMMERCIAL'];
+const PRODUCTS = ['AUTO', 'HOME', 'RENTERS', 'LIFE', 'HEALTH', 'COMMERCIAL', 'BOAT', 'MOTORCYCLE'];
 
 const PRODUCT_LABELS = {
   AUTO: 'Auto',
@@ -13,6 +13,19 @@ const PRODUCT_LABELS = {
   LIFE: 'Life',
   HEALTH: 'Health',
   COMMERCIAL: 'Commercial',
+  BOAT: 'Boat',
+  MOTORCYCLE: 'Motorcycle',
 };
 
-module.exports = { PRODUCTS, PRODUCT_LABELS };
+// Read-time grouping only: vendor intake stores exact title-case strings,
+// quote/Sale records store catalog codes, and historical exports can use
+// either. Merge these two known product aliases without rewriting rows,
+// changing API validation, or reclassifying any other product (e.g. SPL).
+function reportingProductKey(product) {
+  const code = typeof product === 'string' ? product.trim().toUpperCase() : '';
+  return code === 'BOAT' || code === 'MOTORCYCLE'
+    ? PRODUCT_LABELS[code]
+    : product || 'Unspecified';
+}
+
+module.exports = { PRODUCTS, PRODUCT_LABELS, reportingProductKey };

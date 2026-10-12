@@ -11,6 +11,7 @@
 // exports. These feed INTO existing report computations — never a second,
 // parallel report surface. A voided Sale is excluded from everything here.
 const { prisma } = require('./db');
+const { reportingProductKey } = require('./products');
 const { zonedYearMonthDay } = require('./timezone');
 
 // Same opt-in Eastern-calendar-day boundary conversion as
@@ -91,7 +92,7 @@ async function salesByProduct({ agencyId, from, to, assignedToId, timeZone }) {
   });
   const byProduct = {};
   for (const r of rows) {
-    const key = r.productFamily || 'Unspecified';
+    const key = reportingProductKey(r.productFamily);
     if (!byProduct[key]) byProduct[key] = { premiumCents: 0, count: 0 };
     byProduct[key].premiumCents += r.premiumCents || 0;
     byProduct[key].count += 1;

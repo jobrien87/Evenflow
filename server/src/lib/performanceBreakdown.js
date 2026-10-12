@@ -8,6 +8,7 @@
 const { prisma } = require('./db');
 const { computeFunnel, pct } = require('./funnelMetrics');
 const { historicalByProduct } = require('./historicalAggregates');
+const { reportingProductKey } = require('./products');
 const { salesByProduct } = require('./manualSaleAggregates');
 
 const QUOTED_OR_BEYOND = ['QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'];
@@ -72,7 +73,7 @@ async function computeProductBreakdown({ agencyId, userId, from, to }) {
 
   const byProduct = new Map();
   for (const lead of leads) {
-    const key = lead.product || 'Unspecified';
+    const key = reportingProductKey(lead.product);
     if (!byProduct.has(key)) byProduct.set(key, []);
     byProduct.get(key).push(lead);
   }

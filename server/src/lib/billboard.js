@@ -7,7 +7,7 @@
 // historicalAggregates.js and merged into the one aggregation pass below.
 
 const { prisma } = require('./db');
-const { PRODUCT_LABELS } = require('./products');
+const { PRODUCT_LABELS, reportingProductKey } = require('./products');
 const { historicalLeadLikeRows } = require('./historicalAggregates');
 const { saleLeadLikeRows } = require('./manualSaleAggregates');
 const { eligibleProducersWhere } = require('./eligibleProducersQuery');
@@ -136,7 +136,7 @@ function aggregateSoldRows(soldLeads, producers) {
       row.premiumCents += premium;
       byProducerMap.set(lead.assignedToId, row);
     }
-    const product = lead.saleProduct || 'Unspecified';
+    const product = reportingProductKey(lead.saleProduct);
     const prow = byProductMap.get(product) || { product, label: PRODUCT_LABELS[product] || product, soldCount: 0, itemCount: 0, unknownItemsCount: 0, premiumCents: 0 };
     prow.soldCount += 1;
     prow.itemCount += items;

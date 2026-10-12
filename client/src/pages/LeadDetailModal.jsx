@@ -132,7 +132,7 @@ const LEAD_STATUSES = [
 const TASK_TYPES = ['FOLLOW_UP', 'CALLBACK', 'APPOINTMENT'];
 const ACTIVITY_TYPES = ['CALL', 'EMAIL', 'TEXT'];
 
-const PRODUCT_ABBR = { AUTO: 'AUTO', HOME: 'HOME', RENTERS: 'RENT', LIFE: 'LIFE', HEALTH: 'HLTH', COMMERCIAL: 'COMM' };
+const PRODUCT_ABBR = { AUTO: 'AUTO', HOME: 'HOME', RENTERS: 'RENT', LIFE: 'LIFE', HEALTH: 'HLTH', COMMERCIAL: 'COMM', BOAT: 'BOAT', MOTORCYCLE: 'MOTORCYCLE' };
 
 // A cross-sell lead uploaded under AUTO_NO_HOME/HOME_NO_AUTO carries the
 // already-held line in crossSellHaveProduct — it stays visible as context
