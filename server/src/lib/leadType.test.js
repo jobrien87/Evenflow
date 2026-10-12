@@ -11,6 +11,12 @@ test('deriveLeadType: maps a real vendor category when not a live transfer', () 
   assert.equal(deriveLeadType({ isLiveTransfer: false, vendorCategory: 'OTHER' }), 'MANUAL');
 });
 
+test('deriveLeadType: GOOGLE_AD maps to its own leadType, distinct from META_AD', () => {
+  assert.equal(deriveLeadType({ vendorCategory: 'GOOGLE_AD' }), 'GOOGLE_AD');
+  assert.equal(deriveLeadType({ vendorCategory: 'META_AD' }), 'META_AD');
+  assert.notEqual(deriveLeadType({ vendorCategory: 'GOOGLE_AD' }), deriveLeadType({ vendorCategory: 'META_AD' }));
+});
+
 test('deriveLeadType: falls back to MANUAL with no signal at all', () => {
   assert.equal(deriveLeadType({}), 'MANUAL');
 });

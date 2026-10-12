@@ -56,7 +56,10 @@ router.get('/', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'),
   }
 });
 
-const VENDOR_CATEGORIES = ['PAID_AD', 'DIRECT_MAIL', 'META_AD', 'INTERNET', 'OTHER'];
+const VENDOR_CATEGORIES = ['PAID_AD', 'DIRECT_MAIL', 'META_AD', 'GOOGLE_AD', 'INTERNET', 'OTHER'];
+// Categories backed by live ad spend — these leads must always be
+// directly assigned, never left to sit unclaimed in the Moshpit.
+const PAID_AD_CATEGORIES = ['PAID_AD', 'META_AD', 'GOOGLE_AD'];
 const VENDOR_INTEGRATION_TYPES = ['LEAD_POST', 'APPOINTMENT_WEBHOOK'];
 
 // Picks the right vendor-facing setup doc by integrationType — a
@@ -81,6 +84,11 @@ const createVendorSchema = z.object({
   // inherits this as its Lead.leadType (see lib/leadType.js), which drives
   // the configurable priority queue (Agency.priorityRules).
   category: z.enum(VENDOR_CATEGORIES).optional(),
+  // The reportable "visible vendor identity" (e.g. "BizIQ"), kept
+  // separate from `name` — a specific product-scoped connection's own
+  // display name (e.g. "BizIQ - Boat"). Optional; unset falls back to
+  // `name` everywhere it's displayed/reported.
+  vendorBrand: z.string().min(1).optional(),
   // Which inbound contract this vendor's credential may authenticate
   // against — default LEAD_POST preserves every existing caller's
   // behavior. APPOINTMENT_WEBHOOK is for a calendar/booking integration
@@ -108,8 +116,8 @@ router.post('/', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res,
 
     const distributionMode = parsed.data.distributionMode || 'ROUND_ROBIN';
     const category = parsed.data.category || 'OTHER';
-    if (distributionMode === 'MOSHPIT' && ['PAID_AD', 'META_AD'].includes(category)) {
-      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Paid Ad and Meta Ad vendors cannot use Moshpit distribution — these leads must always be directly assigned, never left to sit unclaimed.' });
+    if (distributionMode === 'MOSHPIT' && PAID_AD_CATEGORIES.includes(category)) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Paid Ad, Meta Ad, and Google Ad vendors cannot use Moshpit distribution — these leads must always be directly assigned, never left to sit unclaimed.' });
     }
     const selectedAgentIds = distributionMode === 'SELECTED_AGENTS' ? (parsed.data.selectedAgentIds || []) : [];
     if (selectedAgentIds.length > 0) {
@@ -129,6 +137,7 @@ router.post('/', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res,
       distributionMode,
       selectedAgentIds,
       category,
+      vendorBrand: parsed.data.vendorBrand ?? null,
       integrationType,
       highLevelLocationId: parsed.data.highLevelLocationId ?? null,
       highLevelCalendarId: parsed.data.highLevelCalendarId ?? null,
@@ -300,6 +309,7 @@ const updateVendorSchema = z.object({
   distributionMode: z.enum(['ROUND_ROBIN', 'SELECTED_AGENTS', 'MOSHPIT', 'ALPHA_SPLIT', 'OFFICE_SPLIT']).optional(),
   selectedAgentIds: z.array(z.string().uuid()).optional(),
   category: z.enum(VENDOR_CATEGORIES).optional(),
+  vendorBrand: z.string().min(1).nullable().optional(),
 });
 
 // General field edit — separate from /status below, since a status
@@ -319,8 +329,8 @@ router.patch('/:id', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, 
     const data = { ...parsed.data };
     const nextMode = data.distributionMode || vendor.distributionMode;
     const nextCategory = data.category || vendor.category;
-    if (nextMode === 'MOSHPIT' && ['PAID_AD', 'META_AD'].includes(nextCategory)) {
-      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Paid Ad and Meta Ad vendors cannot use Moshpit distribution — these leads must always be directly assigned, never left to sit unclaimed.' });
+    if (nextMode === 'MOSHPIT' && PAID_AD_CATEGORIES.includes(nextCategory)) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Paid Ad, Meta Ad, and Google Ad vendors cannot use Moshpit distribution — these leads must always be directly assigned, never left to sit unclaimed.' });
     }
     if (nextMode === 'SELECTED_AGENTS' && data.selectedAgentIds) {
       const { valid } = await validateSelectedAgentIds(vendor.agencyId, data.selectedAgentIds);

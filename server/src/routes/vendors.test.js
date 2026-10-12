@@ -170,3 +170,46 @@ test('POST /:id/generate-credential is the one place a credential is ever issued
   assert.equal((await secondRes.json()).error, 'CREDENTIAL_ALREADY_EXISTS');
   assert.equal(await prisma.vendorCredential.count({ where: { vendorId: created.vendor.id } }), 1, 'the 409 must not create a second credential');
 });
+
+test('a GOOGLE_AD vendor cannot be created with MOSHPIT distribution mode, same as PAID_AD/META_AD', async () => {
+  const res = await fetch(`${baseUrl}/api/vendors`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ name: 'Google Ad Vendor', email: `gav-${suffix}@test.local`, product: 'Auto', category: 'GOOGLE_AD', distributionMode: 'MOSHPIT' }),
+  });
+  assert.equal(res.status, 400);
+  const body = await res.json();
+  assert.equal(body.error, 'VALIDATION');
+
+  const count = await prisma.vendor.count({ where: { agencyId, name: 'Google Ad Vendor' } });
+  assert.equal(count, 0, 'no vendor row should have been created');
+});
+
+test('vendorBrand round-trips through create and update, and falls back to null when never set', async () => {
+  const createRes = await fetch(`${baseUrl}/api/vendors`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ name: 'BizIQ - Boat', email: `biziq-boat-${suffix}@test.local`, product: 'Boat', category: 'META_AD', vendorBrand: 'BizIQ', deferCredential: true }),
+  });
+  assert.equal(createRes.status, 201);
+  const created = await createRes.json();
+  assert.equal(created.vendor.vendorBrand, 'BizIQ');
+  assert.equal(created.vendor.name, 'BizIQ - Boat', 'the specific connection name stays distinct from the shared brand');
+
+  const noBrandRes = await fetch(`${baseUrl}/api/vendors`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ name: 'No Brand Vendor', email: `nobrand-${suffix}@test.local`, product: 'Auto', deferCredential: true }),
+  });
+  const noBrand = await noBrandRes.json();
+  assert.equal(noBrand.vendor.vendorBrand, null, 'unset vendorBrand must not be guessed or defaulted to the name at write time');
+
+  const patchRes = await fetch(`${baseUrl}/api/vendors/${created.vendor.id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ vendorBrand: 'BizIQ Updated' }),
+  });
+  assert.equal(patchRes.status, 200);
+  const patched = await patchRes.json();
+  assert.equal(patched.vendor.vendorBrand, 'BizIQ Updated');
+});

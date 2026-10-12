@@ -8,6 +8,7 @@ export const LEAD_TYPE_META = {
   REFERRAL: { label: 'Referral', icon: 'handshake', tone: 'accent' },
   PAID_AD: { label: 'Paid Ad', icon: 'megaphone', tone: 'neutral' },
   META_AD: { label: 'Meta Ad', icon: 'megaphone', tone: 'neutral' },
+  GOOGLE_AD: { label: 'Google Ad', icon: 'megaphone', tone: 'neutral' },
   INTERNET: { label: 'Internet', icon: 'globe', tone: 'neutral' },
   DIRECT_MAIL: { label: 'Direct Mail', icon: 'mail', tone: 'neutral' },
   MANUAL: { label: 'Manual / Organic', icon: 'pencil', tone: 'neutral' },

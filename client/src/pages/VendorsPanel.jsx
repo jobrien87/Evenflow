@@ -8,6 +8,7 @@ const VENDOR_CATEGORIES = [
   { value: 'PAID_AD', label: 'Paid Ad' },
   { value: 'DIRECT_MAIL', label: 'Direct Mail' },
   { value: 'META_AD', label: 'Meta Ad' },
+  { value: 'GOOGLE_AD', label: 'Google Ad' },
   { value: 'INTERNET', label: 'Internet' },
   { value: 'OTHER', label: 'Other' },
 ];
@@ -27,7 +28,7 @@ const distributionLabel = (mode) => DISTRIBUTION_MODES.find((m) => m.value === m
 // sit unclaimed in the Moshpit — mirrors the same rule server-side
 // (routes/vendors.js's create/update validation is the real guarantee,
 // this is just the matching UX so a save never bounces off it unexplained).
-const MOSHPIT_BLOCKED_CATEGORIES = ['PAID_AD', 'META_AD'];
+const MOSHPIT_BLOCKED_CATEGORIES = ['PAID_AD', 'META_AD', 'GOOGLE_AD'];
 const availableDistributionModes = (category) =>
   MOSHPIT_BLOCKED_CATEGORIES.includes(category) ? DISTRIBUTION_MODES.filter((m) => m.value !== 'MOSHPIT') : DISTRIBUTION_MODES;
 
@@ -60,7 +61,7 @@ export default function VendorsPanel() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', email: '', product: 'Auto', costPerLeadCents: '', distributionMode: 'ROUND_ROBIN', selectedAgentIds: [], category: 'OTHER' });
+  const [form, setForm] = useState({ name: '', email: '', product: 'Auto', costPerLeadCents: '', distributionMode: 'ROUND_ROBIN', selectedAgentIds: [], category: 'OTHER', vendorBrand: '' });
   const [formError, setFormError] = useState('');
   const [newKeyResult, setNewKeyResult] = useState(null);
   const [selectedVendor, setSelectedVendor] = useState(null);
@@ -105,11 +106,12 @@ export default function VendorsPanel() {
     try {
       const res = await api.createVendor({
         ...form,
+        vendorBrand: form.vendorBrand.trim() || undefined,
         costPerLeadCents: form.costPerLeadCents ? Math.round(parseFloat(form.costPerLeadCents) * 100) : undefined,
         selectedAgentIds: form.distributionMode === 'SELECTED_AGENTS' ? form.selectedAgentIds : undefined,
       });
       setNewKeyResult(res);
-      setForm({ name: '', email: '', product: 'Auto', costPerLeadCents: '', distributionMode: 'ROUND_ROBIN', selectedAgentIds: [], category: 'OTHER' });
+      setForm({ name: '', email: '', product: 'Auto', costPerLeadCents: '', distributionMode: 'ROUND_ROBIN', selectedAgentIds: [], category: 'OTHER', vendorBrand: '' });
       setShowForm(false);
       await load();
     } catch (err) {
@@ -155,6 +157,7 @@ export default function VendorsPanel() {
       distributionMode: v.distributionMode || 'ROUND_ROBIN',
       selectedAgentIds: v.selectedAgentIds || [],
       category: v.category || 'OTHER',
+      vendorBrand: v.vendorBrand || '',
     });
   }
 
@@ -169,6 +172,7 @@ export default function VendorsPanel() {
         distributionMode: editForm.distributionMode,
         selectedAgentIds: editForm.distributionMode === 'SELECTED_AGENTS' ? editForm.selectedAgentIds : [],
         category: editForm.category,
+        vendorBrand: editForm.vendorBrand?.trim() || null,
       });
       setEditingId(null);
       await load();
@@ -246,6 +250,7 @@ export default function VendorsPanel() {
       {showForm && (
         <form onSubmit={submit} style={s.form}>
           <input style={s.input} placeholder="Vendor name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+          <input style={s.input} placeholder="Vendor brand (optional — e.g. BizIQ; groups multiple connections under one reportable identity)" value={form.vendorBrand} onChange={(e) => setForm({ ...form, vendorBrand: e.target.value })} />
           <input style={s.input} type="email" placeholder="Vendor email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
           <select aria-label="Vendor product" style={s.input} value={form.product} onChange={(e) => setForm({ ...form, product: e.target.value })}>
             {vendorProductOptions(form.product).map((product) => <option key={product} value={product}>{product}</option>)}
@@ -307,7 +312,7 @@ export default function VendorsPanel() {
         <div key={v.id} id={`vendor-${v.id}`} style={s.vendorBlock}>
           <div style={v.id === highlightId ? { ...s.row, ...s.rowHighlighted } : s.row} className="ui-row-stack">
             <div style={{ flex: 1 }}>
-              <div style={s.rowTitle}>{v.name} · {v.product}</div>
+              <div style={s.rowTitle}>{v.name} · {v.product}{v.vendorBrand ? ` (${v.vendorBrand})` : ''}</div>
               <div style={s.rowSub}>
                 {v.email} · {v.costPerLeadCents ? `$${(v.costPerLeadCents / 100).toFixed(2)}/lead` : 'cost not set'}
               </div>
@@ -339,6 +344,7 @@ export default function VendorsPanel() {
           {editingId === v.id && (
             <div style={s.editForm}>
               <input style={s.input} value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} placeholder="Name" />
+              <input style={s.input} value={editForm.vendorBrand || ''} onChange={(e) => setEditForm({ ...editForm, vendorBrand: e.target.value })} placeholder="Vendor brand (optional)" />
               <input style={s.input} type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} placeholder="Email" />
               <select aria-label="Edit vendor product" style={s.input} value={editForm.product} onChange={(e) => setEditForm({ ...editForm, product: e.target.value })}>
                 {vendorProductOptions(editForm.product).map((product) => <option key={product} value={product}>{product}</option>)}

@@ -84,3 +84,11 @@ test('scoreLead: falls back to the seeded defaults when priorityRules is null/un
   assert.deepEqual(DEFAULT_STATUS_RULES.SOLD, { afterDays: 0, action: 'DROP_OFF' });
   assert.ok(DEFAULT_TYPE_RANK.includes('TRANSFER'));
 });
+
+test('DEFAULT_TYPE_RANK includes GOOGLE_AD alongside META_AD, so an agency with no custom priorityRules still ranks Google Ad leads', () => {
+  assert.ok(DEFAULT_TYPE_RANK.includes('GOOGLE_AD'));
+  assert.ok(DEFAULT_TYPE_RANK.includes('META_AD'));
+  const googleAd = scoreLead(baseLead({ leadType: 'GOOGLE_AD' }), null, NOW);
+  const manual = scoreLead(baseLead({ leadType: 'MANUAL' }), null, NOW);
+  assert.ok(googleAd.priorityScore > manual.priorityScore);
+});

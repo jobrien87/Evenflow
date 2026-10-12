@@ -192,6 +192,7 @@ enum VendorCategory {
   PAID_AD
   DIRECT_MAIL
   META_AD
+  GOOGLE_AD
   INTERNET
   OTHER
 }
@@ -223,6 +224,7 @@ enum LeadType {
   REFERRAL
   PAID_AD
   META_AD
+  GOOGLE_AD
   INTERNET
   DIRECT_MAIL
   MANUAL
@@ -1686,6 +1688,13 @@ model Vendor {
   // What kind of leads this vendor supplies — every lead sourced from this
   // vendor inherits this as its Lead.leadType (see createLeadRecord).
   category VendorCategory @default(OTHER)
+
+  // The reportable "visible vendor identity" (e.g. "BizIQ"), kept
+  // deliberately separate from `name` — a specific product-scoped
+  // connection's own display name (e.g. "BizIQ - Boat"). Nullable and
+  // unset by default so no existing vendor is relabeled or guessed; every
+  // display/report falls back to `vendorBrand || name`.
+  vendorBrand String?
 
   // Which inbound contract this vendor's credential may authenticate
   // against (see middleware/vendorAuth.js's requireIntegrationType guard).
