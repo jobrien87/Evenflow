@@ -7,7 +7,7 @@ const { requireAuth, requireRole, canActOnUser } = require('../middleware/auth')
 const { recordAudit } = require('../lib/audit');
 const { sendInvitationEmail } = require('../lib/email');
 const { issuePasswordResetEmail } = require('../lib/auth');
-const { reissueInvitation } = require('../lib/invitations');
+const { reissueInvitation, recordInvitationEmailResult } = require('../lib/invitations');
 const { syncSeatCountForAgency, countOccupiedSeats, findActiveSeatSubscription } = require('../lib/seatBilling');
 const { explainScore, componentPlaceholders } = require('../lib/flowScore');
 const { computeFunnel } = require('../lib/funnelMetrics');
@@ -137,6 +137,7 @@ router.get('/', async (req, res, next) => {
         id: true, email: true, firstName: true, lastName: true, role: true,
         status: true, agencyId: true, createdAt: true, phone: true,
         officeId: true, office: { select: { id: true, name: true } }, birthday: true,
+        ownInvitation: { select: { lastEmailStatus: true, lastEmailSentAt: true, lastEmailError: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -219,6 +220,7 @@ async function inviteOneUser({ actor, agencyId, agency, data, correlationId }) {
     agencyName: agency.name,
     token: rawToken,
   });
+  await recordInvitationEmailResult(user.id, emailResult);
 
   await recordAudit({
     actorId: actor.id,
@@ -349,6 +351,7 @@ router.post('/:userId/resend-invite', requireRole('AGENCY_OWNER', 'AGENCY_MANAGE
     );
 
     const emailResult = await sendInvitationEmail({ to: target.email, role: target.role, agencyName: agency ? agency.name : 'EvenFlow', token: rawToken });
+    await recordInvitationEmailResult(target.id, emailResult);
 
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role, agencyId: target.agencyId,

@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { Card, Badge, Button, StatTile, SectionHeader, EmptyState, Modal, ExportButton, DateRangeFilter } from '../ui';
 import { resolveDateRange } from '../lib/dateRange';
 import { downloadCsv } from '../lib/downloadCsv';
-import { emailStatusMessage } from '../lib/emailStatus';
+import { emailStatusMessage, lastEmailStatusInfo } from '../lib/emailStatus';
 import AgencySettingsModal from './AgencySettingsModal';
 
 const ACTIVITY_PERIODS = [
@@ -361,7 +361,9 @@ function RosterSection({ title, users, onResetPassword, onResendInvite, onPurge,
       {users.length === 0 ? (
         <div style={s.rosterEmpty}>None yet.</div>
       ) : (
-        users.map((u) => (
+        users.map((u) => {
+          const emailInfo = u.status !== 'ACTIVE' ? lastEmailStatusInfo(u.ownInvitation) : null;
+          return (
           <div key={u.id} style={s.rosterRow}>
             <div style={s.rosterInfo}>
               <div style={s.rosterName}>{u.firstName} {u.lastName}</div>
@@ -369,6 +371,11 @@ function RosterSection({ title, users, onResetPassword, onResendInvite, onPurge,
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, flexWrap: 'wrap' }}>
               <Badge tone={statusTone(u.status)} style={s.rosterBadge}>{u.status}</Badge>
+              {emailInfo && (
+                <span title={[emailInfo.when, emailInfo.error].filter(Boolean).join(' — ')}>
+                  <Badge tone={emailInfo.tone}>{emailInfo.label}</Badge>
+                </span>
+              )}
               {u.status === 'ACTIVE' && (
                 <Button variant="ghost" size="sm" onClick={() => onResetPassword(u.id)}>RESET PW</Button>
               )}
@@ -382,7 +389,8 @@ function RosterSection({ title, users, onResetPassword, onResendInvite, onPurge,
               )}
             </div>
           </div>
-        ))
+          );
+        })
       )}
     </Card>
   );

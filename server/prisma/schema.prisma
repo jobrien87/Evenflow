@@ -466,6 +466,18 @@ model Invitation {
   acceptedAt  DateTime?
   createdAt   DateTime  @default(now())
 
+  // The outcome of the most recent send attempt (initial invite or any
+  // resend) — SENT | FAILED | NOT_CONFIGURED, matching lib/email.js's own
+  // return values exactly. Overwritten on every resend (latest attempt
+  // only, not a full history). Never a stand-in for whether the invite
+  // was actually used — see acceptedAt for that.
+  lastEmailStatus String?
+  lastEmailSentAt DateTime?
+  // Brevo's own error text on a FAILED send only — never the accept URL
+  // or any token, matching this file's existing no-secrets-in-storage
+  // discipline.
+  lastEmailError  String?
+
   @@index([email])
 }
 

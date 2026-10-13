@@ -5,7 +5,7 @@ const { prisma } = require('../lib/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { sendInvitationEmail } = require('../lib/email');
-const { reissueInvitation } = require('../lib/invitations');
+const { reissueInvitation, recordInvitationEmailResult } = require('../lib/invitations');
 const { computeTelemarketerPerformance } = require('../lib/performanceBreakdown');
 
 const router = express.Router();
@@ -21,6 +21,7 @@ router.get('/', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
           where: { status: 'ACTIVE' },
           include: { agency: { select: { id: true, name: true } } },
         },
+        ownInvitation: { select: { lastEmailStatus: true, lastEmailSentAt: true, lastEmailError: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -137,6 +138,7 @@ router.post('/invite', requireRole('PLATFORM_OWNER'), async (req, res, next) => 
     });
 
     const emailResult = await sendInvitationEmail({ to: email, role: 'TELEMARKETER', agencyName: 'Yield Marketing', token: rawToken });
+    await recordInvitationEmailResult(user.id, emailResult);
 
     await recordAudit({
       actorId: req.user.id,
@@ -172,6 +174,7 @@ router.post('/:id/resend-invite', requireRole('PLATFORM_OWNER'), async (req, res
     );
 
     const emailResult = await sendInvitationEmail({ to: target.email, role: 'TELEMARKETER', agencyName: 'Yield Marketing', token: rawToken });
+    await recordInvitationEmailResult(target.id, emailResult);
 
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role,

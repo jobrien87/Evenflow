@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { prisma } = require('./db');
 
 // Shared by every "resend invite" endpoint. Invitation.userId is @unique —
 // each user has exactly one Invitation row for their whole lifetime, ever
@@ -38,4 +39,26 @@ async function reissueInvitation(tx, { userId, email, role, agencyId, invitedByI
   return rawToken;
 }
 
-module.exports = { reissueInvitation };
+// Persists the outcome of a sendInvitationEmail()/sendPasswordResetEmail()-
+// style call onto the real Invitation row, so it's visible later in the
+// UI instead of only existing as the one-time response the caller saw at
+// click time. Keyed by userId (Invitation.userId is unique), matching
+// every invite/resend call site's own lookup — those always already know
+// the target user's id. Best-effort: a tracking-write failure must never
+// surface as if the invite/resend itself failed.
+async function recordInvitationEmailResult(userId, emailResult) {
+  try {
+    await prisma.invitation.update({
+      where: { userId },
+      data: {
+        lastEmailStatus: emailResult.status,
+        lastEmailSentAt: new Date(),
+        lastEmailError: emailResult.status === 'FAILED' ? (emailResult.error || null) : null,
+      },
+    });
+  } catch (err) {
+    console.error('[invitations] failed to record email result', err.message);
+  }
+}
+
+module.exports = { reissueInvitation, recordInvitationEmailResult };

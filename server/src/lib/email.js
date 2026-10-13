@@ -68,7 +68,7 @@ async function sendInvitationEmail({ to, role, agencyName, token }) {
     // resend-invite again once delivery is working, which issues a fresh
     // token rather than reusing this one.
     console.error(`[email:FAILED] Invitation to ${to} failed to send (${err.message}). Use resend-invite to retry.`);
-    return { status: 'FAILED', acceptUrl };
+    return { status: 'FAILED', acceptUrl, error: err.message };
   }
 }
 

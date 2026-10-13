@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { Card, SectionHeader, Badge, Button, EmptyState, Modal } from '../ui';
-import { emailStatusMessage } from '../lib/emailStatus';
+import { emailStatusMessage, lastEmailStatusInfo } from '../lib/emailStatus';
 import TimeClockReportPanel from './TimeClockReportPanel';
 
 const TABS = [
@@ -296,12 +296,19 @@ export default function RosterSettingsPanel() {
           <Card style={s.card}>
             <div style={s.cardTitle}>TEAM ({users.length})</div>
             {resendStatus && <div style={s.status}>{resendStatus}</div>}
-            {users.map((u) => (
+            {users.map((u) => {
+              const emailInfo = u.status !== 'ACTIVE' ? lastEmailStatusInfo(u.ownInvitation) : null;
+              return (
               <div key={u.id} style={s.userRow} className="ui-row-stack">
                 <div>
                   <div style={s.rowTitle}>{u.firstName} {u.lastName}</div>
                   <div style={s.rowSub}>{u.role} · {u.status}{u.office ? ` · ${u.office.name}` : ''}</div>
                   <div style={s.badgeRow}>
+                    {emailInfo && (
+                      <span title={[emailInfo.when, emailInfo.error].filter(Boolean).join(' — ')}>
+                        <Badge tone={emailInfo.tone}>{emailInfo.label}</Badge>
+                      </span>
+                    )}
                     {(badgesByUser[u.id] || []).map((b) => (
                       <span key={b.id} onClick={canManage ? () => revokeBadge(b.id) : undefined} style={{ cursor: canManage ? 'pointer' : 'default' }} title={canManage ? 'Click to revoke' : undefined}>
                         <Badge tone="accent">{badgeLabel(b.type)}</Badge>
@@ -326,7 +333,8 @@ export default function RosterSettingsPanel() {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
             {users.length === 0 && <div style={s.empty}>No team members yet.</div>}
           </Card>
 

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { useIsMobile } from '../lib/useViewport';
-import { Button, EdSuggestionBox } from '../ui';
+import { Button, Badge, EdSuggestionBox } from '../ui';
 import FlowScoreCard from './FlowScoreCard';
 import LeadsSnapshotBox from './LeadsSnapshotBox';
 import ZipCodeBox from './ZipCodeBox';
@@ -14,7 +14,7 @@ import AgencySettingsModal from './AgencySettingsModal';
 import PerformanceLeaderboards from './PerformanceLeaderboards';
 import TeamClockStatusBox from './TeamClockStatusBox';
 import AnnouncementComposer from './AnnouncementComposer';
-import { emailStatusMessage } from '../lib/emailStatus';
+import { emailStatusMessage, lastEmailStatusInfo } from '../lib/emailStatus';
 
 export default function AgencyOwnerDashboard() {
   const { user } = useAuth();
@@ -307,7 +307,9 @@ export default function AgencyOwnerDashboard() {
             ))}
           </div>
         )}
-        {users.map((u) => (
+        {users.map((u) => {
+          const emailInfo = u.status !== 'ACTIVE' ? lastEmailStatusInfo(u.ownInvitation) : null;
+          return (
           <div key={u.id}>
             <div style={s.row} className="ui-row-stack">
               <div>
@@ -316,6 +318,11 @@ export default function AgencyOwnerDashboard() {
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <div style={s.badge}>{u.status}</div>
+                {emailInfo && (
+                  <span title={[emailInfo.when, emailInfo.error].filter(Boolean).join(' — ')}>
+                    <Badge tone={emailInfo.tone}>{emailInfo.label}</Badge>
+                  </span>
+                )}
                 {u.role === 'PRODUCER' && (
                   <>
                     <div style={s.flowScoreBadge(producerScores[u.id])}>
@@ -354,7 +361,8 @@ export default function AgencyOwnerDashboard() {
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
       </section>
 
       <section style={s.section}>
@@ -362,14 +370,22 @@ export default function AgencyOwnerDashboard() {
           <h3 style={s.h3}>TELEMARKETERS ({telemarketers.length})</h3>
         </div>
         {telemarketers.length === 0 && <div style={s.hint}>No telemarketer currently assigned to this agency.</div>}
-        {telemarketers.map((t) => (
+        {telemarketers.map((t) => {
+          const emailInfo = t.status !== 'ACTIVE' ? lastEmailStatusInfo(t.ownInvitation) : null;
+          return (
           <div key={t.assignmentId} style={s.row} className="ui-row-stack">
             <div>
               <div style={s.rowTitle}>{t.firstName} {t.lastName}</div>
               <div style={s.rowSub}>{t.email}{t.assignedAt ? ` · assigned ${new Date(t.assignedAt).toLocaleDateString()}` : ''}</div>
             </div>
+            {emailInfo && (
+              <span title={[emailInfo.when, emailInfo.error].filter(Boolean).join(' — ')}>
+                <Badge tone={emailInfo.tone}>{emailInfo.label}</Badge>
+              </span>
+            )}
           </div>
-        ))}
+          );
+        })}
       </section>
 
       {showReport && (

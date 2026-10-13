@@ -5,7 +5,7 @@ const { prisma } = require('../lib/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { sendInvitationEmail } = require('../lib/email');
-const { reissueInvitation } = require('../lib/invitations');
+const { reissueInvitation, recordInvitationEmailResult } = require('../lib/invitations');
 const { resolveSettings } = require('../lib/breakRoom');
 
 const router = express.Router();
@@ -168,6 +168,7 @@ router.post('/', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
       agencyName: agency.name,
       token: rawToken,
     });
+    await recordInvitationEmailResult(invitation.userId, emailResult);
 
     return res.status(201).json({
       success: true,
@@ -210,6 +211,7 @@ router.post('/:agencyId/resend-invite', requireRole('PLATFORM_OWNER'), async (re
     );
 
     const emailResult = await sendInvitationEmail({ to: owner.email, role: 'AGENCY_OWNER', agencyName: agency.name, token: rawToken });
+    await recordInvitationEmailResult(owner.id, emailResult);
 
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role, agencyId: agency.id,
@@ -234,7 +236,10 @@ router.get('/:agencyId', async (req, res, next) => {
     const agency = await prisma.agency.findUnique({ where: { id: req.params.agencyId } });
     if (!agency) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
 
-    const userSelect = { id: true, email: true, firstName: true, lastName: true, role: true, status: true, createdAt: true };
+    const userSelect = {
+      id: true, email: true, firstName: true, lastName: true, role: true, status: true, createdAt: true,
+      ownInvitation: { select: { lastEmailStatus: true, lastEmailSentAt: true, lastEmailError: true } },
+    };
     const [enriched, owners, managers, producers, tmAssignments] = await Promise.all([
       enrichAgencies([agency]),
       prisma.user.findMany({ where: { agencyId: agency.id, role: 'AGENCY_OWNER' }, select: userSelect, orderBy: { createdAt: 'asc' } }),
@@ -718,6 +723,7 @@ router.post('/:agencyId/invite-owner', requireRole('PLATFORM_OWNER'), async (req
     });
 
     const emailResult = await sendInvitationEmail({ to: email, role: parsed.data.role, agencyName: agency.name, token: rawToken });
+    await recordInvitationEmailResult(user.id, emailResult);
 
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role, agencyId: agency.id,

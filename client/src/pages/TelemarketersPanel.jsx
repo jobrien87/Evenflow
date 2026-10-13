@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { Card, Badge, Button, StatTile, BarRow, SectionHeader, EmptyState, ExportButton } from '../ui';
 import { downloadCsv } from '../lib/downloadCsv';
-import { emailStatusMessage } from '../lib/emailStatus';
+import { emailStatusMessage, lastEmailStatusInfo } from '../lib/emailStatus';
 
 const TM_STATUS_ORDER = ['ACTIVE', 'INVITED', 'DEACTIVATED'];
 
@@ -171,7 +171,9 @@ export default function TelemarketersPanel() {
       {tms.length === 0 ? (
         <EmptyState title="No telemarketers yet" description="Invite a telemarketer to get started." />
       ) : (
-        tms.map((tm) => (
+        tms.map((tm) => {
+          const emailInfo = tm.status !== 'ACTIVE' ? lastEmailStatusInfo(tm.ownInvitation) : null;
+          return (
           <Card key={tm.id} style={s.card}>
             <div style={s.cardTop} className="ui-row-stack">
               <div>
@@ -180,6 +182,11 @@ export default function TelemarketersPanel() {
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Badge tone={statusTone(tm.status)}>{tm.status}</Badge>
+                {emailInfo && (
+                  <span title={[emailInfo.when, emailInfo.error].filter(Boolean).join(' — ')}>
+                    <Badge tone={emailInfo.tone}>{emailInfo.label}</Badge>
+                  </span>
+                )}
                 {(tm.status === 'INVITED' || tm.status === 'DEACTIVATED') && (
                   <Button variant="secondary" size="sm" onClick={() => resendTm(tm.id)}>
                     {tm.status === 'DEACTIVATED' ? 'RESEND & REACTIVATE' : 'RESEND INVITE'}
@@ -208,7 +215,8 @@ export default function TelemarketersPanel() {
             </div>
             {assignRowStatus[tm.id] && <div style={s.assignRowStatus}>{assignRowStatus[tm.id]}</div>}
           </Card>
-        ))
+          );
+        })
       )}
     </div>
   );
