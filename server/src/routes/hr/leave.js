@@ -240,19 +240,33 @@ router.get('/requests/mine', async (req, res, next) => {
 });
 
 const createRequestSchema = z.object({
+  // HR_ADMIN only — marking a date as used for someone else. Defaults to
+  // the caller's own profile (the ordinary self-service path).
+  employeeProfileId: z.string().uuid().optional(),
   leaveTypeId: z.string().uuid(),
   startDate: z.coerce.date(),
   endDate: z.coerce.date(),
   requestedMinutes: z.number().int().positive(),
   note: z.string().trim().max(1000).optional(),
+  // HR_ADMIN only — record this as already-used time immediately (no
+  // PENDING review step), for directly marking a vacation/sick day an
+  // employee actually took. Deliberately skips the balance-denial check
+  // below (same reasoning as a protected leave type already skipping it):
+  // this records a real fact of usage, which must never be blocked by a
+  // balance that's merely out of date or not yet configured.
+  autoApprove: z.boolean().optional(),
 });
 
-// Self-service create — any authenticated user with an HR profile can
-// request their own leave. Ordinary (non-protected) leave types are
-// rejected outright when the real computed balance can't cover the
-// request; a protected leave type explicitly skips that check per the
-// directive's own rule and is simply left PENDING for HR_ADMIN review —
-// never auto-approved, never auto-denied.
+// Self-service create by default — any authenticated user with an HR
+// profile can request their own leave. An HR_ADMIN may instead pass
+// employeeProfileId (+ optionally autoApprove) to mark a date range as
+// used vacation/sick time directly on a specific employee's record —
+// this is what the HR leave calendar's "mark used time" action calls.
+// Ordinary (non-protected, non-autoApprove) requests are rejected
+// outright when the real computed balance can't cover them; a protected
+// leave type explicitly skips that check per the directive's own rule
+// and is simply left PENDING for HR_ADMIN review — never auto-approved,
+// never auto-denied.
 router.post('/requests', async (req, res, next) => {
   try {
     const parsed = createRequestSchema.safeParse(req.body);
@@ -262,41 +276,186 @@ router.post('/requests', async (req, res, next) => {
     if (parsed.data.endDate < parsed.data.startDate) {
       return res.status(400).json({ success: false, error: 'VALIDATION', message: 'endDate cannot be before startDate.' });
     }
-    const own = await loadOwnEmployeeProfile(req);
-    if (!own) {
-      return res.status(400).json({ success: false, error: 'NO_PROFILE', message: 'You need an HR profile before requesting leave.' });
-    }
-    const leaveType = await prisma.hrLeaveType.findUnique({ where: { id: parsed.data.leaveTypeId } });
-    if (!leaveType || leaveType.agencyId !== own.agencyId || !leaveType.isActive) {
-      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'leaveTypeId must be an active leave type in your agency.' });
+
+    let target;
+    let isAdminEntry = false;
+    if (parsed.data.employeeProfileId) {
+      target = await prisma.hrEmployeeProfile.findUnique({ where: { id: parsed.data.employeeProfileId } });
+      if (!target) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+      const allowed = await hasHrRole(req.user, target.agencyId, 'HR_ADMIN');
+      if (!allowed) {
+        return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'Only HR_ADMIN can mark leave on someone else’s record.' });
+      }
+      isAdminEntry = true;
+    } else {
+      target = await loadOwnEmployeeProfile(req);
+      if (!target) {
+        return res.status(400).json({ success: false, error: 'NO_PROFILE', message: 'You need an HR profile before requesting leave.' });
+      }
     }
 
-    if (!leaveType.isProtected) {
-      const balance = await getBalanceMinutes(prisma, { employeeProfileId: own.id, leaveTypeId: leaveType.id });
+    const leaveType = await prisma.hrLeaveType.findUnique({ where: { id: parsed.data.leaveTypeId } });
+    if (!leaveType || leaveType.agencyId !== target.agencyId || !leaveType.isActive) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'leaveTypeId must be an active leave type in this agency.' });
+    }
+
+    const autoApprove = isAdminEntry && parsed.data.autoApprove === true;
+
+    if (!leaveType.isProtected && !autoApprove) {
+      const balance = await getBalanceMinutes(prisma, { employeeProfileId: target.id, leaveTypeId: leaveType.id });
       if (balance < parsed.data.requestedMinutes) {
         return res.status(400).json({
           success: false, error: 'INSUFFICIENT_BALANCE',
-          message: `Your ${leaveType.name} balance (${balance}m) does not cover this request (${parsed.data.requestedMinutes}m).`,
+          message: `${isAdminEntry ? 'Their' : 'Your'} ${leaveType.name} balance (${balance}m) does not cover this request (${parsed.data.requestedMinutes}m).`,
           balanceMinutes: balance,
         });
       }
     }
 
-    const leaveRequest = await prisma.hrLeaveRequest.create({
-      data: {
-        employeeProfileId: own.id, agencyId: own.agencyId, leaveTypeId: leaveType.id,
-        startDate: parsed.data.startDate, endDate: parsed.data.endDate,
-        requestedMinutes: parsed.data.requestedMinutes, note: parsed.data.note,
-      },
-      include: { leaveType: true },
-    });
+    let leaveRequest;
+    if (autoApprove) {
+      leaveRequest = await prisma.$transaction(async (tx) => {
+        const created = await tx.hrLeaveRequest.create({
+          data: {
+            employeeProfileId: target.id, agencyId: target.agencyId, leaveTypeId: leaveType.id,
+            startDate: parsed.data.startDate, endDate: parsed.data.endDate,
+            requestedMinutes: parsed.data.requestedMinutes, note: parsed.data.note,
+            status: 'APPROVED', decidedById: req.user.id, decidedAt: new Date(),
+          },
+          include: { leaveType: true },
+        });
+        await tx.hrLeaveLedgerEntry.create({
+          data: {
+            employeeProfileId: target.id, leaveTypeId: leaveType.id, agencyId: target.agencyId,
+            transactionType: 'USE', minutes: -parsed.data.requestedMinutes,
+            reason: `Leave marked used: ${leaveType.name} ${created.startDate.toISOString().slice(0, 10)}–${created.endDate.toISOString().slice(0, 10)}`,
+            sourceRequestId: created.id, recordedById: req.user.id,
+          },
+        });
+        return created;
+      });
+    } else {
+      leaveRequest = await prisma.hrLeaveRequest.create({
+        data: {
+          employeeProfileId: target.id, agencyId: target.agencyId, leaveTypeId: leaveType.id,
+          startDate: parsed.data.startDate, endDate: parsed.data.endDate,
+          requestedMinutes: parsed.data.requestedMinutes, note: parsed.data.note,
+        },
+        include: { leaveType: true },
+      });
+    }
+
     await recordAudit({
-      actorId: req.user.id, actorRole: req.user.role, agencyId: own.agencyId,
-      action: 'hr.leave_request_created', entityType: 'HrLeaveRequest', entityId: leaveRequest.id,
-      after: { leaveTypeId: leaveRequest.leaveTypeId, requestedMinutes: leaveRequest.requestedMinutes, protectedReview: leaveType.isProtected },
+      actorId: req.user.id, actorRole: req.user.role, agencyId: target.agencyId,
+      action: autoApprove ? 'hr.leave_marked_used' : 'hr.leave_request_created', entityType: 'HrLeaveRequest', entityId: leaveRequest.id,
+      after: { employeeProfileId: target.id, leaveTypeId: leaveRequest.leaveTypeId, requestedMinutes: leaveRequest.requestedMinutes, protectedReview: leaveType.isProtected },
       correlationId: req.correlationId,
     });
-    return res.status(201).json({ success: true, leaveRequest, flaggedForProtectedReview: leaveType.isProtected });
+    return res.status(201).json({ success: true, leaveRequest, flaggedForProtectedReview: leaveType.isProtected, autoApproved: autoApprove });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const updateEntrySchema = z.object({
+  startDate: z.coerce.date().optional(),
+  endDate: z.coerce.date().optional(),
+  requestedMinutes: z.number().int().positive().optional(),
+  note: z.string().trim().max(1000).optional(),
+});
+
+// Edit an APPROVED entry's dates/minutes (HR_ADMIN only) — keeps the same
+// HrLeaveRequest row (never a duplicate) and posts one ADJUSTMENT ledger
+// entry for exactly the delta between the old and new minutes, so the
+// real computed balance always reflects the correction immediately.
+// leaveTypeId is deliberately not editable here (that would span two
+// different balances) — remove and re-mark instead for that rare case.
+router.patch('/requests/:id', requireHrRole('HR_ADMIN'), async (req, res, next) => {
+  try {
+    const parsed = updateEntrySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+    const existing = await prisma.hrLeaveRequest.findUnique({ where: { id: req.params.id }, include: { leaveType: true } });
+    if (!existing || existing.agencyId !== req.hrAgencyId) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (existing.status !== 'APPROVED') {
+      return res.status(409).json({ success: false, error: 'INVALID_STATUS', message: 'Only an APPROVED entry can be edited — use approve/deny for a PENDING request.' });
+    }
+
+    const data = {};
+    if (parsed.data.startDate !== undefined) data.startDate = parsed.data.startDate;
+    if (parsed.data.endDate !== undefined) data.endDate = parsed.data.endDate;
+    if (parsed.data.requestedMinutes !== undefined) data.requestedMinutes = parsed.data.requestedMinutes;
+    if (parsed.data.note !== undefined) data.note = parsed.data.note;
+    const newStart = data.startDate || existing.startDate;
+    const newEnd = data.endDate || existing.endDate;
+    if (newEnd < newStart) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'endDate cannot be before startDate.' });
+    }
+
+    const newMinutes = data.requestedMinutes ?? existing.requestedMinutes;
+    const delta = newMinutes - existing.requestedMinutes;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.hrLeaveRequest.update({ where: { id: existing.id }, data });
+      if (delta !== 0) {
+        await tx.hrLeaveLedgerEntry.create({
+          data: {
+            employeeProfileId: existing.employeeProfileId, leaveTypeId: existing.leaveTypeId, agencyId: existing.agencyId,
+            transactionType: 'ADJUSTMENT', minutes: -delta,
+            reason: `Leave entry corrected: ${existing.leaveType.name} (${existing.requestedMinutes}m → ${newMinutes}m)`,
+            sourceRequestId: existing.id, recordedById: req.user.id,
+          },
+        });
+      }
+      return u;
+    });
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: req.hrAgencyId,
+      action: 'hr.leave_entry_updated', entityType: 'HrLeaveRequest', entityId: existing.id,
+      before: { startDate: existing.startDate, endDate: existing.endDate, requestedMinutes: existing.requestedMinutes },
+      after: { startDate: updated.startDate, endDate: updated.endDate, requestedMinutes: updated.requestedMinutes },
+      correlationId: req.correlationId,
+    });
+    return res.json({ success: true, leaveRequest: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Remove a marked/approved entry (HR_ADMIN only) — never deletes the
+// ledger USE entry that was posted (append-only, per this ledger's own
+// design), instead posts an equal-and-opposite REVERSAL entry so the
+// real computed balance is restored and the correction itself stays in
+// the permanent audit trail.
+router.post('/requests/:id/cancel', requireHrRole('HR_ADMIN'), async (req, res, next) => {
+  try {
+    const existing = await prisma.hrLeaveRequest.findUnique({ where: { id: req.params.id }, include: { leaveType: true } });
+    if (!existing || existing.agencyId !== req.hrAgencyId) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (existing.status !== 'APPROVED') {
+      return res.status(409).json({ success: false, error: 'INVALID_STATUS', message: 'Only an APPROVED entry can be cancelled — use deny for a PENDING request.' });
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.hrLeaveRequest.update({ where: { id: existing.id }, data: { status: 'CANCELLED' } });
+      await tx.hrLeaveLedgerEntry.create({
+        data: {
+          employeeProfileId: existing.employeeProfileId, leaveTypeId: existing.leaveTypeId, agencyId: existing.agencyId,
+          transactionType: 'REVERSAL', minutes: existing.requestedMinutes,
+          reason: `Leave entry removed: ${existing.leaveType.name} ${existing.startDate.toISOString().slice(0, 10)}–${existing.endDate.toISOString().slice(0, 10)}`,
+          sourceRequestId: existing.id, recordedById: req.user.id,
+        },
+      });
+      return u;
+    });
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: req.hrAgencyId,
+      action: 'hr.leave_entry_cancelled', entityType: 'HrLeaveRequest', entityId: existing.id,
+      before: { status: 'APPROVED' }, after: { status: 'CANCELLED' }, correlationId: req.correlationId,
+    });
+    return res.json({ success: true, leaveRequest: updated });
   } catch (err) {
     next(err);
   }
@@ -414,6 +573,11 @@ router.get('/calendar', async (req, res, next) => {
       employeeName: `${r.employeeProfile.user.firstName || ''} ${r.employeeProfile.user.lastName || ''}`.trim(),
       startDate: r.startDate,
       endDate: r.endDate,
+      requestedMinutes: r.requestedMinutes,
+      // A protected type's real id is withheld too, not just its name —
+      // otherwise a viewer without HR_ADMIN authority could still infer
+      // the real category by color-matching ids across entries.
+      leaveTypeId: (!canSeeProtected && r.leaveType.isProtected) ? null : r.leaveTypeId,
       leaveTypeName: (!canSeeProtected && r.leaveType.isProtected) ? 'Approved time off' : r.leaveType.name,
       isProtected: canSeeProtected ? r.leaveType.isProtected : false,
     }));

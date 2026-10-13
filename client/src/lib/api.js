@@ -456,6 +456,8 @@ export const api = {
   hrLeaveRequests: (params = '') => request(`/hr/leave/requests${params}`),
   hrMyLeaveRequests: () => request('/hr/leave/requests/mine'),
   createHrLeaveRequest: (payload) => request('/hr/leave/requests', { method: 'POST', body: payload }),
+  updateHrLeaveEntry: (id, payload) => request(`/hr/leave/requests/${id}`, { method: 'PATCH', body: payload }),
+  cancelHrLeaveEntry: (id) => request(`/hr/leave/requests/${id}/cancel`, { method: 'POST' }),
   approveHrLeaveRequest: (id) => request(`/hr/leave/requests/${id}/approve`, { method: 'POST' }),
   denyHrLeaveRequest: (id, payload) => request(`/hr/leave/requests/${id}/deny`, { method: 'POST', body: payload }),
   hrLeaveCalendar: (params = '') => request(`/hr/leave/calendar${params}`),

@@ -184,7 +184,7 @@ export default function HrDashboardPage({ agencyId: agencyIdProp }) {
       {tab === 'timesheets' && <TimesheetsTab employees={employees} agencyId={agencyId} canWrite={!!access?.canWrite} />}
       {tab === 'schedule' && <ScheduleTab employees={employees} departments={departments} agencyId={agencyId} canWrite={!!access?.canWrite} />}
       {tab === 'leavePolicies' && <LeavePoliciesTab employees={employees} agencyId={agencyId} canWrite={!!access?.canWrite} />}
-      {tab === 'leaveCalendar' && <LeaveCalendarTab agencyId={agencyId} />}
+      {tab === 'leaveCalendar' && <LeaveCalendarTab agencyId={agencyId} employees={employees} canWrite={!!access?.canWrite} />}
       {tab === 'settings' && (
         <SettingsTab
           roleGrants={roleGrants}
@@ -1434,21 +1434,63 @@ function AssignLeavePolicyModal({ employees, policies, onClose, onCreated }) {
   );
 }
 
-function LeaveCalendarTab({ agencyId }) {
+// A fixed, visually distinct palette, picked by hashing leaveTypeId — so
+// two different leave types (e.g. Vacation vs Sick) always render in two
+// different colors consistently across reloads, without hardcoding any
+// particular type's name (leave types are agency-configurable).
+const LEAVE_COLOR_PALETTE = ['#4dabf7', '#ff6b6b', '#51cf66', '#cc5de8', '#ffa94d', '#20c997', '#f06595', '#94d82d'];
+function colorForLeaveType(leaveTypeId) {
+  if (!leaveTypeId) return '#868e96';
+  let hash = 0;
+  for (let i = 0; i < leaveTypeId.length; i++) hash = (hash * 31 + leaveTypeId.charCodeAt(i)) >>> 0;
+  return LEAVE_COLOR_PALETTE[hash % LEAVE_COLOR_PALETTE.length];
+}
+
+function startOfMonthUTC(date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+}
+// A full set of calendar weeks (Sun-Sat) covering the given month — days
+// from the adjoining months are included (and visually dimmed) so every
+// week row is a complete 7-day grid.
+function monthGridDays(monthStart) {
+  const firstWeekday = monthStart.getUTCDay();
+  const gridStart = addDays(monthStart, -firstWeekday);
+  const lastOfMonth = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0));
+  const lastWeekday = lastOfMonth.getUTCDay();
+  const gridEnd = addDays(lastOfMonth, 6 - lastWeekday);
+  const days = [];
+  for (let d = gridStart; d <= gridEnd; d = addDays(d, 1)) days.push(d);
+  return days;
+}
+function entriesOnDay(entries, day) {
+  const dayKey = toDateInput(day);
+  return entries.filter((e) => toDateInput(new Date(e.startDate)) <= dayKey && dayKey <= toDateInput(new Date(e.endDate)));
+}
+
+function LeaveCalendarTab({ agencyId, employees, canWrite }) {
+  const [monthStart, setMonthStart] = useState(() => startOfMonthUTC(new Date()));
   const [entries, setEntries] = useState(null);
+  const [leaveTypes, setLeaveTypes] = useState([]);
   const [error, setError] = useState('');
-  const [rangeStart] = useState(() => toDateInput(new Date()));
-  const [rangeEnd] = useState(() => toDateInput(addDays(new Date(), 60)));
+  const [showMark, setShowMark] = useState(false);
+  const [editingEntry, setEditingEntry] = useState(null);
 
   useEffect(() => {
     load();
-  }, [agencyId]);
+  }, [agencyId, monthStart.getTime()]);
 
   async function load() {
     setError('');
     try {
-      const data = await api.hrLeaveCalendar(`?start=${rangeStart}&end=${rangeEnd}${agencyId ? `&agencyId=${agencyId}` : ''}`);
-      setEntries(data.entries || []);
+      const days = monthGridDays(monthStart);
+      const start = toDateInput(days[0]);
+      const end = toDateInput(days[days.length - 1]);
+      const [calRes, typesRes] = await Promise.all([
+        api.hrLeaveCalendar(`?start=${start}&end=${end}${agencyId ? `&agencyId=${agencyId}` : ''}`),
+        canWrite ? api.hrLeaveTypes() : Promise.resolve({ leaveTypes: [] }),
+      ]);
+      setEntries(calRes.entries || []);
+      setLeaveTypes(typesRes.leaveTypes || []);
     } catch (err) {
       setError(err.data?.message || err.message || 'Could not load the leave calendar.');
     }
@@ -1457,27 +1499,220 @@ function LeaveCalendarTab({ agencyId }) {
   if (error) return <EmptyState title="Could not load" description={error} action={<Button size="sm" onClick={load}>RETRY</Button>} />;
   if (entries === null) return <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading…</div>;
 
+  const days = monthGridDays(monthStart);
+  const monthLabel = monthStart.toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  const legendTypes = Array.from(new Map(entries.map((e) => [e.leaveTypeId || e.leaveTypeName, e])).values());
+
   return (
-    <Card>
-      <SectionHeader>LEAVE CALENDAR — NEXT 60 DAYS</SectionHeader>
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-        A protected leave type (e.g. FMLA) always shows as "Approved time off" here unless you hold full HR_ADMIN authority.
-      </div>
-      {entries.length === 0 ? (
-        <EmptyState description="No approved time off in this window." />
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {entries.map((e) => (
-            <div key={e.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'var(--bg-sunken)', borderRadius: 'var(--radius-sm)' }}>
-              <div style={{ fontWeight: 700, fontSize: 13 }}>{e.employeeName}</div>
-              <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                {new Date(e.startDate).toLocaleDateString()} – {new Date(e.endDate).toLocaleDateString()} · <Badge tone={e.isProtected ? 'lime' : 'neutral'}>{e.leaveTypeName}</Badge>
-              </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <Card>
+        <SectionHeader
+          right={
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button size="sm" variant="secondary" onClick={() => setMonthStart(startOfMonthUTC(addDays(monthStart, -1)))}>&larr; PREV</Button>
+              <Button size="sm" variant="secondary" onClick={() => setMonthStart(startOfMonthUTC(new Date()))}>THIS MONTH</Button>
+              <Button size="sm" variant="secondary" onClick={() => setMonthStart(startOfMonthUTC(addDays(monthStart, 32)))}>NEXT &rarr;</Button>
+              {canWrite && <Button size="sm" onClick={() => setShowMark(true)}>+ MARK TIME USED</Button>}
             </div>
-          ))}
+          }
+        >
+          LEAVE CALENDAR — {monthLabel.toUpperCase()}
+        </SectionHeader>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+          A protected leave type (e.g. FMLA) always shows as "Approved time off" here unless you hold full HR_ADMIN authority. Vacation, sick, and every other leave type each get their own consistent color, shown below.
         </div>
+        {legendTypes.length > 0 && (
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+            {legendTypes.map((e) => (
+              <div key={e.leaveTypeId || e.leaveTypeName} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+                <span style={{ width: 10, height: 10, borderRadius: 3, background: colorForLeaveType(e.leaveTypeId), display: 'inline-block' }} />
+                {e.leaveTypeName}
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
+          {['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map((d) => (
+            <div key={d} style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textAlign: 'center', padding: '4px 0' }}>{d}</div>
+          ))}
+          {days.map((day) => {
+            const dayEntries = entriesOnDay(entries, day);
+            const inMonth = day.getUTCMonth() === monthStart.getUTCMonth();
+            return (
+              <div
+                key={toDateInput(day)}
+                style={{
+                  minHeight: 64, padding: 4, borderRadius: 'var(--radius-sm)',
+                  background: inMonth ? 'var(--bg-sunken)' : 'transparent',
+                  opacity: inMonth ? 1 : 0.35,
+                  border: '1px solid var(--border-hairline)',
+                }}
+              >
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>{day.getUTCDate()}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {dayEntries.map((e) => (
+                    <div
+                      key={e.id}
+                      onClick={() => canWrite && e.leaveTypeId !== null && setEditingEntry(e)}
+                      title={`${e.employeeName} — ${e.leaveTypeName}`}
+                      style={{
+                        fontSize: 10, color: '#0b0b0d', background: colorForLeaveType(e.leaveTypeId),
+                        borderRadius: 3, padding: '1px 4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        cursor: canWrite && e.leaveTypeId !== null ? 'pointer' : 'default',
+                      }}
+                    >
+                      {e.employeeName.split(' ')[0]} — {e.leaveTypeName}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      {showMark && canWrite && (
+        <MarkLeaveUsedModal
+          employees={employees}
+          leaveTypes={leaveTypes}
+          onClose={() => setShowMark(false)}
+          onSaved={() => { setShowMark(false); load(); }}
+        />
       )}
-    </Card>
+      {editingEntry && canWrite && (
+        <EditLeaveEntryModal
+          entry={editingEntry}
+          onClose={() => setEditingEntry(null)}
+          onSaved={() => { setEditingEntry(null); load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function MarkLeaveUsedModal({ employees, leaveTypes, onClose, onSaved }) {
+  const [employeeProfileId, setEmployeeProfileId] = useState('');
+  const [leaveTypeId, setLeaveTypeId] = useState('');
+  const [startDate, setStartDate] = useState(toDateInput(new Date()));
+  const [endDate, setEndDate] = useState(toDateInput(new Date()));
+  const [hours, setHours] = useState('8');
+  const [note, setNote] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    if (!employeeProfileId || !leaveTypeId) { setError('Pick an employee and a leave type.'); return; }
+    const requestedMinutes = Math.round(Number(hours) * 60);
+    if (!requestedMinutes || requestedMinutes <= 0) { setError('Enter a positive number of hours.'); return; }
+    setBusy(true);
+    setError('');
+    try {
+      await api.createHrLeaveRequest({
+        employeeProfileId, leaveTypeId, startDate, endDate, requestedMinutes,
+        note: note.trim() || undefined, autoApprove: true,
+      });
+      onSaved();
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Could not mark this time as used.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="Mark Time Used" onClose={onClose}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          Records this as time the employee already took — it's saved as approved immediately and deducted from their balance right away.
+        </div>
+        <label style={labelStyle}>Employee</label>
+        <select value={employeeProfileId} onChange={(e) => setEmployeeProfileId(e.target.value)} style={selectStyle}>
+          <option value="">Select employee…</option>
+          {employees.map((e) => <option key={e.id} value={e.id}>{fullName(e.user)}</option>)}
+        </select>
+        <label style={labelStyle}>Leave Type</label>
+        <select value={leaveTypeId} onChange={(e) => setLeaveTypeId(e.target.value)} style={selectStyle}>
+          <option value="">Select leave type (e.g. Vacation, Sick)…</option>
+          {leaveTypes.map((lt) => <option key={lt.id} value={lt.id}>{lt.name}</option>)}
+        </select>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ flex: 1 }}>
+            <label style={labelStyle}>Start Date</label>
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={inputStyle} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={labelStyle}>End Date</label>
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={inputStyle} />
+          </div>
+        </div>
+        <label style={labelStyle}>Total Hours</label>
+        <input type="number" min="0.5" step="0.5" value={hours} onChange={(e) => setHours(e.target.value)} style={inputStyle} />
+        <label style={labelStyle}>Note (optional)</label>
+        <input value={note} onChange={(e) => setNote(e.target.value)} style={inputStyle} />
+        {error && <div style={{ color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
+        <Button onClick={submit} disabled={busy}>{busy ? 'SAVING…' : 'MARK AS USED'}</Button>
+      </div>
+    </Modal>
+  );
+}
+
+function EditLeaveEntryModal({ entry, onClose, onSaved }) {
+  const [startDate, setStartDate] = useState(toDateInput(new Date(entry.startDate)));
+  const [endDate, setEndDate] = useState(toDateInput(new Date(entry.endDate)));
+  const [hours, setHours] = useState(String((entry.requestedMinutes || 0) / 60));
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    const requestedMinutes = Math.round(Number(hours) * 60);
+    if (!requestedMinutes || requestedMinutes <= 0) { setError('Enter a positive number of hours.'); return; }
+    setBusy(true);
+    setError('');
+    try {
+      await api.updateHrLeaveEntry(entry.id, { startDate, endDate, requestedMinutes });
+      onSaved();
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Could not save this change.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (!confirm(`Remove this ${entry.leaveTypeName} entry for ${entry.employeeName}? Their balance will be restored.`)) return;
+    setBusy(true);
+    setError('');
+    try {
+      await api.cancelHrLeaveEntry(entry.id);
+      onSaved();
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Could not remove this entry.');
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title={`Edit — ${entry.employeeName} (${entry.leaveTypeName})`} onClose={onClose}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ flex: 1 }}>
+            <label style={labelStyle}>Start Date</label>
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={inputStyle} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={labelStyle}>End Date</label>
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={inputStyle} />
+          </div>
+        </div>
+        <label style={labelStyle}>Total Hours</label>
+        <input type="number" min="0.5" step="0.5" value={hours} onChange={(e) => setHours(e.target.value)} style={inputStyle} />
+        {error && <div style={{ color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button onClick={save} disabled={busy}>{busy ? 'SAVING…' : 'SAVE CHANGES'}</Button>
+          <Button variant="danger" onClick={remove} disabled={busy}>REMOVE</Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

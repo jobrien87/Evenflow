@@ -207,6 +207,109 @@ test('GET /hr/leave/calendar redacts a protected leave type to "Approved time of
   assert.equal(ownerEntry.isProtected, true);
 });
 
+test('HR_ADMIN can mark a date range as used directly on another employee\'s record — autoApprove skips the balance check and posts the USE entry immediately', async () => {
+  const typeRes = await call('/hr/leave/types', { method: 'POST', cookie: ownerCookie, body: { name: `Vacation Mark ${suffix}`, isPaid: true } });
+  const leaveTypeId = typeRes.body.leaveType.id;
+  // Deliberately no balance granted — marking a real fact of usage must
+  // never be blocked by balance math, same reasoning as a protected type.
+
+  const res = await call('/hr/leave/requests', {
+    method: 'POST', cookie: ownerCookie,
+    body: { employeeProfileId, leaveTypeId, startDate: '2027-07-01', endDate: '2027-07-01', requestedMinutes: 480, autoApprove: true },
+  });
+  assert.equal(res.status, 201);
+  assert.equal(res.body.leaveRequest.status, 'APPROVED');
+  assert.equal(res.body.autoApproved, true);
+
+  const useEntries = await prisma.hrLeaveLedgerEntry.findMany({ where: { sourceRequestId: res.body.leaveRequest.id, transactionType: 'USE' } });
+  assert.equal(useEntries.length, 1);
+  assert.equal(useEntries[0].minutes, -480);
+
+  const balanceRes = await call('/hr/leave/balance', { cookie: producerCookie });
+  const bal = balanceRes.body.balances.find((b) => b.leaveTypeId === leaveTypeId);
+  assert.equal(bal.balanceMinutes, -480, 'a direct mark-used entry is allowed to take the balance negative rather than being blocked');
+});
+
+test('a non-HR_ADMIN cannot mark leave on someone else\'s record (employeeProfileId is rejected)', async () => {
+  const typeRes = await call('/hr/leave/types', { method: 'POST', cookie: ownerCookie, body: { name: `Sick Mark ${suffix}`, isPaid: true } });
+  const leaveTypeId = typeRes.body.leaveType.id;
+  const res = await call('/hr/leave/requests', {
+    method: 'POST', cookie: producerCookie,
+    body: { employeeProfileId, leaveTypeId, startDate: '2027-07-05', endDate: '2027-07-05', requestedMinutes: 60, autoApprove: true },
+  });
+  // The producer IS employeeProfileId's own user, but only because the
+  // route treats a supplied employeeProfileId as an admin-entry path
+  // requiring real HR_ADMIN authority, regardless of whose id it is.
+  assert.equal(res.status, 403);
+});
+
+test('editing an APPROVED entry posts exactly one ADJUSTMENT ledger entry for the delta, and the balance reflects it immediately', async () => {
+  const typeRes = await call('/hr/leave/types', { method: 'POST', cookie: ownerCookie, body: { name: `EditMe ${suffix}`, isPaid: true } });
+  const leaveTypeId = typeRes.body.leaveType.id;
+  const markRes = await call('/hr/leave/requests', {
+    method: 'POST', cookie: ownerCookie,
+    body: { employeeProfileId, leaveTypeId, startDate: '2027-08-01', endDate: '2027-08-01', requestedMinutes: 240, autoApprove: true },
+  });
+  const entryId = markRes.body.leaveRequest.id;
+
+  const editRes = await call(`/hr/leave/requests/${entryId}`, { method: 'PATCH', cookie: ownerCookie, body: { requestedMinutes: 480 } });
+  assert.equal(editRes.status, 200);
+  assert.equal(editRes.body.leaveRequest.requestedMinutes, 480);
+
+  const adjustments = await prisma.hrLeaveLedgerEntry.findMany({ where: { sourceRequestId: entryId, transactionType: 'ADJUSTMENT' } });
+  assert.equal(adjustments.length, 1);
+  assert.equal(adjustments[0].minutes, -240, 'the extra 240m used is posted as a further negative adjustment');
+
+  const balanceRes = await call('/hr/leave/balance', { cookie: producerCookie });
+  const bal = balanceRes.body.balances.find((b) => b.leaveTypeId === leaveTypeId);
+  assert.equal(bal.balanceMinutes, -480, '0 - 240 (USE) - 240 (ADJUSTMENT) = -480');
+
+  // A no-op edit (same minutes) posts zero additional ledger rows.
+  const noopRes = await call(`/hr/leave/requests/${entryId}`, { method: 'PATCH', cookie: ownerCookie, body: { requestedMinutes: 480 } });
+  assert.equal(noopRes.status, 200);
+  const stillOneAdjustment = await prisma.hrLeaveLedgerEntry.count({ where: { sourceRequestId: entryId, transactionType: 'ADJUSTMENT' } });
+  assert.equal(stillOneAdjustment, 1, 'an edit with no actual minute change posts no new ledger entry');
+});
+
+test('removing an entry posts a REVERSAL that fully restores the balance, and a PENDING request cannot be edited or removed this way', async () => {
+  const typeRes = await call('/hr/leave/types', { method: 'POST', cookie: ownerCookie, body: { name: `RemoveMe ${suffix}`, isPaid: true } });
+  const leaveTypeId = typeRes.body.leaveType.id;
+  await grantBalance(leaveTypeId, 960);
+
+  const markRes = await call('/hr/leave/requests', {
+    method: 'POST', cookie: ownerCookie,
+    body: { employeeProfileId, leaveTypeId, startDate: '2027-09-01', endDate: '2027-09-01', requestedMinutes: 480, autoApprove: true },
+  });
+  const entryId = markRes.body.leaveRequest.id;
+
+  const cancelRes = await call(`/hr/leave/requests/${entryId}/cancel`, { method: 'POST', cookie: ownerCookie });
+  assert.equal(cancelRes.status, 200);
+  assert.equal(cancelRes.body.leaveRequest.status, 'CANCELLED');
+
+  const reversals = await prisma.hrLeaveLedgerEntry.findMany({ where: { sourceRequestId: entryId, transactionType: 'REVERSAL' } });
+  assert.equal(reversals.length, 1);
+  assert.equal(reversals[0].minutes, 480);
+
+  const balanceRes = await call('/hr/leave/balance', { cookie: producerCookie });
+  const bal = balanceRes.body.balances.find((b) => b.leaveTypeId === leaveTypeId);
+  assert.equal(bal.balanceMinutes, 960, '960 granted - 480 used + 480 reversed = 960, fully restored');
+
+  // Cancelling again (already CANCELLED, not APPROVED) is rejected.
+  const secondCancel = await call(`/hr/leave/requests/${entryId}/cancel`, { method: 'POST', cookie: ownerCookie });
+  assert.equal(secondCancel.status, 409);
+
+  // A still-PENDING request (never approved) cannot be edited or cancelled via these routes.
+  const pendingRes = await call('/hr/leave/requests', {
+    method: 'POST', cookie: producerCookie,
+    body: { leaveTypeId, startDate: '2027-09-05', endDate: '2027-09-05', requestedMinutes: 60 },
+  });
+  const pendingId = pendingRes.body.leaveRequest.id;
+  const editPending = await call(`/hr/leave/requests/${pendingId}`, { method: 'PATCH', cookie: ownerCookie, body: { requestedMinutes: 120 } });
+  assert.equal(editPending.status, 409);
+  const cancelPending = await call(`/hr/leave/requests/${pendingId}/cancel`, { method: 'POST', cookie: ownerCookie });
+  assert.equal(cancelPending.status, 409);
+});
+
 test('cross-agency denial: an owner cannot approve or view a leave request belonging to a different agency', async () => {
   const typeRes = await call('/hr/leave/types', { method: 'POST', cookie: ownerCookie, body: { name: `CrossAgency ${suffix}`, isPaid: true } });
   const leaveTypeId = typeRes.body.leaveType.id;
