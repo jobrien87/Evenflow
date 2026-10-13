@@ -401,6 +401,7 @@ export const api = {
   // for them).
   hrOverview: (agencyId = '') => request(`/hr/overview${agencyId ? `?agencyId=${agencyId}` : ''}`),
   hrEmployees: (params = '') => request(`/hr/employees${params}`),
+  hrEmployeeMe: () => request('/hr/employees/me'),
   hrEmployeeDetail: (id) => request(`/hr/employees/${id}`),
   hrMyEmployeeProfile: () => request('/hr/employees/me'),
   createHrEmployee: (payload) => request('/hr/employees', { method: 'POST', body: payload }),

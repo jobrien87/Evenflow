@@ -190,6 +190,49 @@ test('creating an HR employee profile for an existing User, then PATCHing it, wr
   assert.equal(historyAfterNoop, 2, 'a PATCH that changes nothing must never fabricate a history event');
 });
 
+test('birthday (on User) and hireDate (on HrEmployeeProfile) round-trip through create and edit, and birthday is never written when omitted', async () => {
+  const freshUser = await prisma.user.create({
+    data: { email: `hr-dob-${suffix}@test.local`, passwordHash: await bcrypt.hash('TestPass123!', 12), firstName: 'Dob', lastName: 'Test', role: 'PRODUCER', agencyId: agencyA, status: 'ACTIVE' },
+  });
+
+  const createRes = await fetch(`${baseUrl}/api/hr/employees`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerACookie },
+    body: JSON.stringify({ userId: freshUser.id, birthday: '1990-06-15', hireDate: '2022-03-01' }),
+  });
+  assert.equal(createRes.status, 201);
+  const employee = (await createRes.json()).employee;
+  assert.equal(employee.user.birthday.slice(0, 10), '1990-06-15', 'birthday is written onto the real User row, not a second column');
+  assert.equal(employee.hireDate.slice(0, 10), '2022-03-01');
+
+  const storedUser = await prisma.user.findUnique({ where: { id: freshUser.id } });
+  assert.equal(storedUser.birthday.toISOString().slice(0, 10), '1990-06-15');
+
+  // Edit: changing just hireDate must never touch the already-set birthday.
+  const editRes = await fetch(`${baseUrl}/api/hr/employees/${employee.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: ownerACookie },
+    body: JSON.stringify({ version: employee.version, hireDate: '2022-04-01' }),
+  });
+  assert.equal(editRes.status, 200);
+  const stillSameBirthday = await prisma.user.findUnique({ where: { id: freshUser.id } });
+  assert.equal(stillSameBirthday.birthday.toISOString().slice(0, 10), '1990-06-15', 'omitting birthday on an edit leaves it untouched');
+  const updatedProfile = await prisma.hrEmployeeProfile.findUnique({ where: { id: employee.id } });
+  assert.equal(updatedProfile.hireDate.toISOString().slice(0, 10), '2022-04-01');
+
+  // Explicit null clears it.
+  const clearRes = await fetch(`${baseUrl}/api/hr/employees/${employee.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: ownerACookie },
+    body: JSON.stringify({ version: updatedProfile.version, birthday: null }),
+  });
+  assert.equal(clearRes.status, 200);
+  const clearedUser = await prisma.user.findUnique({ where: { id: freshUser.id } });
+  assert.equal(clearedUser.birthday, null);
+
+  await prisma.hrEmploymentHistoryEvent.deleteMany({ where: { employeeProfileId: employee.id } });
+  await prisma.hrEmployeeProfile.delete({ where: { id: employee.id } });
+  await prisma.session.deleteMany({ where: { userId: freshUser.id } });
+  await prisma.user.delete({ where: { id: freshUser.id } });
+});
+
 test('GET /hr/employees/me is self-service — returns null (not 404) with no profile, and works with no HR role grant', async () => {
   const noProfile = await fetch(`${baseUrl}/api/hr/employees/me`, { headers: { Cookie: `evenflow_session=${(await createSession(producerBId)).rawToken}` } });
   // producerB's agency (B) has hrEnabled: false, so the module gate fires first.

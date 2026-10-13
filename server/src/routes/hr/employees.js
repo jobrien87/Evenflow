@@ -11,7 +11,7 @@ const { requireHrRole } = require('../../middleware/hrAuth');
 const router = express.Router();
 
 const EMPLOYEE_INCLUDE = {
-  user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true, role: true, status: true, officeId: true } },
+  user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true, role: true, status: true, officeId: true, birthday: true } },
   department: { select: { id: true, name: true } },
   position: { select: { id: true, title: true } },
   manager: { select: { id: true, firstName: true, lastName: true } },
@@ -77,6 +77,11 @@ router.get('/:id', requireHrRole('HR_ADMIN', 'HR_AUDITOR'), async (req, res, nex
 
 const createSchema = z.object({
   userId: z.string().uuid(),
+  // Lives on the real User row (the same field the self-service
+  // Personalize page already sets/reads — one shared field, never a
+  // second DOB column), so an HR_ADMIN setting it here immediately
+  // drives the existing birthday-celebration popup for that person.
+  birthday: z.coerce.date().optional(),
   legalEmployerId: z.string().uuid().optional(),
   employeeNumber: z.string().trim().max(50).optional(),
   legalFirstName: z.string().trim().max(100).optional(),
@@ -125,7 +130,16 @@ router.post('/', requireHrRole('HR_ADMIN'), async (req, res, next) => {
       }
     }
 
-    const employee = await prisma.hrEmployeeProfile.create({ data: { agencyId: req.hrAgencyId, ...parsed.data }, include: EMPLOYEE_INCLUDE });
+    const { birthday, ...profileData } = parsed.data;
+    // The birthday write (on User) runs BEFORE the profile create whenever
+    // present, so the create's own EMPLOYEE_INCLUDE (which selects
+    // user.birthday) reads the fresh value in the same response — never a
+    // stale pre-write snapshot.
+    const results = await prisma.$transaction([
+      ...(birthday !== undefined ? [prisma.user.update({ where: { id: parsed.data.userId }, data: { birthday } })] : []),
+      prisma.hrEmployeeProfile.create({ data: { agencyId: req.hrAgencyId, ...profileData }, include: EMPLOYEE_INCLUDE }),
+    ]);
+    const employee = results[results.length - 1];
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role, agencyId: req.hrAgencyId,
       action: 'hr.employee_profile_created', entityType: 'HrEmployeeProfile', entityId: employee.id,
@@ -139,6 +153,7 @@ router.post('/', requireHrRole('HR_ADMIN'), async (req, res, next) => {
 
 const updateSchema = z.object({
   version: z.number().int(),
+  birthday: z.coerce.date().nullable().optional(),
   legalEmployerId: z.string().uuid().nullable().optional(),
   employeeNumber: z.string().trim().max(50).nullable().optional(),
   legalFirstName: z.string().trim().max(100).nullable().optional(),
@@ -164,7 +179,7 @@ router.patch('/:id', requireHrRole('HR_ADMIN'), async (req, res, next) => {
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
     }
-    const { version, officeId, ...rest } = parsed.data;
+    const { version, officeId, birthday, ...rest } = parsed.data;
 
     const existing = await prisma.hrEmployeeProfile.findUnique({ where: { id: req.params.id }, include: { user: { select: { officeId: true, agencyId: true } } } });
     if (!existing || existing.agencyId !== req.hrAgencyId) {
@@ -196,11 +211,18 @@ router.patch('/:id', requireHrRole('HR_ADMIN'), async (req, res, next) => {
       historyEvents.push({ employeeProfileId: existing.id, agencyId: req.hrAgencyId, changeType: 'STATUS_CHANGE', previousValue: { offboardingStatus: existing.offboardingStatus }, newValue: { offboardingStatus: rest.offboardingStatus }, recordedById: req.user.id });
     }
 
-    const [updated] = await prisma.$transaction([
-      prisma.hrEmployeeProfile.update({ where: { id: existing.id }, data: { ...rest, version: { increment: 1 } }, include: EMPLOYEE_INCLUDE }),
+    // Both User-side writes (officeId, birthday — see createSchema's
+    // comment on why birthday lives there, not on HrEmployeeProfile) run
+    // BEFORE the profile update, so its own EMPLOYEE_INCLUDE (which
+    // selects both) reads fresh values in the same response.
+    const userWritesBeforeProfile = (officeId !== undefined ? 1 : 0) + (birthday !== undefined ? 1 : 0);
+    const results = await prisma.$transaction([
       ...(officeId !== undefined ? [prisma.user.update({ where: { id: existing.userId }, data: { officeId } })] : []),
+      ...(birthday !== undefined ? [prisma.user.update({ where: { id: existing.userId }, data: { birthday } })] : []),
+      prisma.hrEmployeeProfile.update({ where: { id: existing.id }, data: { ...rest, version: { increment: 1 } }, include: EMPLOYEE_INCLUDE }),
       ...historyEvents.map((data) => prisma.hrEmploymentHistoryEvent.create({ data })),
     ]);
+    const updated = results[userWritesBeforeProfile];
 
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role, agencyId: req.hrAgencyId,

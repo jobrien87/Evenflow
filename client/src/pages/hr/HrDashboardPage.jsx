@@ -305,6 +305,8 @@ function CreateEmployeeModal({ onClose, usersWithoutProfile, departments, positi
   const [departmentId, setDepartmentId] = useState('');
   const [positionId, setPositionId] = useState('');
   const [employeeNumber, setEmployeeNumber] = useState('');
+  const [birthday, setBirthday] = useState('');
+  const [hireDate, setHireDate] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -319,6 +321,8 @@ function CreateEmployeeModal({ onClose, usersWithoutProfile, departments, positi
         departmentId: departmentId || undefined,
         positionId: positionId || undefined,
         employeeNumber: employeeNumber.trim() || undefined,
+        birthday: birthday || undefined,
+        hireDate: hireDate || undefined,
       });
       onCreated();
     } catch (err) {
@@ -340,6 +344,10 @@ function CreateEmployeeModal({ onClose, usersWithoutProfile, departments, positi
         </select>
         <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Employee Number</label>
         <input value={employeeNumber} onChange={(e) => setEmployeeNumber(e.target.value)} style={inputStyle} placeholder="Optional" />
+        <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Date of Birth</label>
+        <input type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} style={inputStyle} />
+        <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Start Date</label>
+        <input type="date" value={hireDate} onChange={(e) => setHireDate(e.target.value)} style={inputStyle} />
         <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Department</label>
         <select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} style={selectStyle}>
           <option value="">None</option>
@@ -363,6 +371,8 @@ function EmployeeDetail({ employee, departments, positions, agencyUsers, canWrit
   const [managerId, setManagerId] = useState(employee.managerId || '');
   const [onboardingStatus, setOnboardingStatus] = useState(employee.onboardingStatus);
   const [offboardingStatus, setOffboardingStatus] = useState(employee.offboardingStatus);
+  const [birthday, setBirthday] = useState(employee.user?.birthday ? toDateInput(new Date(employee.user.birthday)) : '');
+  const [hireDate, setHireDate] = useState(employee.hireDate ? toDateInput(new Date(employee.hireDate)) : '');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [history, setHistory] = useState(employee.employmentHistory || null);
@@ -384,6 +394,8 @@ function EmployeeDetail({ employee, departments, positions, agencyUsers, canWrit
         managerId: managerId || null,
         onboardingStatus,
         offboardingStatus,
+        birthday: birthday || null,
+        hireDate: hireDate || null,
       });
       onChange();
     } catch (err) {
@@ -430,6 +442,14 @@ function EmployeeDetail({ employee, departments, positions, agencyUsers, canWrit
               {OFFBOARDING_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
+          <div>
+            <label style={labelStyle}>Date of Birth</label>
+            <input type="date" value={birthday} onChange={(e) => setBirthday(e.target.value)} style={selectStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>Start Date</label>
+            <input type="date" value={hireDate} onChange={(e) => setHireDate(e.target.value)} style={selectStyle} />
+          </div>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: 13, color: 'var(--text-secondary)' }}>
@@ -438,6 +458,8 @@ function EmployeeDetail({ employee, departments, positions, agencyUsers, canWrit
           <div><span style={labelStyle}>Manager</span>{fullName(agencyUsers.find((u) => u.id === managerId)) || '—'}</div>
           <div><span style={labelStyle}>Onboarding</span>{onboardingStatus}</div>
           <div><span style={labelStyle}>Offboarding</span>{offboardingStatus}</div>
+          <div><span style={labelStyle}>Date of Birth</span>{birthday || '—'}</div>
+          <div><span style={labelStyle}>Start Date</span>{hireDate || '—'}</div>
         </div>
       )}
       {error && <div style={{ color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
