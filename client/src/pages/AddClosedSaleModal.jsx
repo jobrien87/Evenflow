@@ -166,7 +166,21 @@ export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill, 
     }
   }
 
-  const policyTypes = form.carrier ? policyTypesForCarrier(form.carrier) : [];
+  // A sale's carrier/policyType can arrive from free text (e.g. the
+  // disposition-nudge prefill pulls from a Lead's own unconstrained
+  // saleCarrier/salePolicyTypeDetail fields), so the stored value may not
+  // exactly match this dropdown's vocabulary. Without this, a required
+  // <select> with no matching <option> has nothing "selected" and blocks
+  // saving ANY edit — including one that never touches these two fields.
+  // Injecting the current value as a selectable option keeps it intact
+  // unless the user deliberately changes it.
+  const carrierOptions = form.carrier && !CARRIER_OPTIONS.includes(form.carrier)
+    ? [form.carrier, ...CARRIER_OPTIONS]
+    : CARRIER_OPTIONS;
+  const policyTypesBase = form.carrier ? policyTypesForCarrier(form.carrier) : [];
+  const policyTypes = form.policyType && !policyTypesBase.includes(form.policyType)
+    ? [form.policyType, ...policyTypesBase]
+    : policyTypesBase;
   const modalTitle = isEdit ? 'EDIT CLOSED SALE' : `ADD CLOSED SALE${savedCount > 0 ? ` (${savedCount} saved)` : ''}`;
 
   return (
@@ -228,7 +242,7 @@ export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill, 
             </select>
             <select style={s.input} value={form.carrier} onChange={(e) => { setField('carrier', e.target.value); setField('policyType', ''); }} required>
               <option value="">Select carrier…</option>
-              {CARRIER_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+              {carrierOptions.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
             <select style={s.input} value={form.policyType} onChange={(e) => setField('policyType', e.target.value)} required disabled={!form.carrier}>
               <option value="">{form.carrier ? 'Select policy type…' : 'Pick a carrier first'}</option>
