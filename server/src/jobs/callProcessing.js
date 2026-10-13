@@ -21,14 +21,31 @@ async function setStatus(callId, status, extra = {}) {
   return prisma.call.update({ where: { id: callId }, data: { status, ...extra } });
 }
 
+// Compare-and-swap status transition: only writes if the row is still in
+// one of `fromStatuses`, and reports whether it actually won the race.
+// The automatic pipeline (enqueueCallProcessing) and a manually-entered
+// transcript (enqueueAnalysis) are two independent, concurrently-fired
+// background jobs that can both be in flight for the same call — without
+// this guard, a slower automatic-pipeline step (e.g. "no transcription
+// provider configured") can land its unconditional FAILED write after a
+// faster manual-entry path has already completed scoring, silently
+// regressing a COMPLETE call back to FAILED.
+async function setStatusIfCurrently(callId, fromStatuses, status, extra = {}) {
+  const result = await prisma.call.updateMany({ where: { id: callId, status: { in: fromStatuses } }, data: { status, ...extra } });
+  return result.count > 0;
+}
+
 // Shared by the automatic pipeline (after a real transcription result) and
 // the manual-transcript route (after a human pastes one in) — one real
-// analysis step, never two divergent implementations of it.
+// analysis step, never two divergent implementations of it. Guarded so
+// that if both paths ever race to analyze the same call, only the one
+// that wins the TRANSCRIBED -> ANALYZING transition actually runs it.
 async function runAnalysis(callId) {
+  const claimed = await setStatusIfCurrently(callId, ['TRANSCRIBED'], 'ANALYZING');
+  if (!claimed) return;
+
   const call = await prisma.call.findUnique({ where: { id: callId } });
   if (!call) return;
-
-  await setStatus(callId, 'ANALYZING');
 
   let analysisResult;
   try {
@@ -128,8 +145,12 @@ async function runAnalysis(callId) {
 
 async function processCall(callId) {
   try {
-    await setStatus(callId, 'QUEUED');
-    await setStatus(callId, 'TRANSCRIBING');
+    // Each transition only proceeds if the call is still where this
+    // pipeline left it — if a manually-entered transcript has already
+    // moved it on (see enqueueAnalysis), these become no-ops rather than
+    // clobbering whatever that faster path already wrote.
+    if (!(await setStatusIfCurrently(callId, ['UPLOADED'], 'QUEUED'))) return;
+    if (!(await setStatusIfCurrently(callId, ['QUEUED'], 'TRANSCRIBING'))) return;
 
     const call = await prisma.call.findUnique({ where: { id: callId } });
     if (!call) return;
@@ -138,7 +159,7 @@ async function processCall(callId) {
     const transcriptionResult = await transcribe(audioBuffer, call.mimeType);
 
     if (!transcriptionResult.available) {
-      await setStatus(callId, 'FAILED', {
+      await setStatusIfCurrently(callId, ['TRANSCRIBING'], 'FAILED', {
         failureReason: 'Transcription service is not configured. The recording is safely stored and can be retried once a provider is connected, or a transcript can be entered manually.',
       });
       return;
@@ -146,15 +167,15 @@ async function processCall(callId) {
 
     // Redact the moment a transcript is captured — a raw, unredacted
     // transcript is never written to the database, not even transiently.
-    await setStatus(callId, 'TRANSCRIBED', {
+    if (!(await setStatusIfCurrently(callId, ['TRANSCRIBING'], 'TRANSCRIBED', {
       transcript: redactTranscript(transcriptionResult.transcript),
       transcriptProvider: transcriptionResult.provider,
-    });
+    }))) return;
 
     await runAnalysis(callId);
   } catch (err) {
     console.error(`[callProcessing] unexpected failure for call ${callId}`, err);
-    await setStatus(callId, 'FAILED', {
+    await setStatusIfCurrently(callId, ['QUEUED', 'TRANSCRIBING'], 'FAILED', {
       failureReason: 'An unexpected error occurred while processing this call. It can be retried.',
     }).catch(() => {});
   }
@@ -172,4 +193,4 @@ function enqueueAnalysis(callId) {
   });
 }
 
-module.exports = { enqueueCallProcessing, enqueueAnalysis, processCall, runAnalysis };
+module.exports = { enqueueCallProcessing, enqueueAnalysis, processCall, runAnalysis, setStatusIfCurrently };

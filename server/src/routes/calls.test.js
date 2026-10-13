@@ -15,6 +15,7 @@ const bcrypt = require('bcryptjs');
 const { prisma } = require('../lib/db');
 const { createSession } = require('../lib/auth');
 const { read } = require('../lib/storage');
+const { setStatusIfCurrently } = require('../jobs/callProcessing');
 const app = require('../app');
 
 const suffix = Date.now();
@@ -205,6 +206,26 @@ test('scoring completion burns the recording and discards the transcript — ver
   assert.equal(reenterRes.status, 409);
   const reenterBody = await reenterRes.json();
   assert.equal(reenterBody.error, 'ALREADY_SCORED');
+});
+
+test('a stale automatic-pipeline failure write can never clobber a call that a manual transcript entry already advanced past it', async () => {
+  // The automatic pipeline (enqueued on upload) and a manually-entered
+  // transcript (enqueued on PATCH /transcript) are two independent
+  // background jobs that can race on the same call row. Deterministically
+  // reproduces the exact ordering that once let the automatic pipeline's
+  // "no transcription provider configured" FAILED write land after a
+  // faster manual-entry path had already moved the call on to TRANSCRIBED
+  // (or further) — without relying on real timing, which only reproduces
+  // flakily depending on machine/CI load.
+  const call = await uploadCall();
+  await prisma.call.update({ where: { id: call.id }, data: { status: 'TRANSCRIBED', transcript: 'a human already entered this' } });
+
+  const wrote = await setStatusIfCurrently(call.id, ['TRANSCRIBING'], 'FAILED', { failureReason: 'stale automatic-pipeline failure' });
+  assert.equal(wrote, false, 'a FAILED write from a stale TRANSCRIBING precondition must never apply once the row has moved on');
+
+  const afterward = await prisma.call.findUnique({ where: { id: call.id } });
+  assert.equal(afterward.status, 'TRANSCRIBED', 'the manually-advanced status must survive the stale write attempt');
+  assert.equal(afterward.failureReason, null, 'the stale failure reason must never be written');
 });
 
 test('a call that fails before a transcript exists keeps its recording intact for retry', async () => {
