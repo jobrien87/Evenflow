@@ -38,15 +38,16 @@ const CARRIER_POLICY_TYPES = {
     'Allstate Lifetime UL', 'Allstate TrueFit', 'Auto-Non Standard', 'Auto-Specialty', 'Auto-Standard',
     'Boat', 'Business Owners Policy', 'Business Package Policy', 'Commercial Auto',
     'Commercial Auto - Fleet', 'Commercial Umbrella', 'Condo', 'Fixed Annuity', 'Flood',
-    'General Liability', 'Home', 'Inland Marine', 'Landlord', 'Mobile Home', 'Motor Club',
-    'Motorcycle', 'Motorhome (RV)', 'Mutual Fund', 'Off-Road Vehicle (ATV)', 'Production Credit',
-    'PUP', 'Renters', 'Scheduled Personal Property', 'Term Life - Other', 'Trailers',
-    'Universal Life - Other', 'Variable Annuity', 'Variable Life', 'Whole Life',
+    'General Liability', 'Home', 'Inland Marine', 'Jewelry', 'Landlord', 'Mobile Home', 'Motor Club',
+    'Motorcycle', 'Motorhome', 'Motorhome (RV)', 'Mutual Fund', 'Off-Road Vehicle (ATV)', 'Pet Health',
+    'Production Credit', 'PUP', 'Renters', 'Roadside', 'Scheduled Personal Property', 'Term Life - Other',
+    'Trailers', 'Umbrella', 'Universal Life - Other', 'Variable Annuity', 'Variable Life', 'Whole Life',
     'Whole Life Advantage', 'Whole Life Tribute',
   ],
   'National General': [
     'Antique Auto', 'ATV', 'Auto', 'Commercial', 'Condo', 'Dental (Indiv)', 'Disability (Short-term)',
-    'Flood', 'Home', 'Mobile Home', 'Other', 'Renters', 'RV', 'Short Term Medical', 'Vision (Indiv)',
+    'Flood', 'Home', 'Jewelry', 'Mobile Home', 'Motorhome', 'Other', 'Pet Health', 'Renters',
+    'Roadside', 'RV', 'Short Term Medical', 'Umbrella', 'Vision (Indiv)',
   ],
 };
 

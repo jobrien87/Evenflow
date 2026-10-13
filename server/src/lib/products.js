@@ -4,7 +4,10 @@
 // already expects ('Auto', 'Home', 'Life') so a product marked SOLD here
 // feeds the exact same cross-sell gap detection a Transfer-sourced sale
 // already does.
-const PRODUCTS = ['AUTO', 'HOME', 'HOME_LANDLORD', 'RENTERS', 'LIFE', 'HEALTH', 'COMMERCIAL', 'BOAT', 'MOTORCYCLE'];
+const PRODUCTS = [
+  'AUTO', 'HOME', 'HOME_LANDLORD', 'RENTERS', 'LIFE', 'HEALTH', 'COMMERCIAL', 'BOAT', 'MOTORCYCLE',
+  'MOTORHOME', 'JEWELRY', 'PET_HEALTH', 'ROADSIDE', 'UMBRELLA',
+];
 
 const PRODUCT_LABELS = {
   AUTO: 'Auto',
@@ -16,6 +19,11 @@ const PRODUCT_LABELS = {
   COMMERCIAL: 'Commercial',
   BOAT: 'Boat',
   MOTORCYCLE: 'Motorcycle',
+  MOTORHOME: 'Motorhome',
+  JEWELRY: 'Jewelry',
+  PET_HEALTH: 'Pet Health',
+  ROADSIDE: 'Roadside',
+  UMBRELLA: 'Umbrella',
 };
 
 // Read-time grouping only: vendor intake stores exact title-case strings,

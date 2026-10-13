@@ -118,6 +118,52 @@ test('a standalone sale reaches Billboard\'s byProducer and byProduct with the r
   await prisma.revenueEvent.deleteMany({ where: { notes: { contains: sale.id } } });
 });
 
+test('new policy types (Motorhome, Jewelry, Pet Health, Roadside, Umbrella) are accepted, persist, and group correctly on Billboard', async () => {
+  const cases = [
+    { carrier: 'Allstate', policyType: 'Motorhome', productFamily: 'MOTORHOME' },
+    { carrier: 'Allstate', policyType: 'Jewelry', productFamily: 'JEWELRY' },
+    { carrier: 'National General', policyType: 'Pet Health', productFamily: 'PET_HEALTH' },
+    { carrier: 'Allstate', policyType: 'Roadside', productFamily: 'ROADSIDE' },
+    { carrier: 'National General', policyType: 'Umbrella', productFamily: 'UMBRELLA' },
+  ];
+
+  const saleIds = [];
+  for (const c of cases) {
+    const res = await fetch(`${baseUrl}/api/sales`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+      body: JSON.stringify(basePayload({ ...c, premiumCents: 10000 })),
+    });
+    const body = await res.json();
+    assert.equal(res.status, 201, JSON.stringify(body));
+    saleIds.push(body.sale.id);
+
+    // Persists exactly as submitted, independent of creation.
+    const stored = await prisma.sale.findUnique({ where: { id: body.sale.id } });
+    assert.equal(stored.policyType, c.policyType);
+    assert.equal(stored.productFamily, c.productFamily);
+
+    // A reload (fresh GET) reflects the same values, not just the create response.
+    const getRes = await fetch(`${baseUrl}/api/sales?from=2000-01-01&to=2100-01-01`, { headers: { Cookie: ownerCookie } });
+    const getBody = await getRes.json();
+    const reloaded = getBody.sales.find((s) => s.id === body.sale.id);
+    assert.ok(reloaded, 'the sale must be reachable on reload');
+    assert.equal(reloaded.policyType, c.policyType);
+    assert.equal(reloaded.productFamily, c.productFamily);
+  }
+
+  const from = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const to = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  const billboard = await computeBillboard({ agencyId, granularity: 'day', from, to });
+  for (const c of cases) {
+    const productRow = billboard.byProduct.find((p) => p.product === c.productFamily);
+    assert.ok(productRow, `${c.productFamily} must appear in Billboard's product breakdown`);
+    assert.equal(productRow.soldCount >= 1, true);
+  }
+
+  await prisma.sale.deleteMany({ where: { id: { in: saleIds } } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: { in: saleIds } } });
+});
+
 test('zero-premium and zero-item sales are preserved, not coerced to a default', async () => {
   const res = await fetch(`${baseUrl}/api/sales`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },

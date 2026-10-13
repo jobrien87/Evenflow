@@ -12,6 +12,11 @@ export const PRODUCT_META = {
   COMMERCIAL: { label: 'Commercial', icon: 'briefcase' },
   BOAT: { label: 'Boat', icon: 'tag' },
   MOTORCYCLE: { label: 'Motorcycle', icon: 'tag' },
+  MOTORHOME: { label: 'Motorhome', icon: 'tag' },
+  JEWELRY: { label: 'Jewelry', icon: 'tag' },
+  PET_HEALTH: { label: 'Pet Health', icon: 'tag' },
+  ROADSIDE: { label: 'Roadside', icon: 'tag' },
+  UMBRELLA: { label: 'Umbrella', icon: 'tag' },
 };
 
 export const PRODUCTS = Object.keys(PRODUCT_META);

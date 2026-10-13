@@ -5,7 +5,10 @@ const path = require('node:path');
 const { PRODUCTS, PRODUCT_LABELS, reportingProductKey } = require('./products');
 
 test('quote and closed-sale catalog appends explicit Boat/Motorcycle categories', () => {
-  assert.deepEqual(PRODUCTS, ['AUTO', 'HOME', 'HOME_LANDLORD', 'RENTERS', 'LIFE', 'HEALTH', 'COMMERCIAL', 'BOAT', 'MOTORCYCLE']);
+  assert.deepEqual(PRODUCTS, [
+    'AUTO', 'HOME', 'HOME_LANDLORD', 'RENTERS', 'LIFE', 'HEALTH', 'COMMERCIAL', 'BOAT', 'MOTORCYCLE',
+    'MOTORHOME', 'JEWELRY', 'PET_HEALTH', 'ROADSIDE', 'UMBRELLA',
+  ]);
   assert.equal(PRODUCT_LABELS.BOAT, 'Boat');
   assert.equal(PRODUCT_LABELS.MOTORCYCLE, 'Motorcycle');
   assert.equal(new Set(PRODUCTS).size, PRODUCTS.length);
