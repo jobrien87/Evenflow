@@ -159,6 +159,7 @@ function TaskGroup({ title, tasks, tone, onDone }) {
                 {t.type.replace(/_/g, ' ')}
                 {t.lead?.customer ? ` · ${t.lead.customer.firstName} ${t.lead.customer.lastName}` : ''}
                 {t.dueAt ? ` · due ${new Date(t.dueAt).toLocaleString()}` : ''}
+                {' · '}{t.assignedTo ? `${t.assignedTo.firstName} ${t.assignedTo.lastName}` : 'Unassigned'}
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

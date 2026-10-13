@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { Card, SectionHeader, StatTile, BarRow, Badge, Button, ExportButton, EmptyState, TrendChart, MonthSelector } from '../ui';
+import { Card, SectionHeader, StatTile, BarRow, Badge, Button, ExportButton, EmptyState, TrendChart, MonthSelector, Icon } from '../ui';
 import { money } from '../lib/format';
 import { downloadCsv } from '../lib/downloadCsv';
 import AddClosedSaleModal from './AddClosedSaleModal';
@@ -152,6 +152,11 @@ export default function BillboardPanel() {
             <div key={row.userId} style={s.row} className="ui-row-stack">
               <div style={s.rowLeft}>
                 <Badge tone={i === 0 ? 'accent' : 'neutral'}>{`#${i + 1}`}</Badge>
+                {i === 0 && row.premiumCents > 0 && (
+                  <span title="First place this period" style={s.trophy}>
+                    <Icon name="trophy" size={16} />
+                  </span>
+                )}
                 <span style={s.rowName}>
                   {row.firstName} {row.lastName}
                   {row.userId === user?.id && <span style={s.youTag}> (you)</span>}
@@ -253,6 +258,7 @@ const s = {
   rowLeft: { display: 'flex', alignItems: 'center', gap: 10 },
   rowName: { fontWeight: 600, fontSize: 14, color: 'var(--text-primary)' },
   youTag: { color: 'var(--accent)', fontSize: 12, fontWeight: 400 },
+  trophy: { display: 'flex', color: '#e8b923' },
   rowRight: { display: 'flex', gap: 16 },
   rowStat: { fontSize: 13, color: 'var(--text-secondary)' },
   empty: { color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 13 },

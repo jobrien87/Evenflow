@@ -821,7 +821,7 @@ function TasksBlock({ lead, user, onDone }) {
               icon="checklist"
               tone={t.status === 'COMPLETED' ? 'accent' : t.status === 'CANCELLED' ? 'danger' : 'warning'}
               title={t.title}
-              meta={`${t.type.replace(/_/g, ' ')}${t.dueAt ? ` · due ${fmt(t.dueAt)}` : ''} · ${t.status}`}
+              meta={`${t.type.replace(/_/g, ' ')}${t.dueAt ? ` · due ${fmt(t.dueAt)}` : ''} · ${t.status} · ${t.assignedTo ? `${t.assignedTo.firstName} ${t.assignedTo.lastName}` : 'Unassigned'}`}
               action={t.status === 'OPEN' && <Button variant="ghost" size="sm" onClick={() => complete(t.id)}>MARK DONE</Button>}
             />
           ))}

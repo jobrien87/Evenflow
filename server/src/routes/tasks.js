@@ -24,7 +24,10 @@ router.get('/', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER', 'TELEM
     };
     const tasks = await prisma.task.findMany({
       where,
-      include: { lead: { include: { customer: true } } },
+      include: {
+        lead: { include: { customer: true } },
+        assignedTo: { select: { id: true, firstName: true, lastName: true } },
+      },
       orderBy: [{ priority: 'desc' }, { dueAt: 'asc' }],
     });
     return res.json({ success: true, tasks });

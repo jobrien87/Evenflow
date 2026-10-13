@@ -5,6 +5,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { computeGoalActual } = require('../lib/runningReport');
 const { parseGoalText } = require('../lib/goalParser');
+const { computeGoalPace } = require('../lib/goalPacing');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -26,6 +27,18 @@ router.get('/', async (req, res, next) => {
       take: 100,
     });
 
+    // Pacing needs a real IANA timezone to count working days correctly —
+    // only resolvable when every goal in this response shares one agency
+    // (the common case: anyone but a Platform Owner browsing unscoped).
+    // Falls back to the Agency model's own default otherwise, same as
+    // every other timezone-aware feature in this app.
+    let timeZone = 'America/New_York';
+    if (where.agencyId) {
+      const agency = await prisma.agency.findUnique({ where: { id: where.agencyId }, select: { timezone: true } });
+      if (agency?.timezone) timeZone = agency.timezone;
+    }
+    const now = new Date();
+
     // Real live progress for every goal returned (not just currently-active
     // ones) — same computeGoalActual runningReport.js's own report uses, so
     // this is never a second, divergent calculation. A goal that just
@@ -43,11 +56,43 @@ router.get('/', async (req, res, next) => {
           justCompleted = true;
         }
 
-        return { ...g, actual, progressPercent, completedAt, justCompleted };
+        const pace = computeGoalPace({ periodStart: g.periodStart, periodEnd: g.periodEnd, targetValue: g.targetValue, actual, now, timeZone });
+
+        return { ...g, actual, progressPercent, completedAt, justCompleted, pace };
       })
     );
 
-    return res.json({ success: true, goals: withProgress });
+    // Agency-level roll-up: for each distinct metric+period combination
+    // among the individual (producer-assigned) goals just returned, sum
+    // targetValue and actual across those producers' own goals, then
+    // derive percent-to-goal from the two sums — never by averaging each
+    // producer's own percentage, which would silently weight a producer
+    // with a tiny quota the same as one with a huge one. A separate
+    // agency-wide goal (userId: null), if one exists for the same
+    // metric+period, is reported alongside its own group rather than
+    // folded into this sum, so a producer's sale is never counted twice.
+    const groups = new Map();
+    for (const g of withProgress) {
+      if (g.userId === null || g.actual === null) continue;
+      const key = `${g.metric}|${g.periodType}|${g.periodStart.toISOString()}|${g.periodEnd.toISOString()}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          metric: g.metric, periodType: g.periodType, periodStart: g.periodStart, periodEnd: g.periodEnd,
+          totalTarget: 0, totalActual: 0, goalCount: 0,
+        });
+      }
+      const group = groups.get(key);
+      group.totalTarget += g.targetValue;
+      group.totalActual += g.actual;
+      group.goalCount += 1;
+    }
+    const agencyTotals = Array.from(groups.values()).map((group) => ({
+      ...group,
+      totalPercent: group.totalTarget > 0 ? Math.round((group.totalActual / group.totalTarget) * 1000) / 10 : null,
+      pace: computeGoalPace({ periodStart: group.periodStart, periodEnd: group.periodEnd, targetValue: group.totalTarget, actual: group.totalActual, now, timeZone }),
+    }));
+
+    return res.json({ success: true, goals: withProgress, agencyTotals });
   } catch (err) {
     next(err);
   }

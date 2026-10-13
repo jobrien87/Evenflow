@@ -1,7 +1,7 @@
 // Vendor/lead intake products are exact, case-sensitive strings. This list
 // is deliberately separate from the per-product quote/closed-sale catalog.
 export const VENDOR_PRODUCTS = Object.freeze([
-  'Auto', 'Home', 'Life', 'Health', 'Boat', 'Motorcycle',
+  'Auto', 'Home', 'Home - Landlord', 'Life', 'Health', 'Boat', 'Motorcycle',
 ]);
 
 // The API also accepts existing custom product labels (e.g. General).

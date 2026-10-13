@@ -13,7 +13,7 @@ import { Card, SectionHeader, Badge, Button, StatTile, EmptyState, Modal } from 
 const TABS = [
   { key: 'overview', label: 'OVERVIEW' },
   { key: 'employees', label: 'EMPLOYEES' },
-  { key: 'departments', label: 'DEPARTMENTS' },
+  { key: 'departments', label: 'DEPARTMENTS & POSITIONS' },
   { key: 'attendance', label: 'ATTENDANCE' },
   { key: 'timesheets', label: 'TIMESHEETS' },
   { key: 'schedule', label: 'SCHEDULE' },
@@ -77,7 +77,6 @@ export default function HrDashboardPage({ agencyId: agencyIdProp }) {
   const [employees, setEmployees] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [positions, setPositions] = useState([]);
-  const [legalEmployers, setLegalEmployers] = useState([]);
   const [roleGrants, setRoleGrants] = useState([]);
   const [agencyUsers, setAgencyUsers] = useState([]);
   const [noGrant, setNoGrant] = useState(false);
@@ -91,12 +90,11 @@ export default function HrDashboardPage({ agencyId: agencyIdProp }) {
     setLoadError('');
     setNoGrant(false);
     try {
-      const [ov, emp, dept, pos, le, grants, users] = await Promise.all([
+      const [ov, emp, dept, pos, grants, users] = await Promise.all([
         api.hrOverview(agencyId),
         api.hrEmployees(agencyId ? `?agencyId=${agencyId}` : ''),
         api.hrDepartments(agencyId),
         api.hrPositions(agencyId),
-        api.hrLegalEmployers(agencyId),
         api.hrRoleGrants(agencyId),
         api.users(agencyId ? `?agencyId=${agencyId}` : ''),
       ]);
@@ -105,7 +103,6 @@ export default function HrDashboardPage({ agencyId: agencyIdProp }) {
       setEmployees(emp.employees || []);
       setDepartments(dept.departments || []);
       setPositions(pos.positions || []);
-      setLegalEmployers(le.legalEmployers || []);
       setRoleGrants(grants.grants || []);
       setAgencyUsers(users.users || []);
     } catch (err) {
@@ -173,7 +170,6 @@ export default function HrDashboardPage({ agencyId: agencyIdProp }) {
           employees={employees}
           departments={departments}
           positions={positions}
-          legalEmployers={legalEmployers}
           agencyUsers={agencyUsers}
           agencyId={agencyId}
           currentUserId={user?.id}
@@ -182,7 +178,7 @@ export default function HrDashboardPage({ agencyId: agencyIdProp }) {
         />
       )}
       {tab === 'departments' && (
-        <DepartmentsTab departments={departments} agencyUsers={agencyUsers} agencyId={agencyId} canWrite={!!access?.canWrite} onChange={load} />
+        <DepartmentsTab departments={departments} positions={positions} agencyUsers={agencyUsers} agencyId={agencyId} canWrite={!!access?.canWrite} onChange={load} />
       )}
       {tab === 'attendance' && <AttendanceTab canWrite={!!access?.canWrite} />}
       {tab === 'timesheets' && <TimesheetsTab employees={employees} agencyId={agencyId} canWrite={!!access?.canWrite} />}
@@ -191,7 +187,6 @@ export default function HrDashboardPage({ agencyId: agencyIdProp }) {
       {tab === 'leaveCalendar' && <LeaveCalendarTab agencyId={agencyId} />}
       {tab === 'settings' && (
         <SettingsTab
-          legalEmployers={legalEmployers}
           roleGrants={roleGrants}
           agencyUsers={agencyUsers}
           agencyId={agencyId}
@@ -233,7 +228,7 @@ function OverviewTab({ overview }) {
   );
 }
 
-function EmployeesTab({ employees, departments, positions, legalEmployers, agencyUsers, agencyId, currentUserId, canWrite, onChange }) {
+function EmployeesTab({ employees, departments, positions, agencyUsers, agencyId, currentUserId, canWrite, onChange }) {
   const [search, setSearch] = useState('');
   const [expandedId, setExpandedId] = useState('');
   const [showCreate, setShowCreate] = useState(false);
@@ -277,7 +272,6 @@ function EmployeesTab({ employees, departments, positions, legalEmployers, agenc
                     employee={e}
                     departments={departments}
                     positions={positions}
-                    legalEmployers={legalEmployers}
                     agencyUsers={agencyUsers}
                     canWrite={canWrite}
                     onChange={onChange}
@@ -295,7 +289,6 @@ function EmployeesTab({ employees, departments, positions, legalEmployers, agenc
           usersWithoutProfile={usersWithoutProfile}
           departments={departments}
           positions={positions}
-          legalEmployers={legalEmployers}
           agencyId={agencyId}
           onCreated={() => {
             setShowCreate(false);
@@ -307,11 +300,10 @@ function EmployeesTab({ employees, departments, positions, legalEmployers, agenc
   );
 }
 
-function CreateEmployeeModal({ onClose, usersWithoutProfile, departments, positions, legalEmployers, agencyId, onCreated }) {
+function CreateEmployeeModal({ onClose, usersWithoutProfile, departments, positions, agencyId, onCreated }) {
   const [userId, setUserId] = useState('');
   const [departmentId, setDepartmentId] = useState('');
   const [positionId, setPositionId] = useState('');
-  const [legalEmployerId, setLegalEmployerId] = useState('');
   const [employeeNumber, setEmployeeNumber] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -326,7 +318,6 @@ function CreateEmployeeModal({ onClose, usersWithoutProfile, departments, positi
         agencyId: agencyId || undefined,
         departmentId: departmentId || undefined,
         positionId: positionId || undefined,
-        legalEmployerId: legalEmployerId || undefined,
         employeeNumber: employeeNumber.trim() || undefined,
       });
       onCreated();
@@ -359,11 +350,6 @@ function CreateEmployeeModal({ onClose, usersWithoutProfile, departments, positi
           <option value="">None</option>
           {positions.map((p) => <option key={p.id} value={p.id}>{p.title}</option>)}
         </select>
-        <label style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Legal Employer</label>
-        <select value={legalEmployerId} onChange={(e) => setLegalEmployerId(e.target.value)} style={selectStyle}>
-          <option value="">None</option>
-          {legalEmployers.map((le) => <option key={le.id} value={le.id}>{le.legalName}</option>)}
-        </select>
         {error && <div style={{ color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
         <Button onClick={submit} disabled={busy}>{busy ? 'CREATING…' : 'CREATE PROFILE'}</Button>
       </div>
@@ -371,7 +357,7 @@ function CreateEmployeeModal({ onClose, usersWithoutProfile, departments, positi
   );
 }
 
-function EmployeeDetail({ employee, departments, positions, legalEmployers, agencyUsers, canWrite, onChange }) {
+function EmployeeDetail({ employee, departments, positions, agencyUsers, canWrite, onChange }) {
   const [departmentId, setDepartmentId] = useState(employee.departmentId || '');
   const [positionId, setPositionId] = useState(employee.positionId || '');
   const [managerId, setManagerId] = useState(employee.managerId || '');
@@ -475,7 +461,7 @@ function EmployeeDetail({ employee, departments, positions, legalEmployers, agen
   );
 }
 
-function DepartmentsTab({ departments, agencyUsers, agencyId, canWrite, onChange }) {
+function DepartmentsTab({ departments, positions, agencyUsers, agencyId, canWrite, onChange }) {
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState('');
   const [parentDepartmentId, setParentDepartmentId] = useState('');
@@ -513,6 +499,7 @@ function DepartmentsTab({ departments, agencyUsers, agencyId, canWrite, onChange
   }
 
   return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
     <Card>
       <SectionHeader right={canWrite ? <Button size="sm" onClick={() => setShowCreate((v) => !v)}>{showCreate ? 'CANCEL' : '+ ADD DEPARTMENT'}</Button> : <Badge tone="neutral">READ-ONLY</Badge>}>DEPARTMENTS</SectionHeader>
       {showCreate && canWrite && (
@@ -548,13 +535,82 @@ function DepartmentsTab({ departments, agencyUsers, agencyId, canWrite, onChange
         </div>
       )}
     </Card>
+    <PositionsCard departments={departments} positions={positions} agencyId={agencyId} canWrite={canWrite} onChange={onChange} />
+    </div>
   );
 }
 
-function SettingsTab({ legalEmployers, roleGrants, agencyUsers, agencyId, canWrite, canManageGrants, onChange }) {
+function PositionsCard({ departments, positions, agencyId, canWrite, onChange }) {
+  const [showCreate, setShowCreate] = useState(false);
+  const [title, setTitle] = useState('');
+  const [departmentId, setDepartmentId] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function createPosition() {
+    if (!title.trim()) { setError('Title is required.'); return; }
+    setBusy(true);
+    setError('');
+    try {
+      await api.createHrPosition({
+        title: title.trim(),
+        agencyId: agencyId || undefined,
+        departmentId: departmentId || undefined,
+      });
+      setTitle(''); setDepartmentId(''); setShowCreate(false);
+      onChange();
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Could not create position.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleActive(pos) {
+    try {
+      await api.updateHrPosition(pos.id, { isActive: !pos.isActive });
+      onChange();
+    } catch {
+      // surfaced via the list simply not updating; acceptable for this round
+    }
+  }
+
+  return (
+    <Card>
+      <SectionHeader right={canWrite ? <Button size="sm" onClick={() => setShowCreate((v) => !v)}>{showCreate ? 'CANCEL' : '+ ADD POSITION'}</Button> : <Badge tone="neutral">READ-ONLY</Badge>}>POSITIONS</SectionHeader>
+      {showCreate && canWrite && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+          <input placeholder="Position title" value={title} onChange={(e) => setTitle(e.target.value)} style={{ ...inputStyle, flex: 1, minWidth: 160 }} />
+          <select value={departmentId} onChange={(e) => setDepartmentId(e.target.value)} style={selectStyle}>
+            <option value="">No department</option>
+            {departments.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+          <Button size="sm" onClick={createPosition} disabled={busy}>{busy ? 'ADDING…' : 'ADD'}</Button>
+        </div>
+      )}
+      {error && <div style={{ color: 'var(--danger)', fontSize: 12, marginBottom: 10 }}>{error}</div>}
+      {positions.length === 0 ? (
+        <EmptyState description="No positions yet — add one so it can be assigned on an employee's profile." />
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {positions.map((p) => (
+            <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'var(--bg-sunken)', borderRadius: 'var(--radius-sm)' }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{p.title}{!p.isActive && <Badge tone="neutral" style={{ marginLeft: 8 }}>INACTIVE</Badge>}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{p.department ? p.department.name : 'No department'}</div>
+              </div>
+              {canWrite && <Button size="sm" variant="secondary" onClick={() => toggleActive(p)}>{p.isActive ? 'DEACTIVATE' : 'REACTIVATE'}</Button>}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function SettingsTab({ roleGrants, agencyUsers, agencyId, canWrite, canManageGrants, onChange }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <LegalEmployersCard legalEmployers={legalEmployers} agencyId={agencyId} canWrite={canWrite} onChange={onChange} />
       <RoleGrantsCard roleGrants={roleGrants} agencyUsers={agencyUsers} agencyId={agencyId} canManageGrants={canManageGrants} onChange={onChange} />
       <SchedulingSettingsCard canWrite={canWrite} />
     </div>
@@ -604,60 +660,6 @@ function SchedulingSettingsCard({ canWrite }) {
         <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Weekly Overtime Threshold: {thresholdHours || '—'} hours</div>
       )}
       {error && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 8 }}>{error}</div>}
-    </Card>
-  );
-}
-
-function LegalEmployersCard({ legalEmployers, agencyId, canWrite, onChange }) {
-  const [legalName, setLegalName] = useState('');
-  const [jurisdictionCountry, setJurisdictionCountry] = useState('US');
-  const [jurisdictionRegion, setJurisdictionRegion] = useState('');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-
-  async function create() {
-    if (!legalName.trim()) { setError('Legal name is required.'); return; }
-    setBusy(true);
-    setError('');
-    try {
-      await api.createHrLegalEmployer({
-        legalName: legalName.trim(),
-        agencyId: agencyId || undefined,
-        jurisdictionCountry,
-        jurisdictionRegion: jurisdictionRegion.trim() || undefined,
-      });
-      setLegalName(''); setJurisdictionRegion('');
-      onChange();
-    } catch (err) {
-      setError(err.data?.message || err.message || 'Could not create legal employer.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Card>
-      <SectionHeader>LEGAL EMPLOYERS</SectionHeader>
-      {canWrite && (
-        <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-          <input placeholder="Legal name" value={legalName} onChange={(e) => setLegalName(e.target.value)} style={{ ...inputStyle, flex: 1, minWidth: 160 }} />
-          <input placeholder="Country (US)" value={jurisdictionCountry} onChange={(e) => setJurisdictionCountry(e.target.value.toUpperCase())} style={{ ...inputStyle, width: 90 }} maxLength={2} />
-          <input placeholder="Region (optional)" value={jurisdictionRegion} onChange={(e) => setJurisdictionRegion(e.target.value)} style={{ ...inputStyle, width: 120 }} />
-          <Button size="sm" onClick={create} disabled={busy}>{busy ? 'ADDING…' : 'ADD'}</Button>
-        </div>
-      )}
-      {error && <div style={{ color: 'var(--danger)', fontSize: 12, marginBottom: 10 }}>{error}</div>}
-      {legalEmployers.length === 0 ? (
-        <EmptyState description="No legal employers configured yet." />
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {legalEmployers.map((le) => (
-            <div key={le.id} style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-              {le.legalName} — {le.jurisdictionCountry}{le.jurisdictionRegion ? `/${le.jurisdictionRegion}` : ''}
-            </div>
-          ))}
-        </div>
-      )}
     </Card>
   );
 }

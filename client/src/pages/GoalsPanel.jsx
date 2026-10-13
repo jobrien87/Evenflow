@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { ProgressBar, EdSuggestionBox } from '../ui';
+import { EdSuggestionBox } from '../ui';
 import { fireCelebration } from '../lib/celebrations';
 
 const METRICS = ['sales', 'quotes', 'calls', 'contacts', 'premium_cents', 'cross_sells', 'winbacks', 'transfers'];
@@ -11,10 +11,43 @@ function formatUserName(user) {
   return `${user.firstName} ${user.lastName}`;
 }
 
+// Three concepts on one bar: actual progress (the filled portion), the
+// goal (the bar's own right edge, since max is always the target), and a
+// marker for where the current pace projects landing by period end. The
+// marker is clamped to the visible track even when the projection exceeds
+// the goal — the exact number is always also in the caption text below.
+function PaceBar({ actual, target, pace }) {
+  const actualPct = Math.max(0, Math.min(100, target > 0 ? ((actual ?? 0) / target) * 100 : 0));
+  const projectedPct = pace && pace.projectedValue != null && target > 0
+    ? Math.max(0, Math.min(100, (pace.projectedValue / target) * 100))
+    : null;
+  return (
+    <div style={s.paceTrack}>
+      <div style={{ ...s.paceFill, width: `${actualPct}%` }} />
+      {projectedPct !== null && (
+        <div
+          style={{ ...s.paceMarker, left: `${projectedPct}%` }}
+          title={`On pace for ${pace.projectedValue} (${pace.projectedPercent}%) by period end`}
+        />
+      )}
+    </div>
+  );
+}
+
+function paceCaption(pace) {
+  if (!pace) return null;
+  if (pace.workingDaysElapsed <= 0) {
+    return 'Not enough elapsed working days yet to project a pace.';
+  }
+  const word = pace.onPace === true ? 'On pace to hit goal' : pace.onPace === false ? 'Off pace to hit goal' : 'Not on pace to hit goal at this rate';
+  return `${word} — on pace for ${pace.projectedValue} (${pace.projectedPercent}%) by period end · ${pace.workingDaysElapsed} of ${pace.workingDaysTotal} working days elapsed (Mon–Fri, ${pace.timeZone})`;
+}
+
 export default function GoalsPanel() {
   const { user } = useAuth();
   const canManage = user?.role !== 'PRODUCER';
   const [goals, setGoals] = useState([]);
+  const [agencyTotals, setAgencyTotals] = useState([]);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -36,6 +69,7 @@ export default function GoalsPanel() {
     try {
       const [goalData, userData] = await Promise.all([api.goals(), canManage ? api.users('') : Promise.resolve({ users: [] })]);
       setGoals(goalData.goals);
+      setAgencyTotals(goalData.agencyTotals || []);
       setUsers(userData.users.filter((u) => u.role === 'PRODUCER'));
       if (goalData.goals.some((g) => g.justCompleted)) {
         fireCelebration('CONFETTI', { message: 'Goal complete! 🎯' });
@@ -218,6 +252,30 @@ export default function GoalsPanel() {
         </form>
       )}
 
+      {canManage && agencyTotals.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <h3 style={s.h3}>AGENCY TOTAL</h3>
+          {agencyTotals.map((t) => (
+            <div key={`${t.metric}|${t.periodType}|${t.periodStart}|${t.periodEnd}`} style={s.goalCard(false)}>
+              <div style={s.goalTop} className="ui-row-stack">
+                <div>
+                  <div style={s.rowTitle}>{t.metric.replace(/_/g, ' ')} — {t.goalCount} producer goal{t.goalCount === 1 ? '' : 's'}</div>
+                  <div style={s.rowSub}>{new Date(t.periodStart).toLocaleDateString()} – {new Date(t.periodEnd).toLocaleDateString()}</div>
+                </div>
+              </div>
+              <div style={s.progressWrap}>
+                <div style={s.progressLabel}>
+                  <span>{t.totalActual} / {t.totalTarget}</span>
+                  <span>{t.totalPercent === null ? '—' : `${t.totalPercent}%`}</span>
+                </div>
+                <PaceBar actual={t.totalActual} target={t.totalTarget} pace={t.pace} />
+                {t.pace && <div style={s.paceCaption}>{paceCaption(t.pace)}</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {goals.map((g) => (
         <div key={g.id} style={s.goalCard(g.justCompleted)}>
           {g.justCompleted && <div style={s.celebrationBanner}>🎉 GOAL COMPLETE</div>}
@@ -247,7 +305,8 @@ export default function GoalsPanel() {
                 <span>{g.actual === null ? 'No data yet' : `${g.actual} / ${g.targetValue}`}</span>
                 <span>{g.progressPercent === null ? '—' : `${g.progressPercent}%`}</span>
               </div>
-              <ProgressBar value={g.actual ?? 0} max={g.targetValue} />
+              <PaceBar actual={g.actual} target={g.targetValue} pace={g.pace} />
+              {g.pace && <div style={s.paceCaption}>{paceCaption(g.pace)}</div>}
             </div>
           )}
         </div>
@@ -292,5 +351,9 @@ const s = {
   editRow: { display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' },
   progressWrap: {},
   progressLabel: { display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 },
+  paceTrack: { position: 'relative', background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 999, height: 8, overflow: 'visible' },
+  paceFill: { position: 'absolute', top: 0, left: 0, height: '100%', borderRadius: 999, background: 'var(--accent-gradient)', transition: 'width var(--dur-base) var(--ease-standard)' },
+  paceMarker: { position: 'absolute', top: -3, bottom: -3, width: 2, background: '#e8b923', transform: 'translateX(-1px)' },
+  paceCaption: { color: 'var(--text-muted)', fontSize: 11, marginTop: 6, lineHeight: 1.4 },
   empty: { color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 13 },
 };

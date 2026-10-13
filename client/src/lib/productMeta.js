@@ -5,6 +5,7 @@
 export const PRODUCT_META = {
   AUTO: { label: 'Auto', icon: 'car' },
   HOME: { label: 'Home', icon: 'home' },
+  HOME_LANDLORD: { label: 'Home - Landlord', icon: 'home' },
   RENTERS: { label: 'Renters', icon: 'key' },
   LIFE: { label: 'Life', icon: 'heart' },
   HEALTH: { label: 'Health', icon: 'pulse' },

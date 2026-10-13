@@ -4,11 +4,12 @@
 // already expects ('Auto', 'Home', 'Life') so a product marked SOLD here
 // feeds the exact same cross-sell gap detection a Transfer-sourced sale
 // already does.
-const PRODUCTS = ['AUTO', 'HOME', 'RENTERS', 'LIFE', 'HEALTH', 'COMMERCIAL', 'BOAT', 'MOTORCYCLE'];
+const PRODUCTS = ['AUTO', 'HOME', 'HOME_LANDLORD', 'RENTERS', 'LIFE', 'HEALTH', 'COMMERCIAL', 'BOAT', 'MOTORCYCLE'];
 
 const PRODUCT_LABELS = {
   AUTO: 'Auto',
   HOME: 'Home',
+  HOME_LANDLORD: 'Home - Landlord',
   RENTERS: 'Renters',
   LIFE: 'Life',
   HEALTH: 'Health',
