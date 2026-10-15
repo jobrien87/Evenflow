@@ -9,6 +9,7 @@ const { PERIODS: BILLBOARD_PERIODS } = require('../lib/billboardPeriods');
 const { sumHistoricalPremium, countHistoricalSold, historicalByVendor, historicalByAgent } = require('../lib/historicalAggregates');
 const { countSales, salesByAgent } = require('../lib/manualSaleAggregates');
 const { eligibleProducersWhere } = require('../lib/eligibleProducersQuery');
+const { QUOTED_OR_BEYOND_STATUSES } = require('../lib/leadStatusGroups');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -84,11 +85,6 @@ router.get('/summary', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req
     next(err);
   }
 });
-
-// Same "quoted or beyond" definition funnelMetrics.js's computeFunnel()
-// uses for quoteRate — one canonical definition of what counts as a
-// quote, not a second one invented here.
-const QUOTED_OR_BEYOND_STATUSES = ['QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'];
 
 function costPer(costCents, count) {
   return count > 0 ? Math.round(costCents / count) / 100 : null;

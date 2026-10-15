@@ -19,6 +19,7 @@ const { parseHistoricalFileWithAi } = require('../lib/historicalDataImport');
 const { resolveManualAssignment } = require('../lib/leadDistribution');
 const { eligibleProducersWhere } = require('../lib/eligibleProducersQuery');
 const { computeZipBreakdown } = require('../lib/zipBreakdown');
+const { QUOTED_OR_BEYOND_STATUSES } = require('../lib/leadStatusGroups');
 const { sendZipReportEmail } = require('../lib/email');
 
 const router = express.Router();
@@ -77,7 +78,7 @@ router.get('/', async (req, res, next) => {
     // click from a funnel rate lands on precisely the leads behind that rate.
     const STAGE_FILTERS = {
       contacted: { firstContactAt: { not: null } },
-      quoted: { status: { in: ['QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'] } },
+      quoted: { status: { in: QUOTED_OR_BEYOND_STATUSES } },
       sold: { status: 'SOLD' },
     };
 
@@ -1108,7 +1109,7 @@ router.get('/snapshot', async (req, res, next) => {
     const [totalLeads, untouched, quoted, sold, inMoshpit] = await Promise.all([
       prisma.lead.count({ where: baseWhere }),
       prisma.lead.count({ where: { ...baseWhere, firstAttemptAt: null } }),
-      prisma.lead.count({ where: { ...baseWhere, status: { in: ['QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'] } } }),
+      prisma.lead.count({ where: { ...baseWhere, status: { in: QUOTED_OR_BEYOND_STATUSES } } }),
       prisma.lead.count({ where: { ...baseWhere, status: 'SOLD' } }),
       prisma.lead.count({ where: { ...baseWhere, assignedToId: null, OR: [{ vendor: { distributionMode: 'MOSHPIT' } }, { isLiveTransfer: true }, { moshpitEligible: true }] } }),
     ]);

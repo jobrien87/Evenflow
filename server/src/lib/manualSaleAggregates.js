@@ -65,6 +65,21 @@ async function countSales({ agencyId, from, to, assignedToId, productFamily, tim
   return prisma.sale.count({ where });
 }
 
+// Standalone sales only (no originating Lead) — the one case a "quotes"
+// count can safely add Sale-based credit without risking a double-count:
+// a Lead-linked sale's quote credit already comes from that Lead's own
+// disposition history (or doesn't, if the Lead was never dispositioned
+// QUOTED/QUOTED_HOT), so adding it again here would double-count the
+// same real prospect. A standalone sale has no Lead at all to generate
+// that disposition event, so counting it here is purely additive.
+async function countStandaloneSales({ agencyId, from, to, assignedToId, timeZone }) {
+  const where = dateRangeWhere(agencyId, from, to, {
+    leadId: null,
+    ...(assignedToId !== undefined ? { assignedToId } : {}),
+  }, timeZone);
+  return prisma.sale.count({ where });
+}
+
 // {userId, premiumCents, count}[] — a Sale always has a real assignedToId
 // (required field), so unlike historicalByAgent there's no "unmatched"
 // bucket needed here.
@@ -135,6 +150,7 @@ async function saleLeadLikeRows({ agencyId, from, to, timeZone }) {
 module.exports = {
   sumSalePremium,
   countSales,
+  countStandaloneSales,
   salesByAgent,
   salesByProduct,
   saleLeadLikeRows,

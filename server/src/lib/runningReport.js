@@ -8,7 +8,7 @@ const { prisma } = require('./db');
 const { explainScore } = require('./flowScore');
 const { computeFunnel } = require('./funnelMetrics');
 const { sumHistoricalPremium, countHistoricalSold } = require('./historicalAggregates');
-const { sumSalePremium, countSales } = require('./manualSaleAggregates');
+const { sumSalePremium, countSales, countStandaloneSales } = require('./manualSaleAggregates');
 
 function startOfMonth(d) {
   return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -64,10 +64,19 @@ async function computeGoalActual(goal) {
       const manual = await countSales({ agencyId, from: periodStart, to: periodEnd, assignedToId: userId || undefined });
       return historical + manual;
     }
-    case 'quotes':
-      return prisma.leadEvent.count({
-        where: { type: 'lead.disposition', toStatus: 'QUOTED', createdAt: { gte: periodStart, lte: periodEnd }, lead: leadScope },
+    case 'quotes': {
+      const dispositionQuotes = await prisma.leadEvent.count({
+        where: { type: 'lead.disposition', toStatus: { in: ['QUOTED', 'QUOTED_HOT'] }, createdAt: { gte: periodStart, lte: periodEnd }, lead: leadScope },
       });
+      // A standalone Closed Sale (no originating Lead) counts as one
+      // quote and one sale — it generates no Lead disposition event of
+      // its own to be counted above, so this is purely additive, never a
+      // double-count. A Lead-linked sale adds nothing extra here: that
+      // Lead's own disposition history already decided whether it
+      // counted as a quote.
+      const standaloneSaleQuotes = await countStandaloneSales({ agencyId, from: periodStart, to: periodEnd, assignedToId: userId || undefined });
+      return dispositionQuotes + standaloneSaleQuotes;
+    }
     case 'contacts':
       return prisma.leadEvent.count({
         where: { type: 'lead.disposition', toStatus: 'CONTACTED', createdAt: { gte: periodStart, lte: periodEnd }, lead: leadScope },

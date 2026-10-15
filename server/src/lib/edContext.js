@@ -2,6 +2,7 @@ const { prisma } = require('./db');
 const { computeProfitability, computeROI } = require('./financialCalc');
 const { computeGoalActual, assembleAgencyReport } = require('./runningReport');
 const { computeVendorBreakdown, computeTelemarketerPerformance } = require('./performanceBreakdown');
+const { ACTIVE_LEAD_STATUSES } = require('./leadStatusGroups');
 
 // Everything in here is plain arithmetic against real rows — per spec,
 // "ED should use deterministic database calculations for goals, pace,
@@ -14,7 +15,7 @@ async function buildProducerContext(user) {
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
   const [openLeads, untouchedLeads, openTasks, monthlySales, goal, vendorBreakdown] = await Promise.all([
-    prisma.lead.count({ where: { assignedToId: user.id, status: { in: ['NEW', 'CONTACTED', 'FOLLOW_UP'] } } }),
+    prisma.lead.count({ where: { assignedToId: user.id, status: { in: ACTIVE_LEAD_STATUSES } } }),
     prisma.lead.count({ where: { assignedToId: user.id, firstAttemptAt: null, archivedAt: null } }),
     prisma.task.count({ where: { assignedToId: user.id, status: { in: ['OPEN', 'IN_PROGRESS'] } } }),
     // Same real "sales this month" count runningReport.js's goal-progress
@@ -58,7 +59,7 @@ async function buildAgencyOwnerContext(agencyId) {
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
   const [openLeads, overdueLeads, untouchedLeads, inMoshpit, offeredTransfers, acceptedTransfers, rejectedTransfers, revenueAgg, costAgg, producerCount, agencyReport, vendorBreakdown, telemarketerPerformance] = await Promise.all([
-    prisma.lead.count({ where: { agencyId, status: { in: ['NEW', 'CONTACTED', 'FOLLOW_UP'] } } }),
+    prisma.lead.count({ where: { agencyId, status: { in: ACTIVE_LEAD_STATUSES } } }),
     prisma.lead.count({ where: { agencyId, status: { in: ['NEW'] }, receivedAt: { lt: new Date(now.getTime() - 60 * 60 * 1000) } } }),
     prisma.lead.count({ where: { agencyId, firstAttemptAt: null, archivedAt: null, receivedAt: { gte: monthStart } } }),
     prisma.lead.count({ where: { agencyId, assignedToId: null, archivedAt: null, vendor: { distributionMode: 'MOSHPIT' } } }),
@@ -161,7 +162,13 @@ async function buildBriefingContext(user) {
   if (user.role === 'PRODUCER') {
     const [newLeads, newSales, currentSnapshot, priorSnapshot, goal] = await Promise.all([
       prisma.lead.count({ where: { assignedToId: user.id, receivedAt: { gte: since } } }),
-      prisma.leadEvent.count({ where: { type: 'lead.disposition', toStatus: 'SOLD', createdAt: { gte: since }, lead: { assignedToId: user.id } } }),
+      // Same real Sale/Historical-Data-based count computeGoalActual
+      // ('sales') uses everywhere else — a Lead reaching SOLD posts no
+      // credit on its own (routes/leads.js's disposition handler), so
+      // "new sales" here must never be a disposition-event count either,
+      // or Ed's briefing would disagree with monthlySales/pace below and
+      // with every other sales number in this app.
+      computeGoalActual({ metric: 'sales', userId: user.id, agencyId: user.agencyId, periodStart: since, periodEnd: now }),
       prisma.flowScoreSnapshot.findFirst({ where: { subjectType: 'USER', subjectId: user.id }, orderBy: { computedAt: 'desc' } }),
       prisma.flowScoreSnapshot.findFirst({ where: { subjectType: 'USER', subjectId: user.id, computedAt: { lte: since } }, orderBy: { computedAt: 'desc' } }),
       prisma.goal.findFirst({ where: { userId: user.id, metric: 'sales', periodStart: { lte: now }, periodEnd: { gte: now } } }),
@@ -189,7 +196,10 @@ async function buildBriefingContext(user) {
     const [newLeads, newTransfers, newSales, currentSnapshot, priorSnapshot] = await Promise.all([
       prisma.lead.count({ where: { agencyId, receivedAt: { gte: since } } }),
       prisma.transfer.count({ where: { agencyId, createdAt: { gte: since } } }),
-      prisma.leadEvent.count({ where: { type: 'lead.disposition', toStatus: 'SOLD', createdAt: { gte: since }, lead: { agencyId } } }),
+      // Same real Sale/Historical-Data-based count as the Producer branch
+      // above and computeGoalActual('sales') everywhere else — never a
+      // Lead-disposition-event count.
+      computeGoalActual({ metric: 'sales', agencyId, periodStart: since, periodEnd: now }),
       prisma.flowScoreSnapshot.findFirst({ where: { subjectType: 'AGENCY', subjectId: agencyId }, orderBy: { computedAt: 'desc' } }),
       prisma.flowScoreSnapshot.findFirst({ where: { subjectType: 'AGENCY', subjectId: agencyId, computedAt: { lte: since } }, orderBy: { computedAt: 'desc' } }),
     ]);

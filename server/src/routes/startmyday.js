@@ -29,7 +29,7 @@ router.get('/', async (req, res, next) => {
     const monthStart = startOfMonth(now);
     const monthEnd = endOfMonth(now);
 
-    const [yesterdayDispositions, monthlySales, goal, todayLeads, todayTasks] = await Promise.all([
+    const [yesterdayDispositions, monthlySales, goal, todayLeads, todayTasks, yesterdaySales, yesterdayQuotes] = await Promise.all([
       prisma.leadEvent.findMany({
         where: {
           type: 'lead.disposition',
@@ -54,11 +54,15 @@ router.get('/', async (req, res, next) => {
       prisma.task.count({
         where: { assignedToId: userId, status: { in: ['OPEN', 'IN_PROGRESS'] }, agencyId },
       }),
+      // Same canonical 'sales'/'quotes' goal math as monthlySales above —
+      // a Lead reaching SOLD is a queue disposition only, never counted
+      // as a sale here either; a real sale is a recorded Sale/Historical
+      // Data row, same rule everywhere else in this app.
+      computeGoalActual({ metric: 'sales', userId, agencyId, periodStart: yesterday, periodEnd: today }),
+      computeGoalActual({ metric: 'quotes', userId, agencyId, periodStart: yesterday, periodEnd: today }),
     ]);
 
-    const yesterdaySales = yesterdayDispositions.filter((e) => e.toStatus === 'SOLD').length;
     const yesterdayContacts = yesterdayDispositions.filter((e) => e.toStatus === 'CONTACTED').length;
-    const yesterdayQuotes = yesterdayDispositions.filter((e) => e.toStatus === 'QUOTED').length;
 
     let pace = null;
     if (goal) {

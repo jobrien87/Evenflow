@@ -10,8 +10,7 @@ const { computeFunnel, pct } = require('./funnelMetrics');
 const { historicalByProduct } = require('./historicalAggregates');
 const { reportingProductKey } = require('./products');
 const { salesByProduct } = require('./manualSaleAggregates');
-
-const QUOTED_OR_BEYOND = ['QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'];
+const { QUOTED_OR_BEYOND_STATUSES } = require('./leadStatusGroups');
 
 // { agencyId, userId?, from, to } -> one row per vendor this scope actually
 // received leads from in the period (vendors with zero leads in-period are
@@ -87,7 +86,7 @@ async function computeProductBreakdown({ agencyId, userId, from, to }) {
   const rows = [...byProduct.entries()].map(([product, productLeads]) => {
     const total = productLeads.length;
     const contacted = productLeads.filter((l) => l.firstContactAt).length;
-    const quotedOrBeyond = productLeads.filter((l) => QUOTED_OR_BEYOND.includes(l.status)).length;
+    const quotedOrBeyond = productLeads.filter((l) => QUOTED_OR_BEYOND_STATUSES.includes(l.status)).length;
     const sold = productLeads.filter((l) => l.status === 'SOLD').length;
     const historicalSold = historicalProducts[product]?.count || 0;
     const manualSold = manualProducts[product]?.count || 0;

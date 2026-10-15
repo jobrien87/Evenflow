@@ -4,6 +4,7 @@
 // zero underlying sample is null with a reason, never a fabricated 0/100.
 
 const { prisma } = require('./db');
+const { QUOTED_OR_BEYOND_STATUSES } = require('./leadStatusGroups');
 
 function pct(numerator, denominator) {
   if (!denominator) return null;
@@ -42,9 +43,7 @@ async function computeFunnel({ agencyId, userId, vendorId, product, from, to }) 
   // ordinary CRM pipeline activity from any intake source.
   const attempted = leads.filter((l) => l.vendorId && l.assignedAt && l.firstAttemptAt);
   const contacted = leads.filter((l) => l.firstContactAt);
-  const quotedOrBeyond = leads.filter((l) =>
-    ['QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'].includes(l.status)
-  );
+  const quotedOrBeyond = leads.filter((l) => QUOTED_OR_BEYOND_STATUSES.includes(l.status));
   const sold = leads.filter((l) => l.status === 'SOLD');
 
   const speedToAttemptMinutes = attempted.map(

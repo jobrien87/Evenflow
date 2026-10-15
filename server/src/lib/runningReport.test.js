@@ -82,6 +82,58 @@ test('computeGoalActual counts real QUOTED dispositions for the quotes metric', 
   assert.equal(actual, 1);
 });
 
+test('computeGoalActual counts a QUOTED_HOT disposition toward the quotes metric too, same as QUOTED', async () => {
+  const lead = await prisma.lead.create({ data: { agencyId, assignedToId: userId } });
+  leadIds.push(lead.id);
+  await prisma.leadEvent.create({ data: { leadId: lead.id, type: 'lead.disposition', toStatus: 'QUOTED_HOT' } });
+
+  const actual = await computeGoalActual({ metric: 'quotes', userId, agencyId, periodStart, periodEnd });
+  assert.equal(actual, 2, 'the pre-existing QUOTED disposition plus this new QUOTED_HOT one');
+});
+
+test('computeGoalActual: a standalone Closed Sale (no leadId) adds one quote, additive and never double-counted', async () => {
+  const before = await computeGoalActual({ metric: 'quotes', userId, agencyId, periodStart, periodEnd });
+
+  const customer = await prisma.customer.create({ data: { firstName: 'Quote', lastName: `Standalone${suffix}` } });
+  const sale = await prisma.sale.create({
+    data: {
+      agencyId, customerId: customer.id, firstName: 'Quote', lastName: `Standalone${suffix}`,
+      saleDate: new Date(), carrier: 'Allstate', policyType: 'Auto-Standard', productFamily: 'AUTO',
+      premiumCents: 10000, assignedToId: userId, createdById: userId,
+    },
+  });
+
+  const after = await computeGoalActual({ metric: 'quotes', userId, agencyId, periodStart, periodEnd });
+  assert.equal(after, before + 1, 'a standalone sale must add exactly one quote');
+
+  await prisma.sale.delete({ where: { id: sale.id } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: sale.id } });
+  await prisma.customer.delete({ where: { id: customer.id } });
+});
+
+test('computeGoalActual: a Lead-linked Closed Sale adds no extra quote credit beyond its Lead\'s own disposition history', async () => {
+  const lead = await prisma.lead.create({ data: { agencyId, assignedToId: userId } });
+  leadIds.push(lead.id);
+  // No disposition event for this lead at all -- it was never dispositioned QUOTED.
+  const before = await computeGoalActual({ metric: 'quotes', userId, agencyId, periodStart, periodEnd });
+
+  const customer = await prisma.customer.create({ data: { firstName: 'Quote', lastName: `LeadLinked${suffix}` } });
+  const sale = await prisma.sale.create({
+    data: {
+      agencyId, customerId: customer.id, leadId: lead.id, firstName: 'Quote', lastName: `LeadLinked${suffix}`,
+      saleDate: new Date(), carrier: 'Allstate', policyType: 'Auto-Standard', productFamily: 'AUTO',
+      premiumCents: 10000, assignedToId: userId, createdById: userId,
+    },
+  });
+
+  const after = await computeGoalActual({ metric: 'quotes', userId, agencyId, periodStart, periodEnd });
+  assert.equal(after, before, 'a Lead-linked sale must never add its own extra quote credit');
+
+  await prisma.sale.delete({ where: { id: sale.id } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: sale.id } });
+  await prisma.customer.delete({ where: { id: customer.id } });
+});
+
 test('computeGoalActual returns null (never a fabricated number) for an unrecognized metric', async () => {
   const actual = await computeGoalActual({ metric: 'not_a_real_metric', userId, agencyId, periodStart, periodEnd });
   assert.equal(actual, null);

@@ -2,6 +2,7 @@ const express = require('express');
 const { prisma } = require('../lib/db');
 const { requireAuth, requireRole, scopeAgencyId } = require('../middleware/auth');
 const { scoreLead } = require('../lib/priority');
+const { ACTIVE_LEAD_STATUSES } = require('../lib/leadStatusGroups');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -32,7 +33,15 @@ router.get('/', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER', 'PLATF
     const leadWhere = {
       ...(agencyId ? { agencyId } : {}),
       assignedToId: targetUserId,
-      status: { in: ['NEW', 'CONTACTED', 'QUOTED', 'FOLLOW_UP'] },
+      // Every non-terminal lead status belongs in the active work queue —
+      // "Lead SOLD only removes the lead from the queue," same as every
+      // other terminal disposition. Using the shared ACTIVE_LEAD_STATUSES
+      // list (instead of hand-enumerating "active" ones here) is what
+      // keeps a lead from silently vanishing from the queue the next time
+      // a new status is added to the LeadStatus enum, exactly the bug
+      // this list previously had (LEFT_VM, APPOINTMENT, and QUOTED_HOT
+      // were all missing from the old hand-rolled array).
+      status: { in: ACTIVE_LEAD_STATUSES },
       archivedAt: null,
     };
     const taskWhere = {

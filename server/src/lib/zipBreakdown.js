@@ -14,8 +14,9 @@
 
 const { prisma } = require('./db');
 const { pct } = require('./funnelMetrics');
-
-const QUOTED_OR_BEYOND = ['QUOTED', 'APPOINTMENT', 'FOLLOW_UP', 'SOLD'];
+const { QUOTED_OR_BEYOND_STATUSES } = require('./leadStatusGroups');
+const { historicalLeadLikeRows } = require('./historicalAggregates');
+const { saleLeadLikeRows } = require('./manualSaleAggregates');
 
 function costPer(costCents, count) {
   return count > 0 ? Math.round(costCents / count) / 100 : null;
@@ -25,13 +26,32 @@ function costPer(costCents, count) {
 // received in the period, sorted by lead volume descending (so "top N
 // zips" is just array.slice(0, N)).
 async function computeZipBreakdown({ agencyId, from, to }) {
-  const [leads, vendors] = await Promise.all([
+  const [leads, vendors, historicalRows, saleRows] = await Promise.all([
     prisma.lead.findMany({
       where: { agencyId, receivedAt: { gte: from, lte: to }, archivedAt: null },
-      select: { zip: true, vendorId: true, status: true, salePremiumCents: true },
+      select: { zip: true, vendorId: true, status: true },
     }),
     prisma.vendor.findMany({ where: { agencyId }, select: { id: true } }),
+    historicalLeadLikeRows({ agencyId, from, to }),
+    saleLeadLikeRows({ agencyId, from, to }),
   ]);
+
+  // Real sold count/revenue per zip comes from actual Closed Sale records
+  // (Historical Data + Add Closed Sale) — never a live Lead's own
+  // salePremiumCents snapshot, which is written at disposition time and
+  // may not correspond to any real recorded sale at all (see
+  // schema.prisma's Sale model comment / routes/leads.js's disposition
+  // handler: "Lead SOLD only removes the lead from the queue," it never
+  // posts revenue). This keeps revenue and the CPA below consistent with
+  // the same definition of "a sale" used everywhere else in this app.
+  const realSalesByZip = new Map();
+  for (const row of [...historicalRows, ...saleRows]) {
+    const key = row.zip || 'Unspecified';
+    const existing = realSalesByZip.get(key) || { revenueCents: 0, realSoldCount: 0 };
+    existing.revenueCents += row.salePremiumCents || 0;
+    existing.realSoldCount += 1;
+    realSalesByZip.set(key, existing);
+  }
 
   // Real per-vendor cost-per-lead for this exact period — identical
   // formula to financials.js's /by-vendor route, so a zip's attributed
@@ -54,14 +74,17 @@ async function computeZipBreakdown({ agencyId, from, to }) {
     if (!byZip.has(key)) byZip.set(key, []);
     byZip.get(key).push(lead);
   }
+  // A zip with real historical/manual sales but zero live leads in this
+  // period still needs a row, so its sales aren't silently dropped.
+  for (const key of realSalesByZip.keys()) {
+    if (!byZip.has(key)) byZip.set(key, []);
+  }
 
   return [...byZip.entries()]
     .map(([zip, zipLeads]) => {
       const totalLeads = zipLeads.length;
-      const quotedCount = zipLeads.filter((l) => QUOTED_OR_BEYOND.includes(l.status)).length;
-      const soldLeads = zipLeads.filter((l) => l.status === 'SOLD');
-      const soldCount = soldLeads.length;
-      const revenueCents = soldLeads.reduce((sum, l) => sum + (l.salePremiumCents || 0), 0);
+      const quotedCount = zipLeads.filter((l) => QUOTED_OR_BEYOND_STATUSES.includes(l.status)).length;
+      const { revenueCents, realSoldCount: soldCount } = realSalesByZip.get(zip) || { revenueCents: 0, realSoldCount: 0 };
 
       const hasCostData = zipLeads.some((l) => l.vendorId && vendorCostPerLeadCents.has(l.vendorId));
       const totalCostCents = zipLeads.reduce((sum, l) => {
