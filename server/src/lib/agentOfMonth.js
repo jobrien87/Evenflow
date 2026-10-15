@@ -5,6 +5,8 @@
 // same month is never awarded twice, even if this runs more than once.
 
 const { prisma } = require('./db');
+const { historicalLeadLikeRows } = require('./historicalAggregates');
+const { saleLeadLikeRows } = require('./manualSaleAggregates');
 
 function monthLabel(date) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -17,18 +19,19 @@ function previousMonthRange(now = new Date()) {
   return { start, end, label: monthLabel(start) };
 }
 
-// Pure — picks the winner from an already-fetched list of SOLD leads for
-// one agency/month: highest sold count, ties broken by higher total
-// premium. Returns null if nobody sold anything that month (never
-// fabricates a winner).
-function pickWinner(soldLeads) {
+// Pure — picks the winner from an already-fetched list of real sale-like
+// rows ({assignedToId, salePremiumCents}, the same shape
+// historicalLeadLikeRows/saleLeadLikeRows return) for one agency/month:
+// highest sold count, ties broken by higher total premium. Returns null
+// if nobody sold anything that month (never fabricates a winner).
+function pickWinner(soldRows) {
   const byProducer = new Map();
-  for (const lead of soldLeads) {
-    if (!lead.assignedToId) continue;
-    const row = byProducer.get(lead.assignedToId) || { userId: lead.assignedToId, soldCount: 0, premiumCents: 0 };
-    row.soldCount += 1;
-    row.premiumCents += lead.salePremiumCents || 0;
-    byProducer.set(lead.assignedToId, row);
+  for (const row of soldRows) {
+    if (!row.assignedToId) continue;
+    const entry = byProducer.get(row.assignedToId) || { userId: row.assignedToId, soldCount: 0, premiumCents: 0 };
+    entry.soldCount += 1;
+    entry.premiumCents += row.salePremiumCents || 0;
+    byProducer.set(row.assignedToId, entry);
   }
   const rows = Array.from(byProducer.values());
   if (rows.length === 0) return null;
@@ -51,11 +54,14 @@ async function checkAgentOfMonth(now = new Date()) {
     });
     if (existing) continue;
 
-    const soldLeads = await prisma.lead.findMany({
-      where: { agencyId: agency.id, status: 'SOLD', updatedAt: { gte: start, lt: end } },
-      select: { assignedToId: true, salePremiumCents: true },
-    });
-    const winner = pickWinner(soldLeads);
+    // Real production only — a Lead reaching SOLD is a queue disposition,
+    // not a sale. The winner is decided from real Closed Sale/Historical
+    // Data records, same as Billboard/financials, never from Lead.status.
+    const [historicalRows, saleRows] = await Promise.all([
+      historicalLeadLikeRows({ agencyId: agency.id, from: start, to: end }),
+      saleLeadLikeRows({ agencyId: agency.id, from: start, to: end }),
+    ]);
+    const winner = pickWinner([...historicalRows, ...saleRows]);
     if (!winner) continue;
 
     await prisma.userBadge.create({

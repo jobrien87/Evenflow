@@ -42,19 +42,39 @@ test('checkAgentOfMonth: awards the real previous-month winner, exactly once', a
   const { start } = previousMonthRange(new Date());
   const midMonth = new Date(start.getTime() + 5 * 24 * 60 * 60 * 1000);
   const customer = await prisma.customer.create({ data: { firstName: 'AOM', lastName: 'Cust' } });
-  const lead = await prisma.lead.create({
-    data: { agencyId: agency.id, customerId: customer.id, assignedToId: producer.id, status: 'SOLD', salePremiumCents: 10000 },
+  // A real standalone Closed Sale, dated inside last month — the real
+  // production record the winner is now decided from (a bare Lead.SOLD
+  // disposition, with no Sale behind it, must never count — see the
+  // negative-control test below).
+  const sale = await prisma.sale.create({
+    data: {
+      agencyId: agency.id, customerId: customer.id, firstName: 'AOM', lastName: 'Cust',
+      saleDate: midMonth, carrier: 'Allstate', policyType: 'Auto-Standard', productFamily: 'AUTO',
+      premiumCents: 10000, assignedToId: producer.id, createdById: producer.id,
+    },
   });
-  // Backdate updatedAt into last month via a direct update (createdAt/updatedAt
-  // default to now() on create) so the real previous-month query window picks it up.
-  await prisma.lead.update({ where: { id: lead.id }, data: { updatedAt: midMonth } });
+
+  // A second producer with several bare SOLD-disposition Leads and no
+  // real Sale behind any of them — must never outrank (or even count
+  // toward) the real-Sale producer above, despite having a higher raw
+  // "SOLD lead" count.
+  const noSaleProducer = await prisma.user.create({
+    data: { agencyId: agency.id, email: `aom-nosale-${suffix}@test.local`, passwordHash: 'x', firstName: 'No', lastName: 'Sale', role: 'PRODUCER', status: 'ACTIVE' },
+  });
+  for (let i = 0; i < 5; i++) {
+    const c = await prisma.customer.create({ data: { firstName: 'AOM', lastName: `NoSale${suffix}${i}` } });
+    const bareLead = await prisma.lead.create({
+      data: { agencyId: agency.id, customerId: c.id, assignedToId: noSaleProducer.id, status: 'SOLD', salePremiumCents: 50000 },
+    });
+    await prisma.lead.update({ where: { id: bareLead.id }, data: { updatedAt: midMonth } });
+  }
 
   const result1 = await checkAgentOfMonth(new Date());
   assert.ok(result1.awarded >= 1, 'at least this agency should get a fresh award');
 
   const badge = await prisma.userBadge.findFirst({ where: { agencyId: agency.id, type: 'AGENT_OF_THE_MONTH' } });
   assert.ok(badge, 'a real UserBadge row was created');
-  assert.equal(badge.userId, producer.id);
+  assert.equal(badge.userId, producer.id, 'the real-Sale producer wins, never the bare-SOLD-disposition one');
 
   // Running it again must not award a second badge for the same period —
   // the unique constraint plus the existing-check make this a true no-op.
