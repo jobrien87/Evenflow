@@ -118,6 +118,38 @@ test('a standalone sale reaches Billboard\'s byProducer and byProduct with the r
   await prisma.revenueEvent.deleteMany({ where: { notes: { contains: sale.id } } });
 });
 
+// Item 4 of the correction round: a real, full customer-name search for
+// Closed Sales, independent of whatever date range happens to be
+// selected -- same "find it by name" convenience Find a Lead gives leads.
+test('GET /sales?q= finds a sale by customer name regardless of date range, scoped correctly per role', async () => {
+  const uniqueLastName = `SearchCustomer${Date.now()}`;
+  const oldSaleDate = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000).toISOString(); // well outside any date-range preset
+  const createRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ firstName: 'Findable', lastName: uniqueLastName, saleDate: oldSaleDate, assignedToId: producerId })),
+  });
+  assert.equal(createRes.status, 201);
+  const { sale } = await createRes.json();
+
+  const ownerSearch = await fetch(`${baseUrl}/api/sales?q=${encodeURIComponent(uniqueLastName)}`, { headers: { Cookie: ownerCookie } });
+  assert.equal(ownerSearch.status, 200);
+  const ownerBody = await ownerSearch.json();
+  assert.ok(ownerBody.sales.some((s) => s.id === sale.id), 'an old, out-of-range sale must still be found by name search');
+
+  const producerSearch = await fetch(`${baseUrl}/api/sales?q=${encodeURIComponent(uniqueLastName)}`, { headers: { Cookie: producerCookie } });
+  assert.equal(producerSearch.status, 200);
+  const producerBody = await producerSearch.json();
+  assert.ok(producerBody.sales.some((s) => s.id === sale.id), 'the assigned Producer must find their own sale by name search');
+
+  const managerSearch = await fetch(`${baseUrl}/api/sales?q=${encodeURIComponent(uniqueLastName)}`, { headers: { Cookie: manager2Cookie } });
+  assert.equal(managerSearch.status, 200);
+  const managerBody = await managerSearch.json();
+  assert.ok(managerBody.sales.some((s) => s.id === sale.id), 'a Manager (non-owner, non-assignee) must still find it -- agency-wide, same as GET /sales\' existing default scope');
+
+  await prisma.sale.delete({ where: { id: sale.id } });
+  await prisma.revenueEvent.deleteMany({ where: { notes: { contains: sale.id } } });
+});
+
 test('new policy types (Motorhome, Jewelry, Pet Health, Roadside, Umbrella) are accepted, persist, and group correctly on Billboard', async () => {
   const cases = [
     { carrier: 'Allstate', policyType: 'Motorhome', productFamily: 'MOTORHOME' },

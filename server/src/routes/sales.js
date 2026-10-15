@@ -276,6 +276,12 @@ router.get('/', requireRole(...CREATE_ROLES), async (req, res, next) => {
   try {
     const agencyId = scopeAgencyId(req);
     if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+    // ?q= is a real, full customer-name search — when present it is NOT
+    // combined with the from/to range below, so a producer/manager can
+    // find an older Closed Sale by name regardless of which date range
+    // happens to be selected (same "find it by name, not by digging
+    // through a date filter" convenience GET /leads/search gives leads).
+    const q = (req.query.q || '').trim();
     const where = {
       agencyId,
       ...(req.user.role === 'PRODUCER' ? { assignedToId: req.user.id } : {}),
@@ -283,9 +289,11 @@ router.get('/', requireRole(...CREATE_ROLES), async (req, res, next) => {
       ...(req.query.officeId ? { officeId: req.query.officeId } : {}),
       ...(req.query.productFamily ? { productFamily: req.query.productFamily } : {}),
       ...(req.query.includeVoided === 'true' ? {} : { voidedAt: null }),
-      ...(req.query.from || req.query.to
-        ? { saleDate: { ...(req.query.from ? { gte: new Date(req.query.from) } : {}), ...(req.query.to ? { lte: new Date(req.query.to) } : {}) } }
-        : {}),
+      ...(q
+        ? { OR: [{ firstName: { contains: q, mode: 'insensitive' } }, { lastName: { contains: q, mode: 'insensitive' } }] }
+        : (req.query.from || req.query.to)
+          ? { saleDate: { ...(req.query.from ? { gte: new Date(req.query.from) } : {}), ...(req.query.to ? { lte: new Date(req.query.to) } : {}) } }
+          : {}),
     };
     const sales = await prisma.sale.findMany({
       where,

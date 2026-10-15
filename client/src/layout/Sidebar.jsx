@@ -6,6 +6,7 @@ import { goToMarketingSite } from '../lib/marketingUrl';
 import { mainNavForRole, secondaryNavForRole, teamChatNavPath } from './navConfig';
 import { Icon, Button, ComingSoonModal, Logo } from '../ui';
 import NotificationBell from '../pages/NotificationBell';
+import { APP_VERSION_LABEL } from '../lib/version';
 
 export default function Sidebar({ onTakeTour }) {
   const { user, logout } = useAuth();
@@ -92,6 +93,7 @@ export default function Sidebar({ onTakeTour }) {
             Tour
           </button>
         )}
+        <div style={s.versionLabel} title="Real build identity: version + git commit, set at build time">{APP_VERSION_LABEL}</div>
       </div>
 
       {stubOpen && (
@@ -129,6 +131,7 @@ const s = {
   bottom: { padding: 'var(--space-4)', borderTop: '1px solid var(--border-hairline)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' },
   bellRow: { display: 'flex', alignItems: 'center', gap: 10 },
   userLabel: { color: 'var(--text-muted)', fontSize: 11 },
+  versionLabel: { color: 'var(--text-muted)', fontSize: 10, textAlign: 'center', opacity: 0.7 },
   tourButton: {
     display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%',
     background: 'var(--accent-gradient-soft)', border: '1px solid var(--border-hairline)',

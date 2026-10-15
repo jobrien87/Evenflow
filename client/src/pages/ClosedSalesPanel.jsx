@@ -34,6 +34,11 @@ export default function ClosedSalesPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [editingSale, setEditingSale] = useState(null);
+  // A real customer-name search — finds a Closed Sale by name regardless
+  // of the selected date range, same convenience Find a Lead already
+  // gives leads (see api.sales' ?q= handling server-side).
+  const [searchInput, setSearchInput] = useState('');
+  const [activeSearch, setActiveSearch] = useState('');
 
   useEffect(() => {
     if (isProducer) return;
@@ -42,15 +47,21 @@ export default function ClosedSalesPanel() {
 
   useEffect(() => {
     load();
-  }, [periodKey, customFrom, customTo, producerFilter]);
+  }, [periodKey, customFrom, customTo, producerFilter, activeSearch]);
 
   async function load() {
-    const range = resolveDateRange(periodKey, PERIODS, customFrom, customTo);
-    if (!range) return; // custom selected, dates not both picked yet
     setError('');
+    const params = new URLSearchParams();
+    if (!isProducer && producerFilter) params.set('assignedToId', producerFilter);
+    if (activeSearch) {
+      params.set('q', activeSearch);
+    } else {
+      const range = resolveDateRange(periodKey, PERIODS, customFrom, customTo);
+      if (!range) return; // custom selected, dates not both picked yet
+      params.set('from', range.from);
+      params.set('to', range.to);
+    }
     try {
-      const params = new URLSearchParams({ from: range.from, to: range.to });
-      if (!isProducer && producerFilter) params.set('assignedToId', producerFilter);
       const data = await api.sales(`?${params.toString()}`);
       setSales(data.sales || []);
     } catch (err) {
@@ -60,12 +71,22 @@ export default function ClosedSalesPanel() {
     }
   }
 
+  function runSearch(e) {
+    if (e) e.preventDefault();
+    setActiveSearch(searchInput.trim());
+  }
+
+  function clearSearch() {
+    setSearchInput('');
+    setActiveSearch('');
+  }
+
   if (loading) return <div style={s.wrap}>Loading…</div>;
 
   return (
     <div style={s.wrap}>
       <div style={s.headerRow}>
-        <h3 style={s.h3}>{isProducer ? 'MY SALES' : 'CLOSED SALES'} ({sales.length})</h3>
+        <h3 style={s.h3}>{isProducer ? 'MY SALES' : 'CLOSED SALES'} ({sales.length}){activeSearch ? ` · SEARCH: "${activeSearch}"` : ''}</h3>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           {!isProducer && (
             <select style={s.filterSelect} value={producerFilter} onChange={(e) => setProducerFilter(e.target.value)}>
@@ -73,17 +94,30 @@ export default function ClosedSalesPanel() {
               {producers.map((p) => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
             </select>
           )}
-          <DateRangeFilter
-            presets={PERIODS.map((p) => ({ key: p.key, label: p.label.toUpperCase() }))}
-            periodKey={periodKey}
-            onSelectPreset={setPeriodKey}
-            customFrom={customFrom}
-            customTo={customTo}
-            onCustomFromChange={setCustomFrom}
-            onCustomToChange={setCustomTo}
-          />
+          {!activeSearch && (
+            <DateRangeFilter
+              presets={PERIODS.map((p) => ({ key: p.key, label: p.label.toUpperCase() }))}
+              periodKey={periodKey}
+              onSelectPreset={setPeriodKey}
+              customFrom={customFrom}
+              customTo={customTo}
+              onCustomFromChange={setCustomFrom}
+              onCustomToChange={setCustomTo}
+            />
+          )}
         </div>
       </div>
+
+      <form onSubmit={runSearch} style={s.searchRow}>
+        <input
+          style={s.searchInput}
+          placeholder="Search by customer name…"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+        />
+        <Button type="submit" size="sm">SEARCH</Button>
+        {activeSearch && <Button type="button" variant="secondary" size="sm" onClick={clearSearch}>CLEAR</Button>}
+      </form>
 
       {editingSale && (
         <AddClosedSaleModal
@@ -141,6 +175,8 @@ const s = {
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 18 },
   h3: { margin: 0, fontSize: 18, letterSpacing: 0.5 },
   filterSelect: { padding: '8px 10px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 13 },
+  searchRow: { display: 'flex', gap: 10, marginBottom: 14 },
+  searchInput: { flex: 1, maxWidth: 360, padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 13 },
   loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 12, borderRadius: 8, fontSize: 13, marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
   retryButton: { background: 'transparent', border: '1px solid currentColor', color: 'inherit', borderRadius: 6, padding: '4px 10px', fontSize: 12, cursor: 'pointer' },
   table: { display: 'flex', flexDirection: 'column' },

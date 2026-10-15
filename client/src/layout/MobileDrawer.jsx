@@ -4,6 +4,7 @@ import { useAuth } from '../lib/AuthContext';
 import { goToMarketingSite } from '../lib/marketingUrl';
 import { mainNavForRole, secondaryNavForRole } from './navConfig';
 import { Icon, Button, ComingSoonModal, Logo } from '../ui';
+import { APP_VERSION_LABEL } from '../lib/version';
 
 export default function MobileDrawer({ open, onClose, onTakeTour }) {
   const { user, logout } = useAuth();
@@ -90,6 +91,7 @@ export default function MobileDrawer({ open, onClose, onTakeTour }) {
               Tour
             </button>
           )}
+          <div style={s.versionLabel}>{APP_VERSION_LABEL}</div>
         </div>
       </div>
 
@@ -122,6 +124,7 @@ const s = {
   secondaryNav: { padding: '0 var(--space-3) var(--space-2)', borderTop: '1px solid var(--border-hairline)', paddingTop: 'var(--space-2)', display: 'flex', flexDirection: 'column', gap: 2 },
   bottom: { padding: 'var(--space-4)', borderTop: '1px solid var(--border-hairline)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' },
   userLabel: { color: 'var(--text-muted)', fontSize: 11 },
+  versionLabel: { color: 'var(--text-muted)', fontSize: 10, textAlign: 'center', opacity: 0.7 },
   tourButton: {
     display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%',
     background: 'var(--accent-gradient-soft)', border: '1px solid var(--border-hairline)',
