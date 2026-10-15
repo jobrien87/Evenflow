@@ -182,16 +182,44 @@ test('zero-premium and zero-item sales are preserved, not coerced to a default',
   await prisma.sale.delete({ where: { id: sale.id } });
 });
 
-test('a duplicate (same carrier+policyType+saleDate) is flagged and blocked without confirmDuplicate', async () => {
+// False-duplicate fix: carrier+policyType+saleDate alone must never match
+// two different customers against each other.
+test('different customers with the same carrier+policyType+saleDate are never flagged as duplicates of each other', async () => {
   const saleDate = new Date().toISOString();
-  const first = basePayload({ saleDate, lastName: `DupCustomer${Date.now()}` });
+  const first = basePayload({ saleDate, firstName: 'Alice', lastName: `DiffCustomerA${Date.now()}` });
   const res1 = await fetch(`${baseUrl}/api/sales`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie }, body: JSON.stringify(first),
   });
   assert.equal(res1.status, 201);
   const { sale: sale1 } = await res1.json();
 
-  const second = basePayload({ saleDate, lastName: `DupCustomer2${Date.now()}` });
+  const second = basePayload({ saleDate, firstName: 'Bob', lastName: `DiffCustomerB${Date.now()}` });
+  const res2 = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie }, body: JSON.stringify(second),
+  });
+  assert.equal(res2.status, 201, 'two different customers buying the same carrier/policyType on the same date must never be flagged as duplicates of each other');
+  const { sale: sale2 } = await res2.json();
+
+  await prisma.sale.deleteMany({ where: { id: { in: [sale1.id, sale2.id] } } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: { in: [sale1.id, sale2.id] } } });
+});
+
+// Genuine duplicate protection is retained: the SAME customer (name match
+// is case-insensitive) with the same carrier+policyType+saleDate is still
+// caught, and confirmDuplicate still lets a real re-entry through.
+test('a genuine duplicate (same customer, carrier+policyType+saleDate) is flagged and blocked without confirmDuplicate', async () => {
+  const saleDate = new Date().toISOString();
+  const sharedLastName = `DupCustomer${Date.now()}`;
+  const first = basePayload({ saleDate, firstName: 'Same', lastName: sharedLastName });
+  const res1 = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie }, body: JSON.stringify(first),
+  });
+  assert.equal(res1.status, 201);
+  const { sale: sale1 } = await res1.json();
+
+  // Same customer, different case on both names -- the match must be
+  // case-insensitive, same real person either way.
+  const second = basePayload({ saleDate, firstName: 'SAME', lastName: sharedLastName.toUpperCase() });
   const res2 = await fetch(`${baseUrl}/api/sales`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie }, body: JSON.stringify(second),
   });
@@ -208,7 +236,42 @@ test('a duplicate (same carrier+policyType+saleDate) is flagged and blocked with
   const { sale: sale2 } = await res3.json();
 
   await prisma.sale.deleteMany({ where: { id: { in: [sale1.id, sale2.id] } } });
-  await prisma.revenueEvent.deleteMany({ where: { OR: [{ notes: { contains: sale1.id } }, { notes: { contains: sale2.id } }] } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: { in: [sale1.id, sale2.id] } } });
+});
+
+// "Avoid rechecking unchanged matching fields": the client resends
+// carrier/policyType/saleDate unconditionally on every save, so an
+// unrelated correction (e.g. a premium fix) must never re-trigger the
+// duplicate check just because a real colliding sale exists elsewhere.
+test('an edit that only changes an unrelated field does not re-trigger the duplicate check, even when a colliding sale exists', async () => {
+  const saleDate = new Date().toISOString();
+  const sharedLastName = `UnchangedEdit${Date.now()}`;
+  const collidingRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ saleDate, firstName: 'Carry', lastName: sharedLastName })),
+  });
+  assert.equal(collidingRes.status, 201);
+  const { sale: colliding } = await collidingRes.json();
+
+  const targetRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ ...basePayload({ saleDate, firstName: 'Carry', lastName: sharedLastName }), confirmDuplicate: true, premiumCents: 10000 }),
+  });
+  assert.equal(targetRes.status, 201);
+  const { sale: target } = await targetRes.json();
+
+  // Resends carrier/policyType/saleDate unchanged (as the real client
+  // always does) alongside a genuine premium correction.
+  const patchRes = await fetch(`${baseUrl}/api/sales/${target.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ carrier: target.carrier, policyType: target.policyType, saleDate, premiumCents: 77000 }),
+  });
+  assert.equal(patchRes.status, 200, 'resending unchanged carrier/policyType/saleDate alongside a real premium correction must never re-trigger the duplicate check');
+  const { sale: updated } = await patchRes.json();
+  assert.equal(updated.premiumCents, 77000);
+
+  await prisma.sale.deleteMany({ where: { id: { in: [colliding.id, target.id] } } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: { in: [colliding.id, target.id] } } });
 });
 
 test('two POSTs with the same clientRequestId produce exactly one row (idempotent retry)', async () => {

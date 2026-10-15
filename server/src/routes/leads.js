@@ -92,7 +92,14 @@ router.get('/', async (req, res, next) => {
           ...(req.query.to ? { lte: new Date(req.query.to) } : {}),
         },
       } : {}),
-      ...(req.user.role === 'PRODUCER' ? { assignedToId: req.user.id } : {}),
+      ...(req.user.role === 'PRODUCER'
+        ? { assignedToId: req.user.id }
+        // A Manager/Owner/Platform Owner may narrow the agency-wide list
+        // to one assignee's own leads ("My Leads") via this param — real
+        // server-side scoping, not a client-side filter of the full
+        // list. Already-safe: this only ever narrows within the agencyId
+        // filter already applied above, never widens it.
+        : req.query.assignedToId ? { assignedToId: req.query.assignedToId } : {}),
       archivedAt: null,
     };
 
@@ -1309,6 +1316,15 @@ router.get('/search', searchLimiter, requireRole('PRODUCER', 'AGENCY_MANAGER', '
     const email = normalizeEmail(q);
     const where = {
       agencyId,
+      // A PRODUCER's search is scoped to their own assigned leads only —
+      // same limit as their default GET /leads list. Manager/Owner/
+      // Platform Owner keep the real, agency-wide lookup this endpoint
+      // exists for (finding an older/closed lead regardless of who
+      // originally worked it). Moshpit's own separately-authorized
+      // claim/visibility rules (GET /moshpit, POST /:leadId/claim) are
+      // untouched by this — a Producer still sees unclaimed Moshpit
+      // leads there, just not via this search.
+      ...(req.user.role === 'PRODUCER' ? { assignedToId: req.user.id } : {}),
       // Deliberately NOT archivedAt:null — unlike the default list, this
       // is a lookup tool meant to surface older/closed/archived leads too.
       customer: {

@@ -11,11 +11,12 @@ function statusTone(status) {
   return 'neutral';
 }
 
-// Agency-wide name/phone/email lookup for a returning prospect — see
-// GET /leads/search's own comment for the deliberate scope decision
-// (every allowed role, Producer included, searches the whole agency,
-// not just their own leads). Pure read throughout: finding or opening a
-// result never changes its assignedToId/status/archivedAt.
+// Name/phone/email lookup for a returning prospect. Manager/Owner/
+// Platform Owner search the whole agency (so an older/closed lead can be
+// found regardless of who originally worked it); a Producer's search is
+// limited to their own assigned leads, same as their default lead list —
+// see GET /leads/search's own comment. Pure read throughout: finding or
+// opening a result never changes its assignedToId/status/archivedAt.
 export default function LeadSearchBox() {
   const { user } = useAuth();
   const canOpenAny = ['AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'].includes(user?.role);

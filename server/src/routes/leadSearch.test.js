@@ -4,13 +4,14 @@
 //   node --test src/routes/leadSearch.test.js
 //
 // Covers: name/phone/email each independently find the right lead; a
-// Producer's search returns a lead assigned to a DIFFERENT producer in
-// the same agency (the deliberate widening) but never a lead from a
-// different agency; an archived (DUPLICATE-dispositioned) lead IS
-// returned by search but still excluded from the default GET /leads
-// list; a short query returns empty, not an error; PLATFORM_OWNER
-// without agencyId 400s; TELEMARKETER 403s; neither this route nor
-// GET /:leadId ever mutates assignedToId/status/archivedAt/firstAttemptAt.
+// Producer's search is limited to their own assigned leads (never a
+// different producer's, never a different agency's), while Manager/
+// Owner/Platform Owner keep the real agency-wide lookup; an archived
+// (DUPLICATE-dispositioned) lead IS returned by search but still
+// excluded from the default GET /leads list; a short query returns
+// empty, not an error; PLATFORM_OWNER without agencyId 400s; TELEMARKETER
+// 403s; neither this route nor GET /:leadId ever mutates
+// assignedToId/status/archivedAt/firstAttemptAt.
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
@@ -134,12 +135,31 @@ test('search by email finds the right lead', async () => {
   assert.ok(body.leads.some((l) => l.id === targetLead.id), 'the target lead must be found by email');
 });
 
-test('a Producer\'s search returns a lead assigned to a DIFFERENT producer in the same agency (deliberate widening)', async () => {
+// A Producer's search is scoped to their own assigned leads only, same
+// limit as their default GET /leads list — reverted from an earlier
+// round's deliberate agency-wide widening, per the explicit instruction
+// that producer search stay limited to their own assigned leads. Manager/
+// Owner/Platform Owner keep the real agency-wide lookup.
+test('a Producer\'s search never returns a lead assigned to a DIFFERENT producer in the same agency', async () => {
   const res = await fetch(`${baseUrl}/api/leads/search?q=${encodeURIComponent(`Prospect${suffix}`.slice(0, 10))}`, { headers: { Cookie: producerCookie } });
   assert.equal(res.status, 200);
   const body = await res.json();
+  assert.equal(body.leads.some((l) => l.id === targetLead.id), false, 'a Producer must never find a lead assigned to a different producer via search');
+});
+
+test('a Producer\'s search DOES return their own assigned lead', async () => {
+  const res = await fetch(`${baseUrl}/api/leads/search?q=${encodeURIComponent(`Record${suffix}`.slice(0, 8))}`, { headers: { Cookie: producerCookie } });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.ok(body.leads.some((l) => l.id === archivedLead.id), 'a Producer must still find their own assigned lead via search');
+});
+
+test('a Manager/Owner search still returns a lead assigned to any producer in the agency (agency-wide, unchanged)', async () => {
+  const res = await fetch(`${baseUrl}/api/leads/search?q=${encodeURIComponent(`Prospect${suffix}`.slice(0, 10))}`, { headers: { Cookie: ownerCookie } });
+  assert.equal(res.status, 200);
+  const body = await res.json();
   const found = body.leads.find((l) => l.id === targetLead.id);
-  assert.ok(found, 'a Producer must be able to find a lead assigned to a different producer via search');
+  assert.ok(found, 'an Owner must still find a lead assigned to any producer via search');
   assert.equal(found.assignedTo?.id, producer2Id, 'the result must show the real assigned producer');
   assert.equal(found.status, 'LOST', 'the result must show the real current status');
 });

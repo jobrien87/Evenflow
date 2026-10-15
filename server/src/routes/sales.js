@@ -21,11 +21,14 @@ const CREATE_ROLES = ['AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER', 'PLATFORM_OW
 
 // Finds likely duplicates within the agency: an exact policyNumber match
 // against other non-voided Sales, or the same carrier+policyType+saleDate
-// combination (policy number alone must not block a legitimate renewal/
-// rewrite, and name alone is never a reliable key — see the user's own
-// spec). Also a loose cross-check against HistoricalRecord (same customer
-// name + product within a few days of the sale date), the closest fields
-// that model actually has.
+// combination FOR THE SAME CUSTOMER (policy number alone must not block a
+// legitimate renewal/rewrite; carrier+policyType+saleDate alone is not a
+// reliable key either — two unrelated customers can easily buy the same
+// carrier/policy-type combo on the same day, so that branch must also
+// require the same customer name, never fire on coincidence alone). Also
+// a loose cross-check against HistoricalRecord (same customer name +
+// product within a few days of the sale date), the closest fields that
+// model actually has.
 async function findPossibleDuplicates({ agencyId, excludeSaleId, leadId, policyNumber, carrier, policyType, saleDate, firstName, lastName, zip }) {
   const saleWhere = {
     agencyId,
@@ -37,7 +40,11 @@ async function findPossibleDuplicates({ agencyId, excludeSaleId, leadId, policyN
       // never generate a second production credit.
       ...(leadId ? [{ leadId }] : []),
       ...(policyNumber ? [{ policyNumber }] : []),
-      { carrier, policyType, saleDate },
+      {
+        carrier, policyType, saleDate,
+        firstName: { equals: firstName, mode: 'insensitive' },
+        lastName: { equals: lastName, mode: 'insensitive' },
+      },
     ],
   };
   const saleMatches = await prisma.sale.findMany({
@@ -296,10 +303,19 @@ router.get('/', requireRole(...CREATE_ROLES), async (req, res, next) => {
 // explicitly confirm past the recheck below, same as POST.
 const updateSaleSchema = createSaleSchema.omit({ clientRequestId: true }).partial();
 
-// Fields findPossibleDuplicates actually matches on — if a PATCH touches
-// any of these, the duplicate check is re-run (never on an edit that
-// only changes, say, notes or revenueCents).
+// Fields findPossibleDuplicates actually matches on — if a PATCH actually
+// CHANGES any of these (not merely re-sends the sale's existing value,
+// which the client does unconditionally on every save), the duplicate
+// check is re-run. Never on an edit that only changes, say, notes or
+// revenueCents, and never on a client resubmitting an unchanged value
+// alongside an unrelated correction.
 const DUPLICATE_SENSITIVE_FIELDS = ['carrier', 'policyType', 'policyNumber', 'saleDate'];
+
+function duplicateSensitiveFieldChanged(key, patch, sale) {
+  if (!(key in patch)) return false;
+  if (key === 'saleDate') return patch.saleDate.getTime() !== new Date(sale.saleDate).getTime();
+  return patch[key] !== sale[key];
+}
 
 router.patch('/:saleId', requireRole(...CREATE_ROLES), async (req, res, next) => {
   try {
@@ -331,7 +347,14 @@ router.patch('/:saleId', requireRole(...CREATE_ROLES), async (req, res, next) =>
     // different lead. This keeps "standalone vs. linked" and the source
     // Lead's own quote/disposition history untouched by any edit.
 
-    if (data.assignedToId !== undefined && req.user.role !== 'PRODUCER') {
+    // Only treat this as a reassignment — and only run the seniority
+    // check below — when assignedToId is an actual change from the
+    // sale's current assignee. A client resending the unchanged value
+    // alongside an unrelated correction (e.g. a premium fix) must never
+    // be treated as "reassigning credit": canActOnUser requires a
+    // strictly higher rank, so an AGENCY_MANAGER's own self-credited
+    // sale would otherwise always fail this check on every edit.
+    if (data.assignedToId !== undefined && data.assignedToId !== sale.assignedToId && req.user.role !== 'PRODUCER') {
       const assignee = await prisma.user.findUnique({ where: { id: data.assignedToId }, select: { id: true, agencyId: true, role: true } });
       if (!assignee || assignee.agencyId !== sale.agencyId) {
         return res.status(400).json({ success: false, error: 'INVALID_PRODUCER' });
@@ -353,10 +376,14 @@ router.patch('/:saleId', requireRole(...CREATE_ROLES), async (req, res, next) =>
     }
 
     // Re-run the same duplicate check POST uses, excluding this sale
-    // itself, whenever the edit touches a field the check matches on —
-    // never trust a client-side-only check for something this
-    // consequential, same discipline as create.
-    if (DUPLICATE_SENSITIVE_FIELDS.some((key) => data[key] !== undefined)) {
+    // itself, whenever the edit actually CHANGES a field the check
+    // matches on — never trust a client-side-only check for something
+    // this consequential, same discipline as create. Checking actual
+    // change (not mere payload presence) is what keeps an unrelated
+    // correction (e.g. a premium fix) from re-triggering this on every
+    // single save, since the client always resends carrier/policyType/
+    // saleDate even when they're unchanged.
+    if (DUPLICATE_SENSITIVE_FIELDS.some((key) => duplicateSensitiveFieldChanged(key, patch, sale))) {
       const merged = { ...sale, ...patch };
       const duplicates = await findPossibleDuplicates({
         agencyId: sale.agencyId, excludeSaleId: sale.id, leadId: sale.leadId,

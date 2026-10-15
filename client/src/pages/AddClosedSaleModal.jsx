@@ -83,6 +83,32 @@ export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill, 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [savedCount, setSavedCount] = useState(0);
+  // Void is the only way to remove a Closed Sale — there is no hard
+  // delete, same "reversible, never destroy history" convention as
+  // every other record in this app. Only an Owner/Manager/Platform Owner
+  // may void (server-enforced); a Producer never sees this control.
+  const [voiding, setVoiding] = useState(false);
+  const [voidReason, setVoidReason] = useState('');
+  const [voidError, setVoidError] = useState('');
+  const [voidBusy, setVoidBusy] = useState(false);
+
+  async function confirmVoid() {
+    if (!voidReason.trim()) {
+      setVoidError('A reason is required.');
+      return;
+    }
+    setVoidBusy(true);
+    setVoidError('');
+    try {
+      const res = await api.voidSale(sale.id, voidReason.trim());
+      onSaved?.(res.sale);
+      onClose();
+    } catch (err) {
+      setVoidError(err.data?.message || 'Could not void this sale.');
+    } finally {
+      setVoidBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (isProducer) return;
@@ -133,7 +159,15 @@ export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill, 
       reason: form.reason || undefined,
       notes: form.notes || undefined,
       officeId: form.officeId || undefined,
-      assignedToId: isProducer ? undefined : form.assignedToId || undefined,
+      // Only sent when it's an actual change from the sale's current
+      // assignee — an unchanged value here used to trip the server's
+      // reassignment-seniority check on every edit (even a plain premium
+      // correction), which blocked a manager from ever saving their own
+      // self-credited sale (canActOnUser requires a strictly higher rank,
+      // so a Manager editing her own Manager-credited sale always failed).
+      assignedToId: isProducer || (isEdit && form.assignedToId === (sale?.assignedToId || ''))
+        ? undefined
+        : form.assignedToId || undefined,
       confirmDuplicate: confirmDuplicate || undefined,
     };
   }
@@ -189,8 +223,26 @@ export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill, 
       {isEdit && sale.leadId && (
         <div style={s.linkedLeadNote}>Linked to a Lead — this connection can&rsquo;t be changed here.</div>
       )}
+      {isEdit && sale.voidedAt && (
+        <div style={s.linkedLeadNote}>This sale was voided{sale.voidReason ? `: ${sale.voidReason}` : ''}. It no longer counts toward any report.</div>
+      )}
 
-      {duplicates ? (
+      {isEdit && voiding ? (
+        <div>
+          <div style={s.error}>
+            Voiding removes this sale from every report (Billboard, Financials, goals). This can&rsquo;t be undone — it stays in the record as a voided entry, never deleted.
+          </div>
+          {voidError && <div style={s.error}>{voidError}</div>}
+          <label style={s.labeled}>
+            <span style={s.labelText}>Reason for voiding</span>
+            <input style={s.input} value={voidReason} onChange={(e) => setVoidReason(e.target.value)} placeholder="e.g. entered in error" autoFocus />
+          </label>
+          <div style={s.footerRow}>
+            <Button type="button" variant="secondary" onClick={() => { setVoiding(false); setVoidError(''); }} disabled={voidBusy}>CANCEL</Button>
+            <Button type="button" variant="danger" onClick={confirmVoid} disabled={voidBusy}>{voidBusy ? 'VOIDING…' : 'CONFIRM VOID'}</Button>
+          </div>
+        </div>
+      ) : duplicates ? (
         <div>
           <div style={s.error}>
             A similar sale may already exist. Review below, then confirm to save anyway or cancel to edit your entry.
@@ -315,6 +367,11 @@ export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill, 
           <textarea style={s.textarea} maxLength={1000} placeholder="Notes (optional)" value={form.notes} onChange={(e) => setField('notes', e.target.value)} />
 
           <div style={s.footerRow}>
+            {isEdit && !isProducer && !sale.voidedAt && (
+              <Button type="button" variant="danger" onClick={() => setVoiding(true)} disabled={saving} style={{ marginRight: 'auto' }}>
+                VOID THIS SALE
+              </Button>
+            )}
             <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>CANCEL</Button>
             {!isEdit && (
               <Button type="button" variant="secondary" onClick={(e) => submit(e, { addAnother: true })} disabled={saving}>

@@ -14,6 +14,7 @@ import LeadSearchBox from './LeadSearchBox';
 // instead of living inside the Main Stage overview.
 export default function AgencyLeadsPanel() {
   const { user } = useAuth();
+  const isManager = user?.role === 'AGENCY_MANAGER';
   const [searchParams, setSearchParams] = useSearchParams();
   const [leads, setLeads] = useState([]);
   const [producers, setProducers] = useState([]);
@@ -24,6 +25,12 @@ export default function AgencyLeadsPanel() {
   const [leadForm, setLeadForm] = useState({ firstName: '', lastName: '', phone: '', email: '', product: 'Auto', assignedToId: '' });
   const [leadStatus, setLeadStatus] = useState('');
   const [loadError, setLoadError] = useState('');
+  // Real server-side scope for a Manager, not a client-side filter of the
+  // already-fetched agency-wide list: 'all' sends no assignedToId param
+  // (today's existing agency-wide behavior, unchanged for Owner/Platform
+  // Owner, who have no toggle at all); 'mine' re-fetches with
+  // assignedToId=self so a selling Manager can see just her own book.
+  const [scopeMode, setScopeMode] = useState('all');
 
   const stage = searchParams.get('stage');
   const from = searchParams.get('from');
@@ -34,7 +41,7 @@ export default function AgencyLeadsPanel() {
 
   useEffect(() => {
     load();
-  }, [stage, from, to]);
+  }, [stage, from, to, scopeMode]);
 
   useEffect(() => {
     if (!highlightId || handledHighlightRef.current || leads.length === 0) return;
@@ -45,13 +52,24 @@ export default function AgencyLeadsPanel() {
 
   async function load() {
     setLoadError('');
-    const leadParams = stageFilter
-      ? `?stage=${stageFilter.stage}&from=${stageFilter.from}&to=${stageFilter.to}`
-      : '';
+    const params = new URLSearchParams();
+    if (stageFilter) {
+      params.set('stage', stageFilter.stage);
+      params.set('from', stageFilter.from);
+      params.set('to', stageFilter.to);
+    }
+    if (isManager && scopeMode === 'mine' && user?.id) {
+      params.set('assignedToId', user.id);
+    }
+    const qs = params.toString();
     try {
-      const [leadData, userData] = await Promise.all([api.leads(leadParams), api.users('')]);
+      const [leadData, userData] = await Promise.all([api.leads(qs ? `?${qs}` : ''), api.users('')]);
       setLeads(leadData.leads);
-      setProducers(userData.users.filter((u) => u.role === 'PRODUCER' && u.status === 'ACTIVE'));
+      // A selling AGENCY_MANAGER (e.g. Julie) must be a selectable credit
+      // target here too, not just a plain PRODUCER — same
+      // eligible-production-roles rule as Closed Sale's own producer
+      // picker and eligibleProducersQuery.js.
+      setProducers(userData.users.filter((u) => ['PRODUCER', 'AGENCY_MANAGER'].includes(u.role) && u.status === 'ACTIVE'));
     } catch (err) {
       setLoadError(err.data?.message || 'Could not load your leads. Try refreshing.');
     }
@@ -89,8 +107,14 @@ export default function AgencyLeadsPanel() {
       )}
 
       <div style={s.headerRow}>
-        <h3 style={s.h3}>LEADS ({leads.length}){stageFilter ? ` · ${stageFilter.stage.toUpperCase()}` : ''}</h3>
+        <h3 style={s.h3}>LEADS ({leads.length}){stageFilter ? ` · ${stageFilter.stage.toUpperCase()}` : ''}{isManager ? ` · ${scopeMode === 'mine' ? 'MY LEADS' : 'ALL LEADS'}` : ''}</h3>
         <div style={{ display: 'flex', gap: 8 }}>
+          {isManager && (
+            <div style={s.scopeToggle}>
+              <button style={scopeMode === 'all' ? s.scopeButtonActive : s.scopeButton} onClick={() => setScopeMode('all')}>ALL LEADS</button>
+              <button style={scopeMode === 'mine' ? s.scopeButtonActive : s.scopeButton} onClick={() => setScopeMode('mine')}>MY LEADS</button>
+            </div>
+          )}
           {stageFilter && (
             <button style={s.smallButtonOutline} onClick={clearStageFilter}>CLEAR FILTER</button>
           )}
@@ -160,6 +184,9 @@ const s = {
   h3: { color: 'var(--text-secondary)', fontSize: 12, letterSpacing: 2 },
   rowHighlighted: { outline: '2px solid var(--accent)', boxShadow: 'var(--shadow-glow-accent)', borderRadius: 'var(--radius-md)' },
   smallButton: { padding: '8px 14px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
+  scopeToggle: { display: 'flex', border: '1px solid var(--border-strong)', borderRadius: 6, overflow: 'hidden' },
+  scopeButton: { padding: '8px 12px', background: 'transparent', border: 'none', color: 'var(--text-secondary)', fontWeight: 700, cursor: 'pointer', fontSize: 12 },
+  scopeButtonActive: { padding: '8px 12px', background: 'var(--accent)', border: 'none', color: 'var(--bg)', fontWeight: 700, cursor: 'pointer', fontSize: 12 },
   smallButtonOutline: { padding: '8px 14px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
   form: { display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg-elevated)', padding: 16, borderRadius: 8, marginBottom: 12, border: '1px solid var(--border-hairline)' },
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },
