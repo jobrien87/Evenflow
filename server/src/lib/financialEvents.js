@@ -36,6 +36,15 @@ async function syncSaleRevenueEvent(db, sale) {
     return null;
   }
   const notes = `Manual closed-sale entry: ${sale.carrier} ${sale.policyType} for ${sale.firstName} ${sale.lastName} (sale ${sale.id})`;
+  // occurredAt is set to the Sale's own business date (saleDate), never
+  // left at its default row-creation timestamp — Billboard/historical
+  // aggregates already bucket this same sale by saleDate, so a backdated
+  // correction (or simply entering a sale days after it actually closed)
+  // must move its RevenueEvent into the matching period too. Otherwise
+  // /financials/summary's date-range query (which filters on occurredAt)
+  // would keep showing the sale in whatever period it was entered/last
+  // edited, while Billboard moved on to the corrected period — exactly
+  // the "Financials and Billboard disagree" failure this field prevents.
   return db.revenueEvent.upsert({
     where: { saleId: sale.id },
     create: {
@@ -44,9 +53,10 @@ async function syncSaleRevenueEvent(db, sale) {
       category: 'LEAD_REVENUE',
       sourceType: 'SALE',
       amountCents: sale.premiumCents,
+      occurredAt: sale.saleDate,
       notes,
     },
-    update: { amountCents: sale.premiumCents, notes },
+    update: { amountCents: sale.premiumCents, occurredAt: sale.saleDate, notes },
   });
 }
 

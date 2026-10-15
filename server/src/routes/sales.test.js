@@ -17,8 +17,10 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { prisma } = require('../lib/db');
 const { createSession } = require('../lib/auth');
-const { computeBillboard } = require('../lib/billboard');
+const { computeBillboard, computeBillboardPeriod } = require('../lib/billboard');
 const { computeFunnel } = require('../lib/funnelMetrics');
+const { monthBoundsEastern } = require('../lib/billboardPeriods');
+const { zonedYearMonthDay } = require('../lib/timezone');
 const app = require('../app');
 
 const suffix = Date.now();
@@ -763,6 +765,80 @@ test('editing a Sale never changes close rate (computeFunnel reads only Lead.sta
 
   const after1 = await computeFunnel({ agencyId, from, to });
   assert.equal(after1.closeRate, before1.closeRate, 'a Sale create+edit must never move close rate — it is Lead-status-only');
+
+  await prisma.sale.delete({ where: { id: sale.id } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: sale.id } });
+});
+
+// Reconciliation evidence (Item 6): a backdated saleDate correction must
+// move the sale's full premium out of its old period and into its new
+// one in BOTH Financials and Billboard, in lockstep, never leaving it
+// split (counted in one report's period but not the other's, or counted
+// in both at once). Measured as deltas, not absolute totals, since this
+// shared test-suite agency accrues/clears other sales around it.
+test('a backdated saleDate correction moves revenue between periods identically in Financials and Billboard, never splitting them', async () => {
+  const timeZone = 'America/New_York';
+  const now = zonedYearMonthDay(new Date(), timeZone);
+  const thisMonth = { year: now.year, month: now.month };
+  const lastMonth = now.month === 1 ? { year: now.year - 1, month: 12 } : { year: now.year, month: now.month - 1 };
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const thisMonthSaleDate = `${thisMonth.year}-${pad2(thisMonth.month)}-15`;
+  const lastMonthSaleDate = `${lastMonth.year}-${pad2(lastMonth.month)}-15`;
+  const thisMonthBounds = monthBoundsEastern(thisMonth.year, thisMonth.month, timeZone);
+  const lastMonthBounds = monthBoundsEastern(lastMonth.year, lastMonth.month, timeZone);
+
+  async function financialsAmount(bounds) {
+    const res = await fetch(`${baseUrl}/api/financials/summary?${new URLSearchParams({ agencyId, from: bounds.from.toISOString(), to: new Date(bounds.to.getTime() - 1).toISOString() })}`, { headers: { Cookie: ownerCookie } });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    return body.revenueByCategory.find((c) => c.category === 'LEAD_REVENUE')?.amount || 0;
+  }
+  async function billboardPremium(month) {
+    const result = await computeBillboardPeriod({ agencyId, period: 'month', month: `${month.year}-${pad2(month.month)}` });
+    return result.totals.premiumCents;
+  }
+
+  const thisMonthFinBefore = await financialsAmount(thisMonthBounds);
+  const thisMonthBbBefore = await billboardPremium(thisMonth);
+  const lastMonthFinBefore = await financialsAmount(lastMonthBounds);
+  const lastMonthBbBefore = await billboardPremium(lastMonth);
+
+  const createRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ lastName: `Reconcile${Date.now()}`, saleDate: thisMonthSaleDate, premiumCents: 77700 })),
+  });
+  assert.equal(createRes.status, 201);
+  const { sale } = await createRes.json();
+
+  const thisMonthFinAfterCreate = await financialsAmount(thisMonthBounds);
+  const thisMonthBbAfterCreate = await billboardPremium(thisMonth);
+  assert.equal(Math.round((thisMonthFinAfterCreate - thisMonthFinBefore) * 100), 77700, 'Financials must pick up the new sale in its real month');
+  assert.equal(thisMonthBbAfterCreate - thisMonthBbBefore, 77700, 'Billboard must pick up the new sale in its real month');
+
+  const patchRes = await fetch(`${baseUrl}/api/sales/${sale.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ saleDate: lastMonthSaleDate }),
+  });
+  assert.equal(patchRes.status, 200);
+
+  const thisMonthFinAfterPatch = await financialsAmount(thisMonthBounds);
+  const thisMonthBbAfterPatch = await billboardPremium(thisMonth);
+  const lastMonthFinAfterPatch = await financialsAmount(lastMonthBounds);
+  const lastMonthBbAfterPatch = await billboardPremium(lastMonth);
+
+  // The old period loses the full premium in both reports — never left
+  // behind in one while the other moves on.
+  assert.equal(Math.round((thisMonthFinAfterPatch - thisMonthFinBefore) * 100), 0, 'Financials must fully remove the backdated sale from its original month');
+  assert.equal(thisMonthBbAfterPatch - thisMonthBbBefore, 0, 'Billboard must fully remove the backdated sale from its original month');
+
+  // The new period gains the full premium in both reports — never only
+  // one of the two.
+  assert.equal(Math.round((lastMonthFinAfterPatch - lastMonthFinBefore) * 100), 77700, 'Financials must show the backdated sale in its corrected month');
+  assert.equal(lastMonthBbAfterPatch - lastMonthBbBefore, 77700, 'Billboard must show the backdated sale in its corrected month');
+
+  // And the two reports must agree with each other at every step, not
+  // merely with their own prior value.
+  assert.equal(Math.round((lastMonthFinAfterPatch - lastMonthFinBefore) * 100), lastMonthBbAfterPatch - lastMonthBbBefore, 'Financials and Billboard must move by the identical amount, in the identical period');
 
   await prisma.sale.delete({ where: { id: sale.id } });
   await prisma.revenueEvent.deleteMany({ where: { saleId: sale.id } });
