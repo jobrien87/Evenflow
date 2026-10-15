@@ -137,7 +137,7 @@ router.get('/', async (req, res, next) => {
         id: true, email: true, firstName: true, lastName: true, role: true,
         status: true, agencyId: true, createdAt: true, phone: true,
         officeId: true, office: { select: { id: true, name: true } }, birthday: true,
-        ownInvitation: { select: { lastEmailStatus: true, lastEmailSentAt: true, lastEmailError: true } },
+        ownInvitation: { select: { lastEmailStatus: true, lastEmailSentAt: true, lastEmailError: true, lastEmailDeliveryStatus: true, lastEmailDeliveryEventAt: true } },
       },
       orderBy: { createdAt: 'desc' },
     });

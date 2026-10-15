@@ -54,6 +54,13 @@ async function recordInvitationEmailResult(userId, emailResult) {
         lastEmailStatus: emailResult.status,
         lastEmailSentAt: new Date(),
         lastEmailError: emailResult.status === 'FAILED' ? (emailResult.error || null) : null,
+        // A fresh send gets a fresh messageId — any real delivery status
+        // tracked against the PREVIOUS send is now stale (it belongs to a
+        // message that's no longer the one in flight), so it's cleared
+        // here rather than left attached to this new attempt.
+        lastEmailMessageId: emailResult.status === 'SENT' ? (emailResult.messageId || null) : null,
+        lastEmailDeliveryStatus: null,
+        lastEmailDeliveryEventAt: null,
       },
     });
   } catch (err) {

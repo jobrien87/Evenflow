@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { Card, Badge, Button, StatTile, SectionHeader, EmptyState, Modal, ExportButton, DateRangeFilter } from '../ui';
 import { resolveDateRange } from '../lib/dateRange';
 import { downloadCsv } from '../lib/downloadCsv';
-import { emailStatusMessage, lastEmailStatusInfo } from '../lib/emailStatus';
+import { emailStatusMessage, lastEmailStatusInfo, lastEmailDeliveryInfo } from '../lib/emailStatus';
 import AgencySettingsModal from './AgencySettingsModal';
 
 const ACTIVITY_PERIODS = [
@@ -363,6 +363,7 @@ function RosterSection({ title, users, onResetPassword, onResendInvite, onPurge,
       ) : (
         users.map((u) => {
           const emailInfo = u.status !== 'ACTIVE' ? lastEmailStatusInfo(u.ownInvitation) : null;
+          const deliveryInfo = u.status !== 'ACTIVE' ? lastEmailDeliveryInfo(u.ownInvitation) : null;
           return (
           <div key={u.id} style={s.rosterRow}>
             <div style={s.rosterInfo}>
@@ -374,6 +375,11 @@ function RosterSection({ title, users, onResetPassword, onResendInvite, onPurge,
               {emailInfo && (
                 <span title={[emailInfo.when, emailInfo.error].filter(Boolean).join(' — ')}>
                   <Badge tone={emailInfo.tone}>{emailInfo.label}</Badge>
+                </span>
+              )}
+              {deliveryInfo && (
+                <span title={deliveryInfo.when}>
+                  <Badge tone={deliveryInfo.tone}>{deliveryInfo.label}</Badge>
                 </span>
               )}
               {u.status === 'ACTIVE' && (

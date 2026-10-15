@@ -21,7 +21,7 @@ router.get('/', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
           where: { status: 'ACTIVE' },
           include: { agency: { select: { id: true, name: true } } },
         },
-        ownInvitation: { select: { lastEmailStatus: true, lastEmailSentAt: true, lastEmailError: true } },
+        ownInvitation: { select: { lastEmailStatus: true, lastEmailSentAt: true, lastEmailError: true, lastEmailDeliveryStatus: true, lastEmailDeliveryEventAt: true } },
       },
       orderBy: { createdAt: 'desc' },
     });

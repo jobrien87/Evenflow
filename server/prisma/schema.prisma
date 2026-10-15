@@ -478,6 +478,48 @@ model Invitation {
   // discipline.
   lastEmailError  String?
 
+  // Brevo's own message id for the most recent send attempt — the
+  // correlation key a later Brevo delivery-event webhook (see
+  // EmailDeliveryEvent) uses to find this exact Invitation. Null until a
+  // real send succeeds (never set on NOT_CONFIGURED/FAILED, since Brevo
+  // never accepted the message in those cases).
+  lastEmailMessageId       String?
+  // The REAL delivery outcome, distinct from lastEmailStatus above
+  // (which only ever means "did the Brevo API call succeed"): DELIVERED |
+  // BOUNCED | BLOCKED | DEFERRED | SPAM | INVALID_EMAIL | OPENED |
+  // CLICKED | UNSUBSCRIBED, matching lib/emailWebhook.js's
+  // classifyBrevoEvent() output exactly. Null until a real webhook event
+  // arrives — "sent" is never treated as "delivered."
+  lastEmailDeliveryStatus  String?
+  lastEmailDeliveryEventAt DateTime?
+  deliveryEvents           EmailDeliveryEvent[]
+
+  @@index([email])
+  @@index([lastEmailMessageId])
+}
+
+// A durable, append-only log of every real Brevo delivery-event webhook
+// call received — independent of whether it could be correlated back to
+// an Invitation (a password-reset, vendor-posting-instructions, or
+// zip-report email has no durable record to update, but the real event
+// still matters for visibility/audit). Never fabricated: every row here
+// is a real event Brevo itself reported. `event`+`messageId` is the
+// natural dedupe key — Brevo documents at-least-once delivery, and a
+// retried webhook call must never be recorded twice.
+model EmailDeliveryEvent {
+  id           String    @id @default(uuid())
+  messageId    String
+  event        String // the normalized status, see classifyBrevoEvent()
+  rawEvent     String // Brevo's own raw event string, kept verbatim for debugging a future mapping gap
+  email        String
+  occurredAt   DateTime // Brevo's own event timestamp, never server-receipt time
+  invitationId String?
+  invitation   Invitation? @relation(fields: [invitationId], references: [id])
+  rawPayload   Json
+  receivedAt   DateTime  @default(now())
+
+  @@unique([messageId, event])
+  @@index([invitationId])
   @@index([email])
 }
 

@@ -14,7 +14,7 @@ import AgencySettingsModal from './AgencySettingsModal';
 import PerformanceLeaderboards from './PerformanceLeaderboards';
 import TeamClockStatusBox from './TeamClockStatusBox';
 import AnnouncementComposer from './AnnouncementComposer';
-import { emailStatusMessage, lastEmailStatusInfo } from '../lib/emailStatus';
+import { emailStatusMessage, lastEmailStatusInfo, lastEmailDeliveryInfo } from '../lib/emailStatus';
 
 export default function AgencyOwnerDashboard() {
   const { user } = useAuth();
@@ -309,6 +309,7 @@ export default function AgencyOwnerDashboard() {
         )}
         {users.map((u) => {
           const emailInfo = u.status !== 'ACTIVE' ? lastEmailStatusInfo(u.ownInvitation) : null;
+          const deliveryInfo = u.status !== 'ACTIVE' ? lastEmailDeliveryInfo(u.ownInvitation) : null;
           return (
           <div key={u.id}>
             <div style={s.row} className="ui-row-stack">
@@ -321,6 +322,11 @@ export default function AgencyOwnerDashboard() {
                 {emailInfo && (
                   <span title={[emailInfo.when, emailInfo.error].filter(Boolean).join(' — ')}>
                     <Badge tone={emailInfo.tone}>{emailInfo.label}</Badge>
+                  </span>
+                )}
+                {deliveryInfo && (
+                  <span title={deliveryInfo.when}>
+                    <Badge tone={deliveryInfo.tone}>{deliveryInfo.label}</Badge>
                   </span>
                 )}
                 {u.role === 'PRODUCER' && (
@@ -372,6 +378,7 @@ export default function AgencyOwnerDashboard() {
         {telemarketers.length === 0 && <div style={s.hint}>No telemarketer currently assigned to this agency.</div>}
         {telemarketers.map((t) => {
           const emailInfo = t.status !== 'ACTIVE' ? lastEmailStatusInfo(t.ownInvitation) : null;
+          const deliveryInfo = t.status !== 'ACTIVE' ? lastEmailDeliveryInfo(t.ownInvitation) : null;
           return (
           <div key={t.assignmentId} style={s.row} className="ui-row-stack">
             <div>
@@ -381,6 +388,11 @@ export default function AgencyOwnerDashboard() {
             {emailInfo && (
               <span title={[emailInfo.when, emailInfo.error].filter(Boolean).join(' — ')}>
                 <Badge tone={emailInfo.tone}>{emailInfo.label}</Badge>
+              </span>
+            )}
+            {deliveryInfo && (
+              <span title={deliveryInfo.when}>
+                <Badge tone={deliveryInfo.tone}>{deliveryInfo.label}</Badge>
               </span>
             )}
           </div>

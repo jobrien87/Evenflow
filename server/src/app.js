@@ -44,6 +44,7 @@ const breakRoomRoutes = require('./routes/breakRoom');
 const rosterRoutes = require('./routes/roster');
 const salesRoutes = require('./routes/sales');
 const hrRoutes = require('./routes/hr');
+const emailWebhookRoutes = require('./routes/emailWebhook');
 
 const app = express();
 
@@ -106,6 +107,7 @@ app.use('/api/hr', hrRoutes);
 // Public, vendor-authenticated Direct POST API — versioned per spec.
 app.use('/api/v1', vendorApiRoutes);
 app.use('/api/v1', highlevelWebhookRoutes);
+app.use('/api/webhooks', emailWebhookRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ success: false, error: 'NOT_FOUND', correlationId: req.correlationId });

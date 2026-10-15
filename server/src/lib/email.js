@@ -18,6 +18,10 @@ function isConfigured() {
   return !!process.env.BREVO_API_KEY;
 }
 
+// Returns Brevo's own messageId (e.g. "<xxx@smtp-relay.mailin.fr>") from
+// the send response — the correlation key a later Brevo delivery-event
+// webhook (lib/emailWebhook.js) uses to find which specific send this
+// was. Null if Brevo's response shape ever omits it (never fabricated).
 async function sendEmail({ to, subject, html }) {
   const resp = await fetch(BREVO_API_URL, {
     method: 'POST',
@@ -37,6 +41,8 @@ async function sendEmail({ to, subject, html }) {
     const text = await resp.text().catch(() => '');
     throw new Error(`Brevo ${resp.status}: ${text}`);
   }
+  const body = await resp.json().catch(() => ({}));
+  return { messageId: body.messageId || null };
 }
 
 async function sendInvitationEmail({ to, role, agencyName, token }) {
@@ -54,14 +60,14 @@ async function sendInvitationEmail({ to, role, agencyName, token }) {
   }
 
   try {
-    await sendEmail({
+    const { messageId } = await sendEmail({
       to,
       subject: `You've been invited to EvenFlow`,
       html: `<p>You've been invited to join <strong>${agencyName}</strong> on EvenFlow as ${role}.</p>
              <p><a href="${acceptUrl}">Click here to activate your account</a></p>
              <p>This link expires in 7 days.</p>`,
     });
-    return { status: 'SENT', acceptUrl };
+    return { status: 'SENT', acceptUrl, messageId };
   } catch (err) {
     // Same reasoning as the NOT_CONFIGURED case above — never log the raw
     // link, even on a real send failure. An operator recovers by using

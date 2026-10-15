@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { Card, SectionHeader, Badge, Button, EmptyState, Modal } from '../ui';
-import { emailStatusMessage, lastEmailStatusInfo } from '../lib/emailStatus';
+import { emailStatusMessage, lastEmailStatusInfo, lastEmailDeliveryInfo } from '../lib/emailStatus';
 import TimeClockReportPanel from './TimeClockReportPanel';
 
 const TABS = [
@@ -298,6 +298,7 @@ export default function RosterSettingsPanel() {
             {resendStatus && <div style={s.status}>{resendStatus}</div>}
             {users.map((u) => {
               const emailInfo = u.status !== 'ACTIVE' ? lastEmailStatusInfo(u.ownInvitation) : null;
+              const deliveryInfo = u.status !== 'ACTIVE' ? lastEmailDeliveryInfo(u.ownInvitation) : null;
               return (
               <div key={u.id} style={s.userRow} className="ui-row-stack">
                 <div>
@@ -307,6 +308,11 @@ export default function RosterSettingsPanel() {
                     {emailInfo && (
                       <span title={[emailInfo.when, emailInfo.error].filter(Boolean).join(' — ')}>
                         <Badge tone={emailInfo.tone}>{emailInfo.label}</Badge>
+                      </span>
+                    )}
+                    {deliveryInfo && (
+                      <span title={deliveryInfo.when}>
+                        <Badge tone={deliveryInfo.tone}>{deliveryInfo.label}</Badge>
                       </span>
                     )}
                     {(badgesByUser[u.id] || []).map((b) => (

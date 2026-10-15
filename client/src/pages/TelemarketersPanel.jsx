@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { Card, Badge, Button, StatTile, BarRow, SectionHeader, EmptyState, ExportButton } from '../ui';
 import { downloadCsv } from '../lib/downloadCsv';
-import { emailStatusMessage, lastEmailStatusInfo } from '../lib/emailStatus';
+import { emailStatusMessage, lastEmailStatusInfo, lastEmailDeliveryInfo } from '../lib/emailStatus';
 
 const TM_STATUS_ORDER = ['ACTIVE', 'INVITED', 'DEACTIVATED'];
 
@@ -173,6 +173,7 @@ export default function TelemarketersPanel() {
       ) : (
         tms.map((tm) => {
           const emailInfo = tm.status !== 'ACTIVE' ? lastEmailStatusInfo(tm.ownInvitation) : null;
+          const deliveryInfo = tm.status !== 'ACTIVE' ? lastEmailDeliveryInfo(tm.ownInvitation) : null;
           return (
           <Card key={tm.id} style={s.card}>
             <div style={s.cardTop} className="ui-row-stack">
@@ -185,6 +186,11 @@ export default function TelemarketersPanel() {
                 {emailInfo && (
                   <span title={[emailInfo.when, emailInfo.error].filter(Boolean).join(' — ')}>
                     <Badge tone={emailInfo.tone}>{emailInfo.label}</Badge>
+                  </span>
+                )}
+                {deliveryInfo && (
+                  <span title={deliveryInfo.when}>
+                    <Badge tone={deliveryInfo.tone}>{deliveryInfo.label}</Badge>
                   </span>
                 )}
                 {(tm.status === 'INVITED' || tm.status === 'DEACTIVATED') && (

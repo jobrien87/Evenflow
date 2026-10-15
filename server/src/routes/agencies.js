@@ -238,7 +238,7 @@ router.get('/:agencyId', async (req, res, next) => {
 
     const userSelect = {
       id: true, email: true, firstName: true, lastName: true, role: true, status: true, createdAt: true,
-      ownInvitation: { select: { lastEmailStatus: true, lastEmailSentAt: true, lastEmailError: true } },
+      ownInvitation: { select: { lastEmailStatus: true, lastEmailSentAt: true, lastEmailError: true, lastEmailDeliveryStatus: true, lastEmailDeliveryEventAt: true } },
     };
     const [enriched, owners, managers, producers, tmAssignments] = await Promise.all([
       enrichAgencies([agency]),
