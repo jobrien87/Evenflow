@@ -770,6 +770,61 @@ test('editing a Sale never changes close rate (computeFunnel reads only Lead.sta
   await prisma.revenueEvent.deleteMany({ where: { saleId: sale.id } });
 });
 
+// A Producer's own sale-editing path (Item 1's original "verify a
+// producer can correct premium/items on their own sale and save/reload
+// without changing ownership or creating another sale") — the PATCH
+// route's own PRODUCER branches (ownership 403, smuggled assignedToId
+// silently ignored) had no direct test coverage of their own before this.
+test('a Producer can PATCH their own sale and reload the correction, but gets 403 on another producer\'s sale, and a smuggled assignedToId is ignored', async () => {
+  const createRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: producerCookie },
+    body: JSON.stringify(basePayload({ lastName: `ProducerOwnEdit${Date.now()}`, premiumCents: 40000, items: 1, assignedToId: producerId })),
+  });
+  assert.equal(createRes.status, 201);
+  const { sale } = await createRes.json();
+
+  // Own sale: premium/items correction succeeds and persists on reload.
+  const ownPatchRes = await fetch(`${baseUrl}/api/sales/${sale.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: producerCookie },
+    body: JSON.stringify({ premiumCents: 55500, items: 2 }),
+  });
+  assert.equal(ownPatchRes.status, 200);
+  const reloaded = await prisma.sale.findUnique({ where: { id: sale.id } });
+  assert.equal(reloaded.premiumCents, 55500);
+  assert.equal(reloaded.items, 2);
+  assert.equal(reloaded.assignedToId, producerId, 'ownership must be unchanged by the producer\'s own correction');
+
+  // A smuggled assignedToId from the Producer must be silently ignored,
+  // never reassigning credit and never erroring the whole request.
+  const smuggleRes = await fetch(`${baseUrl}/api/sales/${sale.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: producerCookie },
+    body: JSON.stringify({ premiumCents: 60000, assignedToId: producer2Id }),
+  });
+  assert.equal(smuggleRes.status, 200);
+  const afterSmuggle = await prisma.sale.findUnique({ where: { id: sale.id } });
+  assert.equal(afterSmuggle.assignedToId, producerId, 'a Producer can never reassign credit via PATCH, even to themselves-adjacent values');
+  assert.equal(afterSmuggle.premiumCents, 60000, 'the legitimate part of the same request must still apply');
+
+  // A different producer's own sale is 403, not editable.
+  const otherCreateRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ lastName: `OtherProducerSale${Date.now()}`, assignedToId: producer2Id })),
+  });
+  const { sale: otherSale } = await otherCreateRes.json();
+  const crossPatchRes = await fetch(`${baseUrl}/api/sales/${otherSale.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: producerCookie },
+    body: JSON.stringify({ premiumCents: 1 }),
+  });
+  assert.equal(crossPatchRes.status, 403);
+  const otherUnchanged = await prisma.sale.findUnique({ where: { id: otherSale.id } });
+  assert.notEqual(otherUnchanged.premiumCents, 1, 'a 403\'d PATCH must never mutate the other producer\'s sale');
+
+  await prisma.sale.delete({ where: { id: sale.id } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: sale.id } });
+  await prisma.sale.delete({ where: { id: otherSale.id } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: otherSale.id } });
+});
+
 // Reconciliation evidence (Item 6): a backdated saleDate correction must
 // move the sale's full premium out of its old period and into its new
 // one in BOTH Financials and Billboard, in lockstep, never leaving it

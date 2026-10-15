@@ -44,7 +44,7 @@ export default function useAccountCelebrations(user) {
     if (user.birthday) {
       const today = new Date();
       const bday = new Date(user.birthday);
-      const isBirthdayToday = bday.getUTCMonth() === today.getMonth() && bday.getUTCDate() === today.getDate();
+      const isBirthdayToday = bday.getUTCMonth() === today.getUTCMonth() && bday.getUTCDate() === today.getUTCDate();
       if (isBirthdayToday) {
         const todayKey = today.toISOString().slice(0, 10);
         const storageKey = `birthday_celebrated_${user.id}_${todayKey}`;
