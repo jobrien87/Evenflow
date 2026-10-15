@@ -16,8 +16,10 @@ const { z } = require('zod');
 const { prisma } = require('../lib/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
-const boberdoo = require('../lib/boberdoo');
 const provisioning = require('../lib/recordStoreProvisioning');
+const stripeLib = require('../lib/stripe');
+
+const APP_URL = process.env.APP_URL || 'http://localhost:5173';
 
 const router = express.Router();
 router.use(requireAuth);
@@ -82,7 +84,7 @@ router.get('/balance', requireRole(...AGENCY_ROLES), async (req, res, next) => {
     if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
     const result = await provisioning.refreshAgencyBalance(agencyId);
     if (!result.success) return res.status(502).json({ success: false, error: result.errorCode, message: result.errorMessage });
-    return res.json({ success: true, ...result, paymentPageUrl: boberdoo.getPaymentPageUrl() });
+    return res.json({ success: true, ...result });
   } catch (err) {
     next(err);
   }
@@ -138,7 +140,7 @@ router.post('/orders/:id/provision', mutationLimiter, requireRole(...AGENCY_ROLE
     if (error) return res.status(error.status).json(error.body);
     const result = await provisioning.provisionSubscription(subscription.id, req.correlationId);
     if (!result.success) return res.status(502).json({ success: false, error: result.errorCode, message: result.errorMessage });
-    return res.json({ success: true, subscription: result.subscription, paymentPageUrl: result.paymentPageUrl || boberdoo.getPaymentPageUrl() });
+    return res.json({ success: true, subscription: result.subscription });
   } catch (err) {
     next(err);
   }
@@ -151,6 +153,88 @@ router.post('/orders/:id/confirm-funding', mutationLimiter, requireRole(...AGENC
     const result = await provisioning.refreshFundingStatus(subscription.id, req.correlationId);
     if (!result.success) return res.status(502).json({ success: false, error: result.errorCode, message: result.errorMessage });
     return res.json({ success: true, satisfied: result.satisfied, subscription: result.subscription });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// A sane range for a deposit/top-up: at least $1, no more than $50,000 in
+// one payment (fat-finger/abuse guard, not a real product limit).
+const fundingCheckoutSchema = z.object({
+  amountCents: z.number().int().min(100).max(5_000_000),
+});
+
+// Funds (or tops up) a specific lead program's order — used from the
+// wizard's "Fund Account" step. Real money is collected via Stripe
+// Checkout here; crediting Boberdoo's own balance happens only once the
+// webhook confirms the charge (routes/billing.js).
+router.post('/orders/:id/funding-checkout', mutationLimiter, requireRole(...AGENCY_ROLES), async (req, res, next) => {
+  try {
+    if (!stripeLib.isConfigured()) {
+      return res.status(501).json({ success: false, error: 'NOT_CONFIGURED', message: 'Payment processor is not configured yet.' });
+    }
+    const parsed = fundingCheckoutSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+
+    const { subscription, error } = await loadOwnedSubscription(req);
+    if (error) return res.status(error.status).json(error.body);
+
+    const agency = await prisma.agency.findUnique({ where: { id: subscription.agencyId } });
+    if (!agency.boberdooPartnerId) {
+      return res.status(409).json({ success: false, error: 'NOT_PROVISIONED', message: 'This lead program has not finished setup yet — provision it first.' });
+    }
+
+    const session = await stripeLib.createRecordStoreFundingCheckoutSession({
+      agency,
+      amountCents: parsed.data.amountCents,
+      recordStoreSubscriptionId: subscription.id,
+      successUrl: `${APP_URL}/agency/record-store?funding=success&subscriptionId=${subscription.id}`,
+      cancelUrl: `${APP_URL}/agency/record-store?funding=canceled`,
+    });
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: subscription.agencyId,
+      action: 'record_store.funding_checkout_started', entityType: 'RecordStoreSubscription', entityId: subscription.id,
+      after: { amountCents: parsed.data.amountCents }, correlationId: req.correlationId,
+    });
+
+    return res.json({ success: true, url: session.url });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// A generic top-up, not tied to any one order — used from the "ADD FUNDS"
+// button on the account-wide balance card.
+router.post('/funding-checkout', mutationLimiter, requireRole(...AGENCY_ROLES), async (req, res, next) => {
+  try {
+    if (!stripeLib.isConfigured()) {
+      return res.status(501).json({ success: false, error: 'NOT_CONFIGURED', message: 'Payment processor is not configured yet.' });
+    }
+    const parsed = fundingCheckoutSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+
+    const agencyId = scopedAgencyId(req);
+    if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+    const agency = await prisma.agency.findUnique({ where: { id: agencyId } });
+    if (!agency?.boberdooPartnerId) {
+      return res.status(409).json({ success: false, error: 'NOT_PROVISIONED', message: 'Set up a lead program first.' });
+    }
+
+    const session = await stripeLib.createRecordStoreFundingCheckoutSession({
+      agency,
+      amountCents: parsed.data.amountCents,
+      successUrl: `${APP_URL}/agency/record-store?funding=success`,
+      cancelUrl: `${APP_URL}/agency/record-store?funding=canceled`,
+    });
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId,
+      action: 'record_store.funding_checkout_started', entityType: 'Agency', entityId: agencyId,
+      after: { amountCents: parsed.data.amountCents }, correlationId: req.correlationId,
+    });
+
+    return res.json({ success: true, url: session.url });
   } catch (err) {
     next(err);
   }

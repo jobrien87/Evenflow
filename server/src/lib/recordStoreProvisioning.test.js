@@ -45,6 +45,7 @@ before(async () => {
 
 after(async () => {
   await prisma.auditEvent.deleteMany({ where: { agencyId } });
+  await prisma.recordStoreFundingPayment.deleteMany({ where: { agencyId } });
   await prisma.recordStoreSubscription.deleteMany({ where: { agencyId } });
   await prisma.recordStoreTemplate.deleteMany({ where: { id: { in: [templateId, template2Id] } } });
   await prisma.user.delete({ where: { id: ownerId } });
@@ -71,7 +72,6 @@ function fakeHappyBoberdoo() {
   boberdoo.updateFilterSetDailyVolume = async () => ({ success: true });
   boberdoo.getPartnerBalance = async () => ({ success: true, balanceCents: 150000, totalBalanceCents: 150000 });
   boberdoo.getPartnerInfo = async () => ({ success: true, data: {} });
-  boberdoo.getPaymentPageUrl = () => 'https://example.com/pay';
 }
 
 async function loadTemplate(id) {
@@ -356,4 +356,102 @@ test('billing/delivery never crosses agencies — two different agencies buying 
   await prisma.auditEvent.deleteMany({ where: { agencyId: otherAgency.id } });
   await prisma.user.delete({ where: { id: otherOwner.id } });
   await prisma.agency.delete({ where: { id: otherAgency.id } });
+});
+
+// ---- Funding payment submission (real Stripe charge -> Boberdoo credit) --
+
+test('submitFundingPayment credits the real Boberdoo Partner balance and marks the payment SUBMITTED', async () => {
+  fakeHappyBoberdoo();
+  const template = await loadTemplate(templateId);
+  const { subscription } = await provisioning.createOrder({ agencyId, template, dailyVolume: 10, userId: ownerId });
+  await provisioning.provisionSubscription(subscription.id);
+
+  boberdoo.submitPayment = async () => ({ success: true, totalBalanceCents: 250000 });
+  // refreshFundingStatus (invoked by submitFundingPayment below, since this
+  // payment is tied to a subscription) re-reads the balance independently —
+  // keep the two mocks consistent with what a real post-credit read would
+  // return, matching the real Boberdoo account actually being at 250000.
+  boberdoo.getPartnerBalance = async () => ({ success: true, balanceCents: 250000, totalBalanceCents: 250000 });
+
+  const payment = await prisma.recordStoreFundingPayment.create({
+    data: { agencyId, recordStoreSubscriptionId: subscription.id, amountCents: 150000, stripeCheckoutSessionId: `cs_test_${Date.now()}` },
+  });
+
+  const result = await provisioning.submitFundingPayment(payment.id, 'test-correlation');
+  assert.equal(result.success, true);
+  assert.equal(result.payment.status, 'SUBMITTED');
+  assert.ok(result.payment.submittedAt);
+  assert.equal(result.payment.boberdooTotalBalanceCents, 250000);
+
+  const agency = await prisma.agency.findUnique({ where: { id: agencyId } });
+  assert.equal(agency.recordStoreBalanceCents, 250000);
+
+  // Tied to a PENDING_FUNDING subscription — crediting a real balance must
+  // activate it, reusing refreshFundingStatus's own existing logic.
+  const updatedSub = await prisma.recordStoreSubscription.findUnique({ where: { id: subscription.id } });
+  assert.equal(updatedSub.status, 'ACTIVE');
+
+  await prisma.recordStoreFundingPayment.delete({ where: { id: payment.id } });
+});
+
+test('submitFundingPayment marks the payment FAILED (never loses it) when Boberdoo rejects the call', async () => {
+  fakeHappyBoberdoo();
+  boberdoo.submitPayment = async () => ({ success: false, errorCode: 'PROVIDER_ERROR', errorMessage: 'nope' });
+
+  const payment = await prisma.recordStoreFundingPayment.create({
+    data: { agencyId, amountCents: 50000, stripeCheckoutSessionId: `cs_test_${Date.now()}` },
+  });
+
+  const result = await provisioning.submitFundingPayment(payment.id, 'test-correlation');
+  assert.equal(result.success, false);
+
+  const updated = await prisma.recordStoreFundingPayment.findUnique({ where: { id: payment.id } });
+  assert.equal(updated.status, 'FAILED');
+  assert.ok(updated.failedReason);
+
+  await prisma.recordStoreFundingPayment.delete({ where: { id: payment.id } });
+});
+
+test('submitFundingPayment is a safe no-op when called again on an already-SUBMITTED payment', async () => {
+  fakeHappyBoberdoo();
+  let callCount = 0;
+  boberdoo.submitPayment = async () => { callCount += 1; return { success: true, totalBalanceCents: 100000 }; };
+  await prisma.agency.update({ where: { id: agencyId }, data: { boberdooPartnerId: `P-${++partnerCounter}` } });
+
+  const payment = await prisma.recordStoreFundingPayment.create({
+    data: { agencyId, amountCents: 100000, stripeCheckoutSessionId: `cs_test_${Date.now()}` },
+  });
+
+  await provisioning.submitFundingPayment(payment.id, 'test-correlation');
+  const second = await provisioning.submitFundingPayment(payment.id, 'test-correlation');
+
+  assert.equal(second.alreadySubmitted, true);
+  assert.equal(callCount, 1, 'a second call must never submit a real payment to Boberdoo twice');
+
+  await prisma.recordStoreFundingPayment.delete({ where: { id: payment.id } });
+});
+
+test('submitPendingFundingPayments processes every PENDING_SUBMIT/FAILED row, regardless of how it got there', async () => {
+  fakeHappyBoberdoo();
+  boberdoo.submitPayment = async () => ({ success: true, totalBalanceCents: 99900 });
+  await prisma.agency.update({ where: { id: agencyId }, data: { boberdooPartnerId: `P-${++partnerCounter}` } });
+
+  const [pending, failed, alreadyDone] = await Promise.all([
+    prisma.recordStoreFundingPayment.create({ data: { agencyId, amountCents: 10000, stripeCheckoutSessionId: `cs_test_${Date.now()}_a` } }),
+    prisma.recordStoreFundingPayment.create({ data: { agencyId, amountCents: 20000, stripeCheckoutSessionId: `cs_test_${Date.now()}_b`, status: 'FAILED', failedReason: 'previous attempt failed' } }),
+    prisma.recordStoreFundingPayment.create({ data: { agencyId, amountCents: 30000, stripeCheckoutSessionId: `cs_test_${Date.now()}_c`, status: 'SUBMITTED', submittedAt: new Date() } }),
+  ]);
+
+  await provisioning.submitPendingFundingPayments('test-correlation');
+
+  const [a, b, c] = await Promise.all([
+    prisma.recordStoreFundingPayment.findUnique({ where: { id: pending.id } }),
+    prisma.recordStoreFundingPayment.findUnique({ where: { id: failed.id } }),
+    prisma.recordStoreFundingPayment.findUnique({ where: { id: alreadyDone.id } }),
+  ]);
+  assert.equal(a.status, 'SUBMITTED');
+  assert.equal(b.status, 'SUBMITTED', 'a previously-FAILED row must be retried, not skipped forever');
+  assert.equal(c.status, 'SUBMITTED', 'an already-submitted row is left alone');
+
+  await prisma.recordStoreFundingPayment.deleteMany({ where: { id: { in: [pending.id, failed.id, alreadyDone.id] } } });
 });

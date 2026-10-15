@@ -5,6 +5,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const stripeLib = require('../lib/stripe');
 const { countActiveSeats } = require('../lib/seatBilling');
+const recordStoreProvisioning = require('../lib/recordStoreProvisioning');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -405,6 +406,27 @@ async function processStripeEvent(tx, event, correlationId) {
         break;
       }
 
+      // Record Store deposit/top-up — the real charge is captured here,
+      // durably, before anything talks to Boberdoo. Crediting the
+      // Boberdoo Partner's balance is a second, external, non-
+      // transactional call (lib/recordStoreProvisioning.submitPendingFundingPayments,
+      // invoked right after this transaction commits — see below) so a
+      // Boberdoo-side hiccup can never roll back or duplicate this
+      // already-cleared Stripe payment.
+      if (session.metadata?.purpose === 'record_store_funding') {
+        await tx.recordStoreFundingPayment.create({
+          data: {
+            agencyId,
+            recordStoreSubscriptionId: session.metadata?.recordStoreSubscriptionId || null,
+            amountCents: session.amount_total,
+            stripeCheckoutSessionId: session.id,
+            stripePaymentIntentId: typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id || null,
+          },
+        });
+        await recordAudit({ agencyId, action: 'billing.record_store_funding_payment_received', entityType: 'RecordStoreFundingPayment', entityId: session.id, after: { amountCents: session.amount_total }, correlationId });
+        break;
+      }
+
       if (!session.subscription) break;
       const plan = await stripeLib.ensureSeatPlan();
       const seatCount = await countActiveSeats(agencyId);
@@ -498,6 +520,20 @@ async function handleStripeWebhook(req, res) {
 
   try {
     await processWebhookEventIdempotently(event, req.correlationId);
+
+    // The Stripe charge is already durably recorded at this point (the
+    // transaction above committed). Crediting Boberdoo is best-effort
+    // from here — a failure here is caught and logged, never re-thrown,
+    // since re-throwing would make Stripe retry a webhook whose charge
+    // was already fully processed. Any row left PENDING_SUBMIT/FAILED is
+    // picked up by the next webhook delivery or an admin retry.
+    if (event.type === 'checkout.session.completed' && event.data.object?.metadata?.purpose === 'record_store_funding') {
+      try {
+        await recordStoreProvisioning.submitPendingFundingPayments(req.correlationId);
+      } catch (submitErr) {
+        console.error('[stripe webhook] record store funding submission to Boberdoo failed — will retry later', submitErr);
+      }
+    }
   } catch (err) {
     // A genuine processing failure (a DB write failed, Stripe's seat-sync
     // call threw, etc.) must NOT be acknowledged as received — the whole

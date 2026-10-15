@@ -655,6 +655,7 @@ model Agency {
   producerNotes            ProducerNote[]
   offices                  Office[]
   recordStoreSubscriptions RecordStoreSubscription[]
+  recordStoreFundingPayments RecordStoreFundingPayment[]
   leadImportBatches        LeadImportBatch[]
   historicalRecords        HistoricalRecord[]
   userBadges               UserBadge[]
@@ -2572,6 +2573,57 @@ model RecordStoreSubscription {
   createdById String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  fundingPayments RecordStoreFundingPayment[]
+
+  @@index([agencyId])
+  @@index([status])
+}
+
+// A real Stripe payment collected from the Agency Owner to fund (or top
+// up) their Record Store lead-purchasing balance. EvenFlow never asks
+// Boberdoo to process a card directly — Boberdoo's documented API has no
+// hosted payment page and `cimProfileAdd` requires an Authorize.net CIM
+// profile this app doesn't use (see docs/lead-portal-api-reference.md).
+// Stripe (already wired for seat/Sales-Studio billing, lib/stripe.js)
+// collects the real charge; `submitPayment` only ever credits the
+// Boberdoo Partner's balance afterward, as a pure bookkeeping call.
+//
+// `status` separates "Stripe confirmed the charge" (this row exists,
+// written atomically with the StripeEvent dedup row) from "Boberdoo's
+// balance was actually credited" (PENDING_SUBMIT -> SUBMITTED), since the
+// Boberdoo call is a second, non-transactional external call that can
+// fail or be retried independently of the Stripe charge having already
+// cleared — the charge must never be lost or double-submitted just
+// because the Boberdoo leg hiccups.
+enum RecordStoreFundingPaymentStatus {
+  PENDING_SUBMIT
+  SUBMITTED
+  FAILED
+}
+
+model RecordStoreFundingPayment {
+  id       String @id @default(uuid())
+  agencyId String
+  agency   Agency @relation(fields: [agencyId], references: [id])
+
+  // Optional — a top-up from the "ADD FUNDS" balance card isn't tied to
+  // any one lead program's order.
+  recordStoreSubscriptionId String?
+  recordStoreSubscription   RecordStoreSubscription? @relation(fields: [recordStoreSubscriptionId], references: [id])
+
+  amountCents             Int
+  stripeCheckoutSessionId String @unique
+  stripePaymentIntentId   String?
+
+  status                    RecordStoreFundingPaymentStatus @default(PENDING_SUBMIT)
+  boberdooOperationType     Int                              @default(2) // 2 = Payment on account (credit) — see lib/boberdoo.js submitPayment()
+  boberdooTotalBalanceCents Int?
+  submittedAt               DateTime?
+  failedReason               String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([agencyId])
   @@index([status])

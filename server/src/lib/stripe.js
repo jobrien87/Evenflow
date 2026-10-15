@@ -140,6 +140,39 @@ async function createSalesStudioCheckoutSession({ agency, successUrl, cancelUrl 
   return session;
 }
 
+// Record Store deposit/top-up funding — a real one-time Stripe payment,
+// for a dollar amount the Agency Owner chooses (the storefront suggests a
+// template's minimumDepositCents as a starting point, but this never
+// enforces one fixed number — a later top-up is just a different
+// amount). Boberdoo itself never sees a card; see
+// routes/billing.js's webhook handler for the submitPayment() call that
+// credits the Boberdoo Partner's balance once this charge clears.
+async function createRecordStoreFundingCheckoutSession({ agency, amountCents, recordStoreSubscriptionId, successUrl, cancelUrl }) {
+  const stripe = getClient();
+  const customerId = await getOrCreateCustomer(agency);
+  const session = await stripe.checkout.sessions.create({
+    mode: 'payment',
+    customer: customerId,
+    line_items: [{
+      price_data: {
+        currency: 'usd',
+        unit_amount: amountCents,
+        product_data: { name: 'EvenFlow — Record Store lead balance funding' },
+      },
+      quantity: 1,
+    }],
+    success_url: successUrl,
+    cancel_url: cancelUrl,
+    client_reference_id: agency.id,
+    metadata: {
+      agencyId: agency.id,
+      purpose: 'record_store_funding',
+      ...(recordStoreSubscriptionId ? { recordStoreSubscriptionId } : {}),
+    },
+  });
+  return session;
+}
+
 async function createPortalSession({ customerId, returnUrl }) {
   const stripe = getClient();
   return stripe.billingPortal.sessions.create({ customer: customerId, return_url: returnUrl });
@@ -167,6 +200,7 @@ module.exports = {
   getOrCreateCustomer,
   createCheckoutSession,
   createSalesStudioCheckoutSession,
+  createRecordStoreFundingCheckoutSession,
   createPortalSession,
   constructWebhookEvent,
   updateSubscriptionSeats,

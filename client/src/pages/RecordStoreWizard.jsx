@@ -27,8 +27,8 @@ export default function RecordStoreWizard({ template, agency, user, onClose, onD
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [subscription, setSubscription] = useState(null);
-  const [paymentPageUrl, setPaymentPageUrl] = useState(null);
   const [fundingSatisfied, setFundingSatisfied] = useState(false);
+  const [startingCheckout, setStartingCheckout] = useState(false);
 
   const stepName = steps[stepIndex];
 
@@ -77,7 +77,6 @@ export default function RecordStoreWizard({ template, agency, user, onClose, onD
         });
         const provisionRes = await api.provisionRecordStoreOrder(orderRes.subscription.id);
         setSubscription(provisionRes.subscription);
-        setPaymentPageUrl(provisionRes.paymentPageUrl);
         setStepIndex((i) => i + 1);
       } catch (err) {
         setError(err.data?.message || 'Could not start your lead program. Please try again.');
@@ -91,6 +90,18 @@ export default function RecordStoreWizard({ template, agency, user, onClose, onD
   function goBack() {
     setError('');
     setStepIndex((i) => Math.max(0, i - 1));
+  }
+
+  async function startFundingCheckout() {
+    setStartingCheckout(true);
+    setError('');
+    try {
+      const res = await api.createRecordStoreFundingCheckout(subscription.id, template.minimumDepositCents);
+      window.location.href = res.url;
+    } catch (err) {
+      setStartingCheckout(false);
+      setError(err.data?.message || 'Could not start your payment. Please try again.');
+    }
   }
 
   async function confirmPayment() {
@@ -183,13 +194,9 @@ export default function RecordStoreWizard({ template, agency, user, onClose, onD
                 <div style={s.fundTitle}>FUND YOUR LEAD ACCOUNT</div>
                 <div style={s.fundAmount}>${centsToDollars(template.minimumDepositCents)}</div>
                 <div style={s.helpText}>Your deposit becomes your lead purchasing balance.</div>
-                {paymentPageUrl ? (
-                  <Button variant="primary" style={{ width: '100%', marginTop: 12 }} onClick={() => window.open(paymentPageUrl, '_blank', 'noopener')}>
-                    FUND ACCOUNT — ${centsToDollars(template.minimumDepositCents)}
-                  </Button>
-                ) : (
-                  <div style={s.notConfigured}>Payment isn't configured in this environment yet — your Super Admin needs to set the Boberdoo payment page URL before this can be completed.</div>
-                )}
+                <Button variant="primary" style={{ width: '100%', marginTop: 12 }} disabled={startingCheckout} onClick={startFundingCheckout}>
+                  {startingCheckout ? 'Starting checkout…' : `FUND ACCOUNT — $${centsToDollars(template.minimumDepositCents)}`}
+                </Button>
               </div>
               <Button variant="secondary" disabled={busy} onClick={confirmPayment}>{busy ? 'Checking…' : "I'VE COMPLETED PAYMENT"}</Button>
             </>
@@ -244,7 +251,6 @@ const s = {
   fundCard: { background: 'var(--surface-tint-lime)', border: '1px solid var(--surface-tint-lime-border)', borderRadius: 8, padding: 20, textAlign: 'center' },
   fundTitle: { fontSize: 11, letterSpacing: 1.5, color: 'var(--text-muted)', fontWeight: 700 },
   fundAmount: { fontFamily: 'var(--font-display)', fontSize: 32, fontWeight: 700, color: 'var(--accent)', margin: '6px 0' },
-  notConfigured: { color: 'var(--warning)', fontSize: 12, marginTop: 12, textAlign: 'left' },
   successBox: { textAlign: 'center', padding: '20px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 },
   successTitle: { fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' },
   error: { color: 'var(--danger)', fontSize: 12, marginTop: 10 },

@@ -81,6 +81,22 @@ function fakeCheckoutSessionEvent({ agencyId, subscriptionId, setupFeeIncluded }
   };
 }
 
+function fakeRecordStoreFundingEvent({ agencyId, amountCents, recordStoreSubscriptionId }) {
+  return {
+    id: `evt_test_${crypto.randomUUID()}`,
+    type: 'checkout.session.completed',
+    data: {
+      object: {
+        id: `cs_test_${crypto.randomUUID()}`,
+        client_reference_id: agencyId,
+        amount_total: amountCents,
+        payment_intent: `pi_test_${crypto.randomUUID()}`,
+        metadata: { agencyId, purpose: 'record_store_funding', ...(recordStoreSubscriptionId ? { recordStoreSubscriptionId } : {}) },
+      },
+    },
+  };
+}
+
 function fakeSalesStudioEvent({ agencyId }) {
   return {
     id: `evt_test_${crypto.randomUUID()}`,
@@ -148,6 +164,42 @@ test('a Sales Studio one-time checkout unlocks coachingEnabled and is recorded a
   const subs = await prisma.agencySubscription.count({ where: { agencyId: freshAgency.id } });
   assert.equal(subs, 0);
 
+  await prisma.agency.delete({ where: { id: freshAgency.id } });
+});
+
+test('a Record Store funding checkout.session.completed records a real payment row, pending Boberdoo submission', async () => {
+  const freshAgency = await prisma.agency.create({ data: { name: `Record Store Funding Test Agency ${suffix}` } });
+  const event = fakeRecordStoreFundingEvent({ agencyId: freshAgency.id, amountCents: 150000 });
+
+  await processWebhookEventIdempotently(event, 'test-correlation');
+
+  const payments = await prisma.recordStoreFundingPayment.findMany({ where: { agencyId: freshAgency.id } });
+  assert.equal(payments.length, 1);
+  assert.equal(payments[0].amountCents, 150000);
+  assert.equal(payments[0].status, 'PENDING_SUBMIT');
+  assert.equal(payments[0].stripeCheckoutSessionId, event.data.object.id);
+  assert.equal(payments[0].stripePaymentIntentId, event.data.object.payment_intent);
+  assert.equal(payments[0].recordStoreSubscriptionId, null);
+
+  // This purpose must never create (or touch) a seat subscription.
+  const subs = await prisma.agencySubscription.count({ where: { agencyId: freshAgency.id } });
+  assert.equal(subs, 0);
+
+  await prisma.recordStoreFundingPayment.deleteMany({ where: { agencyId: freshAgency.id } });
+  await prisma.agency.delete({ where: { id: freshAgency.id } });
+});
+
+test('replaying the same Record Store funding event id never creates a second payment row', async () => {
+  const freshAgency = await prisma.agency.create({ data: { name: `Record Store Funding Replay Agency ${suffix}` } });
+  const event = fakeRecordStoreFundingEvent({ agencyId: freshAgency.id, amountCents: 50000 });
+
+  await processWebhookEventIdempotently(event, 'test-correlation');
+  await processWebhookEventIdempotently(event, 'test-correlation');
+
+  const payments = await prisma.recordStoreFundingPayment.count({ where: { agencyId: freshAgency.id } });
+  assert.equal(payments, 1, 'a replayed funding event must never double-record the payment');
+
+  await prisma.recordStoreFundingPayment.deleteMany({ where: { agencyId: freshAgency.id } });
   await prisma.agency.delete({ where: { id: freshAgency.id } });
 });
 

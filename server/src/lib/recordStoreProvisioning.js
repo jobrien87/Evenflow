@@ -288,7 +288,7 @@ async function provisionSubscription(subscriptionId, correlationId) {
     return activateSubscription(subscriptionId, correlationId);
   }
 
-  return { success: true, subscription: updated, paymentPageUrl: boberdoo.getPaymentPageUrl() };
+  return { success: true, subscription: updated };
 }
 
 // ---- Funding confirmation ------------------------------------------------
@@ -580,6 +580,74 @@ async function refreshAgencyBalance(agencyId) {
   return { success: true, balanceCents: updated.recordStoreBalanceCents, lastUpdatedAt: updated.recordStoreBalanceCheckedAt };
 }
 
+// ---- Funding payment submission (real Stripe charge -> Boberdoo credit) --
+
+// Credits one already-Stripe-confirmed RecordStoreFundingPayment to its
+// agency's real Boberdoo Partner balance. Called right after the Stripe
+// webhook's transaction commits (routes/billing.js), and safe to call
+// again later (an admin retry, a periodic sync) for any row still
+// PENDING_SUBMIT/FAILED — the Stripe charge itself was already captured
+// durably by the webhook before this ever runs, so a failure here never
+// loses the payment, it only delays Boberdoo seeing the credit.
+async function submitFundingPayment(paymentId, correlationId) {
+  const payment = await prisma.recordStoreFundingPayment.findUnique({ where: { id: paymentId }, include: { agency: true } });
+  if (!payment) return { success: false, errorCode: 'NOT_FOUND' };
+  if (payment.status === 'SUBMITTED') return { success: true, alreadySubmitted: true, payment };
+
+  if (!payment.agency.boberdooPartnerId) {
+    await prisma.recordStoreFundingPayment.update({ where: { id: payment.id }, data: { status: 'FAILED', failedReason: 'Agency has no Boberdoo Partner yet.' } });
+    return { success: false, errorCode: 'NO_PARTNER' };
+  }
+
+  const result = await boberdoo.submitPayment(payment.agency.boberdooPartnerId, payment.amountCents, payment.boberdooOperationType);
+  if (!result.success) {
+    await prisma.recordStoreFundingPayment.update({ where: { id: payment.id }, data: { status: 'FAILED', failedReason: result.errorMessage || result.errorCode } });
+    await notifyAgencyOwners(payment.agencyId, {
+      type: 'record_store.funding_submit_failed',
+      severity: 'WARNING',
+      title: 'Record Store deposit needs attention',
+      body: 'Your payment went through, but we could not yet credit it to your lead balance. Our team has been notified.',
+    });
+    return { success: false, errorCode: result.errorCode, errorMessage: FRIENDLY_ERROR };
+  }
+
+  const updated = await prisma.recordStoreFundingPayment.update({
+    where: { id: payment.id },
+    data: { status: 'SUBMITTED', submittedAt: new Date(), boberdooTotalBalanceCents: result.totalBalanceCents },
+  });
+  await prisma.agency.update({
+    where: { id: payment.agencyId },
+    data: { recordStoreBalanceCents: result.totalBalanceCents, recordStoreBalanceCheckedAt: new Date() },
+  });
+  await recordAudit({
+    agencyId: payment.agencyId, action: 'record_store.funding_submitted', entityType: 'RecordStoreFundingPayment', entityId: payment.id,
+    after: { amountCents: payment.amountCents, totalBalanceCents: result.totalBalanceCents }, correlationId,
+  });
+
+  // If this payment was tied to a specific order, let the existing
+  // deposit-satisfied/activation logic pick it up immediately — reused
+  // as-is rather than duplicated (see refreshFundingStatus above).
+  if (payment.recordStoreSubscriptionId) {
+    await refreshFundingStatus(payment.recordStoreSubscriptionId, correlationId);
+  }
+
+  return { success: true, payment: updated };
+}
+
+// Finds every funding payment still owed a real Boberdoo credit (a fresh
+// webhook delivery, or anything left over from a prior failed attempt)
+// and submits each one. Safe to call repeatedly — submitFundingPayment
+// itself treats an already-SUBMITTED row as a no-op.
+async function submitPendingFundingPayments(correlationId) {
+  const pending = await prisma.recordStoreFundingPayment.findMany({ where: { status: { in: ['PENDING_SUBMIT', 'FAILED'] } } });
+  const results = [];
+  for (const payment of pending) {
+    // eslint-disable-next-line no-await-in-loop
+    results.push(await submitFundingPayment(payment.id, correlationId));
+  }
+  return results;
+}
+
 module.exports = {
   FRIENDLY_ERROR,
   refreshAgencyBalance,
@@ -594,4 +662,6 @@ module.exports = {
   resumeAccount,
   changeDailyVolume,
   linkExistingPartner,
+  submitFundingPayment,
+  submitPendingFundingPayments,
 };

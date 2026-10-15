@@ -32,13 +32,19 @@ export default function RecordStorePanel() {
   const [loadError, setLoadError] = useState('');
   const [wizardTemplate, setWizardTemplate] = useState(null);
   const [volumeEdit, setVolumeEdit] = useState(null); // { subscription, value }
+  const [fundingModal, setFundingModal] = useState(null); // { amount, busy }
   const [confirmingPauseAll, setConfirmingPauseAll] = useState(false);
   const [confirmingResumeAll, setConfirmingResumeAll] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [status, setStatus] = useState('');
+  const fundingResult = new URLSearchParams(window.location.search).get('funding');
 
   useEffect(() => {
     load();
+    if (fundingResult === 'success') {
+      // Give the webhook a moment to land, then pull a fresh balance.
+      setTimeout(() => { api.recordStoreBalance().then(setBalance).catch(() => {}); }, 2000);
+    }
   }, []);
 
   async function load() {
@@ -97,6 +103,21 @@ export default function RecordStorePanel() {
     }
   }
 
+  async function startAccountFundingCheckout() {
+    const dollars = Number(fundingModal.amount);
+    if (!dollars || dollars <= 0) {
+      setFundingModal({ ...fundingModal, error: 'Enter a valid amount.' });
+      return;
+    }
+    setFundingModal({ ...fundingModal, busy: true, error: '' });
+    try {
+      const res = await api.createRecordStoreAccountFundingCheckout(Math.round(dollars * 100));
+      window.location.href = res.url;
+    } catch (err) {
+      setFundingModal({ ...fundingModal, busy: false, error: err.data?.message || 'Could not start your payment.' });
+    }
+  }
+
   async function pauseAll() {
     setConfirmingPauseAll(false);
     setStatus('Pausing all lead products…');
@@ -151,11 +172,13 @@ export default function RecordStorePanel() {
           <div style={s.balanceUpdated}>{balance?.lastUpdatedAt ? `Updated ${new Date(balance.lastUpdatedAt).toLocaleString()}` : balance?.noPartnerYet ? 'No account yet' : 'Not yet checked'}</div>
           <div style={s.balanceActions}>
             <Button variant="secondary" size="sm" onClick={refreshBalance}><Icon name="refresh" size={13} style={{ marginRight: 4 }} />REFRESH</Button>
-            {balance?.paymentPageUrl && <Button variant="primary" size="sm" onClick={() => window.open(balance.paymentPageUrl, '_blank', 'noopener')}>ADD FUNDS</Button>}
+            <Button variant="primary" size="sm" onClick={() => setFundingModal({ amount: '', busy: false, error: '' })}>ADD FUNDS</Button>
           </div>
         </Card>
       </div>
 
+      {fundingResult === 'success' && <div style={s.status}>Payment received — crediting your lead balance now. It may take a few seconds to show above.</div>}
+      {fundingResult === 'canceled' && <div style={s.status}>Checkout was canceled — no charge was made.</div>}
       {status && <div style={s.status}>{status}</div>}
 
       {hasPrograms && (
@@ -261,6 +284,32 @@ export default function RecordStorePanel() {
           onClose={() => setWizardTemplate(null)}
           onDone={load}
         />
+      )}
+
+      {fundingModal && (
+        <div style={s.volumeModalBackdrop} onClick={() => (fundingModal.busy ? null : setFundingModal(null))}>
+          <Card style={s.volumeModal} onClick={(e) => e.stopPropagation()}>
+            <div style={s.sectionTitle}>ADD FUNDS</div>
+            <div style={s.helpText}>Amount added to your lead purchasing balance — charged via card, deposited straight to your account.</div>
+            <input
+              style={s.input}
+              type="number"
+              min="1"
+              step="0.01"
+              placeholder="e.g. 500.00"
+              value={fundingModal.amount}
+              onChange={(e) => setFundingModal({ ...fundingModal, amount: e.target.value })}
+              autoFocus
+            />
+            {fundingModal.error && <div style={s.syncError}>{fundingModal.error}</div>}
+            <div style={s.confirmActions}>
+              <Button variant="primary" size="sm" disabled={fundingModal.busy} onClick={startAccountFundingCheckout}>
+                {fundingModal.busy ? 'Starting checkout…' : 'CONTINUE TO PAYMENT'}
+              </Button>
+              <Button variant="secondary" size="sm" disabled={fundingModal.busy} onClick={() => setFundingModal(null)}>CANCEL</Button>
+            </div>
+          </Card>
+        </div>
       )}
 
       {volumeEdit && (

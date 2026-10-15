@@ -200,8 +200,22 @@ async function getIprFilterSets(partnerId) {
   return callAction('iprGetFilterSets', { Partner_ID: partnerId });
 }
 
-function getPaymentPageUrl() {
-  return process.env.BOBERDOO_PAYMENT_PAGE_URL || null;
+// submitPayment — docs §3/§4 "Partners". Credits (or charges) a Partner's
+// balance directly; it has no concept of a card or a payment page at all.
+// Real money is collected by EvenFlow's own Stripe integration first (see
+// lib/stripe.js's createRecordStoreFundingCheckoutSession +
+// routes/billing.js's webhook) — this call only posts the resulting
+// bookkeeping entry once that charge has actually cleared. Operation_Type
+// 2 ("Payment on account", a credit) is the default and the only code
+// this app uses; the full code table lives in
+// docs/lead-portal-api-reference.md.
+async function submitPayment(partnerId, amountCents, operationType = 2) {
+  const amount = (amountCents / 100).toFixed(2);
+  const result = await callAction('submitPayment', { Partner_ID: partnerId, Amount: amount, Operation_Type: operationType });
+  if (!result.success) return result;
+  const d = result.data;
+  const toCents = (v) => (v === undefined || v === null || v === '' ? null : Math.round(parseFloat(v) * 100));
+  return { ...result, totalBalanceCents: toCents(d.total_balance ?? d.Total_Balance) };
 }
 
 module.exports = {
@@ -220,5 +234,5 @@ module.exports = {
   updateIprFilterSet,
   updateIprDailyVolume,
   getIprFilterSets,
-  getPaymentPageUrl,
+  submitPayment,
 };
