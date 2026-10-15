@@ -7,7 +7,8 @@
 // typically costs a fraction of a cent — rounding to whole cents would make
 // nearly every log row show $0.00, which defeats the point of cost tracking.
 const RATES_PER_MILLION_MICROS = {
-  'claude-haiku-4-5-20251001': { input: 1_000_000, output: 5_000_000 }, // $1.00 in / $5.00 out per million tokens
+  'claude-sonnet-5-5': { input: 2_000_000, output: 10_000_000 }, // $2.00 in / $10.00 out per million tokens — ED's current default model
+  'claude-haiku-4-5-20251001': { input: 1_000_000, output: 5_000_000 }, // $1.00 in / $5.00 out per million tokens — kept for correctly costing pre-existing log rows
   default: { input: 3_000_000, output: 15_000_000 },
 };
 

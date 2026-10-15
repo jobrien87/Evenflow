@@ -13,6 +13,7 @@ const { computeFunnel } = require('../lib/funnelMetrics');
 const { computeVendorBreakdown, computeProductBreakdown } = require('../lib/performanceBreakdown');
 const { computeCoachingBreakdown } = require('../lib/callScoring');
 const { findRelevantLessons } = require('../lib/drillRetrieval');
+const { buildKnowledgeBaseForRole } = require('../lib/edKnowledgeBase');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -160,11 +161,19 @@ router.post('/ask', askLimiter, async (req, res, next) => {
     const relevantDrills = await findRelevantLessons(parsed.data.message, { limit: 3 });
     const promptContext = relevantDrills.length > 0 ? { ...context, relevantDrills } : context;
 
-    const systemPrompt = buildSystemPrompt({ context: promptContext, humorLevel: parsed.data.humorLevel || 'SPICY' });
+    // Real, static knowledge of how EvenFlow actually works (lib/edKnowledgeBase.js),
+    // scoped to this person's own role — this is what lets ED answer "how do
+    // I..."/"what does X do" questions instead of refusing everything
+    // outside the live numeric CONTEXT block above.
+    const knowledgeBase = buildKnowledgeBaseForRole(req.user.role);
+    const systemPrompt = buildSystemPrompt({ context: promptContext, knowledgeBase, humorLevel: parsed.data.humorLevel || 'SPICY' });
 
     let result;
     try {
-      result = await callEd({ systemPrompt, userMessage: parsed.data.message });
+      // Higher than the 500-token default: a real how-to answer grounded in
+      // the knowledge base runs longer than a bare stat recitation, and a
+      // response truncated mid-sentence is worse than a slightly longer one.
+      result = await callEd({ systemPrompt, userMessage: parsed.data.message, maxTokens: 700 });
     } catch (err) {
       console.error(`[ed] provider error correlationId=${req.correlationId}`, err.message);
       return res.json({

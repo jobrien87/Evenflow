@@ -3,7 +3,12 @@
 // from lib/edContext.js — never from here. If this integration isn't
 // configured, ED must say so plainly rather than fabricating an answer.
 
-const DEFAULT_MODEL = process.env.AI_MODEL || 'claude-haiku-4-5-20251001';
+// Sonnet, not Haiku: ED has to be reliably accurate across a wide range of
+// app-knowledge and coaching questions (not just short dashboard-number
+// recitation), so the extra per-token cost buys real quality here — and
+// the existing per-user daily caps on /ask, /briefing, /suggest, and
+// /coaching-summary already bound the real spend regardless of model.
+const DEFAULT_MODEL = process.env.AI_MODEL || 'claude-sonnet-5-5';
 
 function isConfigured() {
   return !!process.env.ANTHROPIC_API_KEY;
