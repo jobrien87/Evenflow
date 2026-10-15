@@ -15,6 +15,7 @@ export const NAV_BY_ROLE = {
     { label: 'Tasks', to: '/producer/tasks', icon: 'checklist', dataTour: 'nav-tasks' },
     { label: 'My Leads', to: '/producer/my-leads', icon: 'leads', primary: true, dataTour: 'nav-my-leads' },
     { label: 'My Sales', to: '/producer/my-sales', icon: 'dollar', dataTour: 'nav-my-sales' },
+    { label: 'Billboard', to: '/producer/billboard', icon: 'megaphone', dataTour: 'nav-billboard' },
     { label: 'Team Chat', to: '/producer/team-chat', icon: 'chat', primary: true, dataTour: 'nav-team-chat' },
     { label: 'Sales Studio', to: '/producer/sales-studio', icon: 'trophy', primary: true, dataTour: 'nav-sales-studio' },
     { label: 'Moshpit', to: '/producer/moshpit', icon: 'flame', primary: true, dataTour: 'nav-moshpit' },

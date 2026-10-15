@@ -18,6 +18,7 @@ const bcrypt = require('bcryptjs');
 const { prisma } = require('../lib/db');
 const { createSession } = require('../lib/auth');
 const { computeBillboard, computeBillboardPeriod } = require('../lib/billboard');
+const { PRODUCT_LABELS } = require('../lib/products');
 const { computeFunnel } = require('../lib/funnelMetrics');
 const { monthBoundsEastern } = require('../lib/billboardPeriods');
 const { zonedYearMonthDay } = require('../lib/timezone');
@@ -112,7 +113,7 @@ test('a standalone sale reaches Billboard\'s byProducer and byProduct with the r
   assert.equal(producerRow.soldCount, 1);
   assert.equal(producerRow.premiumCents, 75000);
 
-  const productRow = billboard.byProduct.find((p) => p.product === 'AUTO');
+  const productRow = billboard.byProduct.find((p) => p.product === PRODUCT_LABELS.AUTO);
   assert.ok(productRow, 'the product row must appear');
   assert.equal(productRow.soldCount, 1);
 
@@ -189,7 +190,7 @@ test('new policy types (Motorhome, Jewelry, Pet Health, Roadside, Umbrella) are 
   const to = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const billboard = await computeBillboard({ agencyId, granularity: 'day', from, to });
   for (const c of cases) {
-    const productRow = billboard.byProduct.find((p) => p.product === c.productFamily);
+    const productRow = billboard.byProduct.find((p) => p.product === PRODUCT_LABELS[c.productFamily]);
     assert.ok(productRow, `${c.productFamily} must appear in Billboard's product breakdown`);
     assert.equal(productRow.soldCount >= 1, true);
   }
@@ -736,9 +737,9 @@ test('editing items/productFamily/saleDate/assignedToId is reflected live in Bil
   const from = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const to = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const billboard = await computeBillboard({ agencyId, granularity: 'day', from, to });
-  const homeRow = billboard.byProduct.find((p) => p.product === 'HOME');
+  const homeRow = billboard.byProduct.find((p) => p.product === PRODUCT_LABELS.HOME);
   assert.ok(homeRow, 'the edited productFamily must be reflected on next read, no extra code needed');
-  const autoRowStillHasOldSale = billboard.byProduct.find((p) => p.product === 'AUTO')?.soldCount || 0;
+  const autoRowStillHasOldSale = billboard.byProduct.find((p) => p.product === PRODUCT_LABELS.AUTO)?.soldCount || 0;
   // Other AUTO sales from earlier tests may still exist concurrently in
   // this suite's shared agency; the real assertion is that the edited
   // sale itself now lands under HOME, not that AUTO is empty.
@@ -897,4 +898,97 @@ test('a backdated saleDate correction moves revenue between periods identically 
 
   await prisma.sale.delete({ where: { id: sale.id } });
   await prisma.revenueEvent.deleteMany({ where: { saleId: sale.id } });
+});
+
+// --- GET /leads/sold-missing-sale (reconciliation for the leaderboard
+// -not-reporting-correctly complaint) ---
+
+async function createSoldLeadWithNoSale({ assignedToId = producerId, premiumCents = 45000, saleProduct = 'AUTO' } = {}) {
+  const customer = await prisma.customer.create({
+    data: { firstName: 'Unlogged', lastName: `Sale${Date.now()}${Math.random()}`, phoneNormalized: `unlogged${Date.now()}${Math.floor(Math.random() * 1e6)}` },
+  });
+  const lead = await prisma.lead.create({
+    data: {
+      agencyId, customerId: customer.id, source: 'manual', status: 'SOLD', product: 'Auto',
+      createdById: ownerId, assignedToId, salePremiumCents: premiumCents, saleProduct,
+    },
+  });
+  return { lead, customer };
+}
+
+test('GET /leads/sold-missing-sale surfaces a SOLD lead with no Closed Sale logged, and omits one that has a real linked Sale', async () => {
+  const { lead: missingLead, customer: missingCustomer } = await createSoldLeadWithNoSale();
+  const { lead: linkedLead, customer: linkedCustomer } = await createSoldLeadWithNoSale({ premiumCents: 60000 });
+
+  // Log a real Closed Sale against the second lead — it must disappear
+  // from the missing-sale list once linked.
+  const saleRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ premiumCents: 60000, leadId: linkedLead.id })),
+  });
+  assert.equal(saleRes.status, 201);
+  const { sale: linkedSale } = await saleRes.json();
+
+  const res = await fetch(`${baseUrl}/api/leads/sold-missing-sale`, { headers: { Cookie: ownerCookie } });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+
+  assert.ok(body.leads.some((l) => l.id === missingLead.id), 'a SOLD lead with no linked Sale must be surfaced');
+  assert.equal(body.leads.some((l) => l.id === linkedLead.id), false, 'a SOLD lead with a real linked Sale must never be surfaced as missing');
+
+  const row = body.leads.find((l) => l.id === missingLead.id);
+  assert.equal(row.salePremiumCents, 45000);
+  assert.equal(row.saleProduct, 'AUTO');
+  assert.equal(row.assignedToId, producerId);
+
+  await prisma.sale.delete({ where: { id: linkedSale.id } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: linkedSale.id } });
+  await prisma.lead.deleteMany({ where: { id: { in: [missingLead.id, linkedLead.id] } } });
+  await prisma.customer.deleteMany({ where: { id: { in: [missingCustomer.id, linkedCustomer.id] } } });
+});
+
+test('GET /leads/sold-missing-sale: a Producer only ever sees their own gaps, never another producer\'s', async () => {
+  const { lead: ownLead, customer: ownCustomer } = await createSoldLeadWithNoSale({ assignedToId: producerId });
+  const { lead: otherLead, customer: otherCustomer } = await createSoldLeadWithNoSale({ assignedToId: producer2Id });
+
+  const producerRes = await fetch(`${baseUrl}/api/leads/sold-missing-sale`, { headers: { Cookie: producerCookie } });
+  assert.equal(producerRes.status, 200);
+  const producerBody = await producerRes.json();
+  assert.ok(producerBody.leads.some((l) => l.id === ownLead.id), 'a producer must see their own unlogged sale');
+  assert.equal(producerBody.leads.some((l) => l.id === otherLead.id), false, 'a producer must never see a different producer\'s unlogged sale');
+
+  const ownerRes = await fetch(`${baseUrl}/api/leads/sold-missing-sale`, { headers: { Cookie: ownerCookie } });
+  const ownerBody = await ownerRes.json();
+  assert.ok(ownerBody.leads.some((l) => l.id === ownLead.id), 'the Owner must see every gap in the agency');
+  assert.ok(ownerBody.leads.some((l) => l.id === otherLead.id), 'the Owner must see every gap in the agency');
+
+  await prisma.lead.deleteMany({ where: { id: { in: [ownLead.id, otherLead.id] } } });
+  await prisma.customer.deleteMany({ where: { id: { in: [ownCustomer.id, otherCustomer.id] } } });
+});
+
+test('a voided Sale still linked to a lead leaves that lead counted as missing again', async () => {
+  const { lead, customer } = await createSoldLeadWithNoSale({ premiumCents: 70000 });
+  const saleRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ premiumCents: 70000, leadId: lead.id })),
+  });
+  const { sale } = await saleRes.json();
+
+  const beforeVoid = await fetch(`${baseUrl}/api/leads/sold-missing-sale`, { headers: { Cookie: ownerCookie } });
+  const beforeVoidBody = await beforeVoid.json();
+  assert.equal(beforeVoidBody.leads.some((l) => l.id === lead.id), false, 'a lead with a real, non-voided Sale must not be missing');
+
+  await fetch(`${baseUrl}/api/sales/${sale.id}/void`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ voidReason: 'test void' }),
+  });
+
+  const afterVoid = await fetch(`${baseUrl}/api/leads/sold-missing-sale`, { headers: { Cookie: ownerCookie } });
+  const afterVoidBody = await afterVoid.json();
+  assert.ok(afterVoidBody.leads.some((l) => l.id === lead.id), 'once its one real Sale is voided, the lead must be surfaced as missing again — a voided sale credits nothing');
+
+  await prisma.sale.delete({ where: { id: sale.id } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: sale.id } });
+  await prisma.lead.delete({ where: { id: lead.id } });
+  await prisma.customer.delete({ where: { id: customer.id } });
 });

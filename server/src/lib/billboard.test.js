@@ -12,6 +12,7 @@ const { test, before } = require('node:test');
 const assert = require('node:assert/strict');
 const { prisma } = require('./db');
 const { computeBillboard, computeBillboardPeriod, bucketStart, buildSeries } = require('./billboard');
+const { PRODUCT_LABELS } = require('./products');
 
 test('bucketStart: week bucket always starts on Monday', () => {
   // 2026-10-01 is a Thursday.
@@ -143,12 +144,12 @@ test('computeBillboard: aggregates real sold leads by producer and by product', 
 
   // Sorted by premium descending — A and B are tied with producers'
   // relative product totals, so check product rows directly instead.
-  const auto = result.byProduct.find((p) => p.product === 'AUTO');
+  const auto = result.byProduct.find((p) => p.product === PRODUCT_LABELS.AUTO);
   assert.equal(auto.soldCount, 2);
   assert.equal(auto.premiumCents, 30000);
   assert.equal(auto.itemCount, 4);
 
-  const home = result.byProduct.find((p) => p.product === 'HOME');
+  const home = result.byProduct.find((p) => p.product === PRODUCT_LABELS.HOME);
   assert.equal(home.soldCount, 1);
   assert.equal(home.premiumCents, 30000);
   assert.equal(home.itemCount, 2);

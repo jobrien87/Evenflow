@@ -39,6 +39,7 @@ export const api = {
 
   leads: (params = '') => request(`/leads${params}`),
   searchLeads: (params = '') => request(`/leads/search${params}`),
+  soldLeadsMissingSale: () => request('/leads/sold-missing-sale'),
   leadDetail: (id) => request(`/leads/${id}`),
   leadFunnel: (params = '') => request(`/leads/funnel${params}`),
   leadsSnapshot: (params = '') => request(`/leads/snapshot${params}`),

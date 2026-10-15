@@ -4,7 +4,27 @@ import { useAuth } from '../lib/AuthContext';
 import { Card, SectionHeader, StatTile, BarRow, Badge, Button, ExportButton, EmptyState, TrendChart, MonthSelector, Icon } from '../ui';
 import { money } from '../lib/format';
 import { downloadCsv } from '../lib/downloadCsv';
+import { PRODUCTS } from '../lib/productMeta';
 import AddClosedSaleModal from './AddClosedSaleModal';
+
+// A SOLD disposition posts no revenue by itself — only an explicit Add
+// Closed Sale does (see server/src/routes/leads.js's disposition route
+// comment). Built from a GET /leads/sold-missing-sale row, which only
+// ever carries a single real sold product when exactly one was marked —
+// never guessed at here if it's a joined multi-product string.
+function prefillFromMissingSaleRow(row) {
+  return {
+    firstName: row.firstName || '',
+    lastName: row.lastName || '',
+    phone: row.phone || '',
+    email: row.email || '',
+    zip: row.zip || '',
+    state: row.state || '',
+    ...(row.saleProduct && PRODUCTS.includes(row.saleProduct) ? { productFamily: row.saleProduct } : {}),
+    premiumCents: row.salePremiumCents != null ? (row.salePremiumCents / 100).toFixed(2) : '',
+    assignedToId: row.assignedToId || '',
+  };
+}
 
 const PERIODS = [
   { key: 'week', label: 'WEEK' },
@@ -29,6 +49,9 @@ export default function BillboardPanel() {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [showAddSale, setShowAddSale] = useState(false);
+  const [missingSales, setMissingSales] = useState([]);
+  const [logSaleFor, setLogSaleFor] = useState(null);
+  const [missingExpanded, setMissingExpanded] = useState(false);
   // Guards against a slow earlier request resolving after a faster, newer
   // one and clobbering its result (e.g. rapidly switching periods) — only
   // the response from the most recently fired request is ever applied.
@@ -38,6 +61,23 @@ export default function BillboardPanel() {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period, selectedMonth, selectedYear]);
+
+  useEffect(() => {
+    loadMissingSales();
+  }, []);
+
+  // Independent of the period selector — these are leads marked SOLD at
+  // some point that never got logged at all, regardless of which window
+  // is currently being viewed above.
+  async function loadMissingSales() {
+    try {
+      const res = await api.soldLeadsMissingSale();
+      setMissingSales(res.leads || []);
+    } catch {
+      // Non-critical to the page's main purpose — fails silently rather
+      // than blocking the real Billboard numbers from loading.
+    }
+  }
 
   function selectPeriod(key) {
     setPeriod(key);
@@ -99,7 +139,49 @@ export default function BillboardPanel() {
       </div>
 
       {showAddSale && (
-        <AddClosedSaleModal onClose={() => setShowAddSale(false)} onSaved={load} />
+        <AddClosedSaleModal onClose={() => setShowAddSale(false)} onSaved={() => { load(); loadMissingSales(); }} />
+      )}
+
+      {logSaleFor && (
+        <AddClosedSaleModal
+          leadId={logSaleFor.id}
+          prefill={prefillFromMissingSaleRow(logSaleFor)}
+          onClose={() => setLogSaleFor(null)}
+          onSaved={() => { setLogSaleFor(null); load(); loadMissingSales(); }}
+        />
+      )}
+
+      {missingSales.length > 0 && (
+        <Card style={{ ...s.card, ...s.missingCard }} data-tour="billboard-needs-reconciliation">
+          <div style={s.cardTitleRow}>
+            <div style={s.cardTitle}>
+              <Icon name="alert" size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
+              {missingSales.length} sold lead{missingSales.length === 1 ? '' : 's'} not counted yet
+            </div>
+            <Button variant="secondary" size="sm" onClick={() => setMissingExpanded((v) => !v)}>
+              {missingExpanded ? 'HIDE' : 'REVIEW'}
+            </Button>
+          </div>
+          <div style={s.missingExplain}>
+            Marking a lead SOLD doesn't put it on the Billboard by itself — it still needs a Closed Sale logged.
+            {missingSales.length === 1
+              ? " This one was marked SOLD but never logged, so it's missing from every total and leaderboard above."
+              : " These were marked SOLD but never logged, so they're missing from every total and leaderboard above."}
+          </div>
+          {missingExpanded && missingSales.map((row) => (
+            <div key={row.id} style={s.row} className="ui-row-stack">
+              <div style={s.rowLeft}>
+                <span style={s.rowName}>{row.firstName} {row.lastName}</span>
+                {row.assignedToName && <span style={s.rowStat}>&nbsp;· {row.assignedToName}</span>}
+              </div>
+              <div style={s.rowRight}>
+                {row.salePremiumCents != null && <span style={s.rowStat}>{money(row.salePremiumCents)}</span>}
+                <span style={s.rowStat}>sold {new Date(row.soldAt).toLocaleDateString()}</span>
+                <Button size="sm" variant="primary" onClick={() => setLogSaleFor(row)}>LOG SALE</Button>
+              </div>
+            </div>
+          ))}
+        </Card>
       )}
 
       <div style={s.periodLabel}>{data.periodLabel}</div>
@@ -255,6 +337,8 @@ const s = {
   statsRow: { display: 'flex', gap: 32, flexWrap: 'wrap', marginBottom: 20 },
   card: { marginBottom: 16, padding: 'var(--space-4)' },
   cardTitleRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  missingCard: { border: '1px solid var(--warning)', background: 'var(--warning-soft)' },
+  missingExplain: { color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.5, marginBottom: 8 },
   cardTitle: { fontSize: 11, letterSpacing: 1.5, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 12, textTransform: 'uppercase' },
   row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--border-hairline)', gap: 10 },
   rowLeft: { display: 'flex', alignItems: 'center', gap: 10 },

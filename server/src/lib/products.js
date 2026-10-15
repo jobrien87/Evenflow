@@ -26,15 +26,23 @@ const PRODUCT_LABELS = {
   UMBRELLA: 'Umbrella',
 };
 
+// Case-insensitive label lookup, e.g. 'AUTO' -> 'Auto', 'HOME - LANDLORD' -> 'Home - Landlord'.
+const PRODUCT_LABEL_LOOKUP = Object.fromEntries(
+  Object.values(PRODUCT_LABELS).map((label) => [label.toUpperCase(), label]),
+);
+
 // Read-time grouping only: vendor intake stores exact title-case strings,
-// quote/Sale records store catalog codes, and historical exports can use
-// either. Merge these two known product aliases without rewriting rows,
-// changing API validation, or reclassifying any other product (e.g. SPL).
+// quote/Sale records store catalog codes, and historical exports (free-text,
+// unvalidated spreadsheet columns) can use either, or any casing of either
+// ('Auto', 'AUTO', 'auto'). Merge any casing of a known catalog code or
+// label onto its one canonical label, without rewriting any stored row or
+// changing API validation. A product that matches neither (e.g. 'SPL') is
+// never guessed at — it passes through exactly as stored.
 function reportingProductKey(product) {
-  const code = typeof product === 'string' ? product.trim().toUpperCase() : '';
-  return code === 'BOAT' || code === 'MOTORCYCLE'
-    ? PRODUCT_LABELS[code]
-    : product || 'Unspecified';
+  if (typeof product !== 'string' || !product.trim()) return 'Unspecified';
+  const trimmed = product.trim();
+  const code = trimmed.toUpperCase();
+  return PRODUCT_LABELS[code] || PRODUCT_LABEL_LOOKUP[code] || trimmed;
 }
 
 module.exports = { PRODUCTS, PRODUCT_LABELS, reportingProductKey };

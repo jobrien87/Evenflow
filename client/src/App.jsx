@@ -108,6 +108,7 @@ export default function App() {
           <Route path="producer/moshpit" element={<MoshpitPanel />} />
           <Route path="producer/my-leads" element={<MyLeadsPanel />} />
           <Route path="producer/my-sales" element={<ClosedSalesPanel />} />
+          <Route path="producer/billboard" element={<BillboardPanel />} />
           <Route path="producer/goals" element={<GoalsPanel />} />
           <Route path="producer/my-hr" element={<HrMyProfilePage />} />
           <Route path="producer/break-room" element={<BreakRoomPanel />} />

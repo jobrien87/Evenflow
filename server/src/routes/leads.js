@@ -1358,6 +1358,73 @@ router.get('/search', searchLimiter, requireRole('PRODUCER', 'AGENCY_MANAGER', '
   }
 });
 
+// Reconciliation: every Lead marked SOLD that has no real, non-voided Sale
+// row linked back to it. Since the "Item 3" fix, a SOLD disposition is a
+// pure pipeline status change — it posts no revenue and creates no
+// production credit on its own (see POST /:leadId/disposition's own
+// comment). The one real production entry is an explicit Add Closed Sale,
+// and today the only prompt for that is a one-shot, fully-dismissible
+// client-side nudge (LeadDetailModal.jsx's SaleLogNudge) with zero
+// server-side record of whether it was ever acted on. Without this
+// endpoint, a sale a producer marked SOLD but never formally logged
+// simply vanishes from Billboard/Financials with no visible trace
+// anywhere — exactly the silent gap this surfaces instead of hiding.
+router.get('/sold-missing-sale', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const agencyId = scopeAgencyId(req);
+    if (req.user.role === 'PLATFORM_OWNER' && !agencyId) {
+      return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+    }
+
+    const soldLeads = await prisma.lead.findMany({
+      where: {
+        agencyId,
+        status: 'SOLD',
+        // Same scoping rule as /search: a Producer only ever sees (and can
+        // act on) their own gaps, Owner/Manager/Platform Owner see every
+        // one in the agency.
+        ...(req.user.role === 'PRODUCER' ? { assignedToId: req.user.id } : {}),
+      },
+      include: {
+        customer: { select: { firstName: true, lastName: true, phoneNormalized: true, email: true } },
+        assignedTo: { select: { id: true, firstName: true, lastName: true } },
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    if (soldLeads.length === 0) {
+      return res.json({ success: true, leads: [], count: 0 });
+    }
+
+    const linkedSales = await prisma.sale.findMany({
+      where: { leadId: { in: soldLeads.map((l) => l.id) }, voidedAt: null },
+      select: { leadId: true },
+    });
+    const linkedLeadIds = new Set(linkedSales.map((s) => s.leadId));
+
+    const missing = soldLeads
+      .filter((l) => !linkedLeadIds.has(l.id))
+      .map((l) => ({
+        id: l.id,
+        soldAt: l.updatedAt,
+        firstName: l.customer?.firstName || '',
+        lastName: l.customer?.lastName || '',
+        phone: l.customer?.phoneNormalized || '',
+        email: l.customer?.email || '',
+        zip: l.zip || '',
+        state: l.state || '',
+        saleProduct: l.saleProduct,
+        salePremiumCents: l.salePremiumCents,
+        assignedToId: l.assignedToId,
+        assignedToName: l.assignedTo ? `${l.assignedTo.firstName} ${l.assignedTo.lastName}` : null,
+      }));
+
+    return res.json({ success: true, leads: missing, count: missing.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/:leadId', async (req, res, next) => {
   try {
     const lead = await prisma.lead.findUnique({
