@@ -209,7 +209,7 @@ export default function GoalsPanel() {
       </div>
 
       {canManage && (
-        <div style={s.aiBox}>
+        <div style={s.aiBox} data-tour="goals-ai-box">
           <div style={s.aiLabel}>✨ DESCRIBE A GOAL</div>
           <div style={s.aiRow}>
             <input
@@ -300,7 +300,7 @@ export default function GoalsPanel() {
               <button style={s.editButton} onClick={() => setEditingId(null)}>CANCEL</button>
             </div>
           ) : (
-            <div style={s.progressWrap}>
+            <div style={s.progressWrap} data-tour="goals-pace-bar">
               <div style={s.progressLabel}>
                 <span>{g.actual === null ? 'No data yet' : `${g.actual} / ${g.targetValue}`}</span>
                 <span>{g.progressPercent === null ? '—' : `${g.progressPercent}%`}</span>

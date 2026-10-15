@@ -215,7 +215,7 @@ export default function VendorsPanel() {
     <div style={s.wrap}>
       <div style={s.headerRow}>
         <h3 style={s.h3}>VENDORS ({vendors.length})</h3>
-        <button style={s.button} onClick={() => setShowForm(!showForm)}>+ ADD VENDOR</button>
+        <button style={s.button} onClick={() => setShowForm(!showForm)} data-tour="vendors-add-button">+ ADD VENDOR</button>
       </div>
 
       <section style={s.atGlanceSection}>
@@ -336,7 +336,7 @@ export default function VendorsPanel() {
             <button style={s.smallButtonOutline} onClick={() => viewInstructions(v.id)}>VIEW INSTRUCTIONS</button>
             <button style={s.smallButtonOutline} onClick={() => revoke(v.id)}>REVOKE</button>
             <button style={s.smallButtonOutline} onClick={() => viewDetail(v)}>LOGS</button>
-            <button style={s.smallButtonOutline} onClick={() => setExpandedCredentialsId(expandedCredentialsId === v.id ? null : v.id)}>
+            <button style={s.smallButtonOutline} onClick={() => setExpandedCredentialsId(expandedCredentialsId === v.id ? null : v.id)} data-tour="vendors-credentials-logs">
               CREDENTIALS ({v.credentials?.length || 0})
             </button>
           </div>

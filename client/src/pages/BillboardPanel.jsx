@@ -83,7 +83,7 @@ export default function BillboardPanel() {
         <SectionHeader>Billboard</SectionHeader>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <Button size="sm" onClick={() => setShowAddSale(true)}>+ ADD CLOSED SALE</Button>
-          <div style={s.periodTabs}>
+          <div style={s.periodTabs} data-tour="billboard-period-tabs">
             {PERIODS.map((p) => (
               <button
                 key={p.key}
@@ -133,7 +133,7 @@ export default function BillboardPanel() {
         </Card>
       )}
 
-      <Card style={s.card}>
+      <Card style={s.card} data-tour="billboard-leaderboard">
         <div style={s.cardTitleRow}>
           <div style={s.cardTitle}>PRODUCER LEADERBOARD</div>
           <ExportButton onExport={() => downloadCsv('billboard-producers', data.byProducer, [
@@ -189,16 +189,18 @@ export default function BillboardPanel() {
         )}
       </Card>
 
-      <Card style={s.card}>
+      <Card style={s.card} data-tour="billboard-by-vendor">
         <div style={s.cardTitleRow}>
           <div style={s.cardTitle}>BY VENDOR</div>
-          <ExportButton onExport={() => downloadCsv('billboard-by-vendor', data.byVendor, [
-            { key: 'vendorName', label: 'Vendor' },
-            { key: 'soldCount', label: 'Policies Sold' },
-            { key: 'itemCount', label: 'Items' },
-            { key: 'unknownItemsCount', label: 'Unknown Items' },
-            { key: (r) => (r.premiumCents / 100).toFixed(2), label: 'Premium ($)' },
-          ])} />
+          <span data-tour="billboard-export">
+            <ExportButton onExport={() => downloadCsv('billboard-by-vendor', data.byVendor, [
+              { key: 'vendorName', label: 'Vendor' },
+              { key: 'soldCount', label: 'Policies Sold' },
+              { key: 'itemCount', label: 'Items' },
+              { key: 'unknownItemsCount', label: 'Unknown Items' },
+              { key: (r) => (r.premiumCents / 100).toFixed(2), label: 'Premium ($)' },
+            ])} />
+          </span>
         </div>
         {data.byVendor.length === 0 ? (
           <div style={s.empty}>No sales in this period yet.</div>

@@ -118,9 +118,9 @@ export default function AgencyLeadsPanel() {
           {stageFilter && (
             <button style={s.smallButtonOutline} onClick={clearStageFilter}>CLEAR FILTER</button>
           )}
-          <button style={s.smallButtonOutline} onClick={() => setShowUpload(!showUpload)}>UPLOAD LEADS</button>
+          <button style={s.smallButtonOutline} onClick={() => setShowUpload(!showUpload)} data-tour="leads-bulk-upload-button">UPLOAD LEADS</button>
           <button style={s.smallButtonOutline} onClick={() => setShowAddSale(true)}>+ ADD CLOSED SALE</button>
-          <button style={s.smallButton} onClick={() => setShowAddLead(!showAddLead)}>+ ADD LEAD</button>
+          <button style={s.smallButton} onClick={() => setShowAddLead(!showAddLead)} data-tour="leads-add-button">+ ADD LEAD</button>
         </div>
       </div>
       {showUpload && (

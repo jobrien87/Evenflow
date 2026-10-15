@@ -224,7 +224,7 @@ export default function AgencyOwnerDashboard() {
         <FunnelMetricsCard scope="agency" title="AGENCY FUNNEL" onSelectStage={selectFunnelStage} />
       </section>
 
-      <section style={s.section}>
+      <section style={s.section} data-tour="agency-leaderboard-section">
         <PerformanceLeaderboards agencyId={user?.agencyId} linkToDetail />
       </section>
 
@@ -265,7 +265,7 @@ export default function AgencyOwnerDashboard() {
         )}
       </section>
 
-      <section style={s.section}>
+      <section style={s.section} data-tour="agency-roster-section">
         <div style={s.headerRow}>
           <h3 style={s.h3}>TEAM ({users.length})</h3>
           <button style={s.smallButton} onClick={() => setShowInvite(!showInvite)}>

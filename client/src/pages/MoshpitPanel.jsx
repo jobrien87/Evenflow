@@ -139,6 +139,7 @@ export default function MoshpitPanel() {
                   style={s.claimButton}
                   disabled={claimingId === lead.id}
                   onClick={() => claim(lead.id)}
+                  data-tour="moshpit-claim-button"
                 >
                   {claimingId === lead.id ? 'CLAIMING…' : 'CLAIM'}
                 </Button>

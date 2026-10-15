@@ -257,7 +257,14 @@ export default function RosterSettingsPanel() {
         <SectionHeader>Roster Settings</SectionHeader>
         <div style={s.tabRow}>
           {TABS.map((t) => (
-            <button key={t.key} style={s.tab(tab === t.key)} onClick={() => setTab(t.key)}>{t.label}</button>
+            <button
+              key={t.key}
+              style={s.tab(tab === t.key)}
+              onClick={() => setTab(t.key)}
+              data-tour={t.key === 'pto' ? 'roster-tab-pto' : t.key === 'hours' ? 'roster-tab-hours' : undefined}
+            >
+              {t.label}
+            </button>
           ))}
         </div>
       </div>
@@ -277,17 +284,17 @@ export default function RosterSettingsPanel() {
           )}
 
           {canManage && (
-            <Card style={s.card}>
+            <Card style={s.card} data-tour="roster-invite-card">
               <div style={s.cardTitle}>+ INVITE</div>
               <form onSubmit={invite} style={s.inviteForm}>
                 <input style={s.input} placeholder="Email" type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} required />
                 <input style={s.input} placeholder="First name" value={inviteFirstName} onChange={(e) => setInviteFirstName(e.target.value)} required />
                 <input style={s.input} placeholder="Last name" value={inviteLastName} onChange={(e) => setInviteLastName(e.target.value)} required />
-                <select style={s.input} value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}>
+                <select style={s.input} value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} data-tour="roster-invite-role-select">
                   <option value="PRODUCER">Producer</option>
                   <option value="AGENCY_MANAGER">Agency Manager</option>
                 </select>
-                <Button type="submit" size="sm">INVITE</Button>
+                <Button type="submit" size="sm" data-tour="roster-invite-submit">INVITE</Button>
               </form>
               {inviteStatus && <div style={s.status}>{inviteStatus}</div>}
             </Card>
@@ -330,7 +337,7 @@ export default function RosterSettingsPanel() {
                     </select>
                     {awardForUserId === u.id && <button style={s.smallButton} onClick={awardBadge}>AWARD</button>}
                     {(u.status === 'INVITED' || u.status === 'DEACTIVATED') && (
-                      <button style={s.linkButton} disabled={resendingId === u.id} onClick={() => resendInvite(u.id)}>
+                      <button style={s.linkButton} disabled={resendingId === u.id} onClick={() => resendInvite(u.id)} data-tour="roster-resend-button">
                         {resendingId === u.id ? 'RESENDING…' : u.status === 'DEACTIVATED' ? 'RESEND & REACTIVATE' : 'RESEND'}
                       </button>
                     )}

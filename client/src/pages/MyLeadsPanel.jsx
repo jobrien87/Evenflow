@@ -113,7 +113,7 @@ export default function MyLeadsPanel() {
 
       <section style={s.statsSection}>
         <SectionHeader>At a Glance</SectionHeader>
-        <div style={s.statsRow}>
+        <div style={s.statsRow} data-tour="my-leads-stats-row">
           <StatTile label="Total Leads" value={total} />
           <StatTile label="Untouched" value={untouchedCount} sub={untouchedCount > 0 ? 'need a first attempt' : 'all touched'} />
           <StatTile label="Contact Rate" value={pct(performance?.funnel?.contactRate)} />
@@ -127,7 +127,7 @@ export default function MyLeadsPanel() {
         {(performance?.vendorBreakdown || []).length === 0 ? (
           <EmptyState title="No vendor leads yet this period" description="Once vendors send you leads, each one's numbers show up here." />
         ) : (
-          <Card style={s.tableCard}>
+          <Card style={s.tableCard} data-tour="my-leads-vendor-breakdown">
             <div style={s.tableHeaderRow}>
               <span style={s.colVendor}>VENDOR</span>
               <span style={s.col}>LEADS</span>
@@ -153,7 +153,7 @@ export default function MyLeadsPanel() {
       <section style={s.section}>
         <div style={s.headerRow}>
           <SectionHeader>Your Leads</SectionHeader>
-          <select style={s.filterSelect} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <select style={s.filterSelect} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} data-tour="my-leads-status-filter">
             <option value="">All statuses</option>
             {['NEW', 'CONTACTED', 'APPOINTMENT', 'QUOTED', 'FOLLOW_UP', 'SOLD', 'LOST'].map((st) => (
               <option key={st} value={st}>{st.replace(/_/g, ' ')}</option>
@@ -164,7 +164,7 @@ export default function MyLeadsPanel() {
         {leads.length === 0 ? (
           <EmptyState title="No leads here yet" description="Leads assigned to you will show up in this list." />
         ) : (
-          <Card style={s.tableCard}>
+          <Card style={s.tableCard} data-tour="my-leads-table">
             <div style={s.leadHeaderRow}>
               <span style={s.colLeadName}>NAME</span>
               <span style={s.col}>VENDOR</span>

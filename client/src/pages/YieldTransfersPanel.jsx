@@ -340,7 +340,7 @@ export default function YieldTransfersPanel() {
         </Card>
       )}
 
-      <div style={s.leadsColumn}>
+      <div style={s.leadsColumn} data-tour="transfers-leads-list">
         {visibleLeads.length === 0 ? (
           <EmptyState
             title="No leads yet"

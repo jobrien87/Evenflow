@@ -61,7 +61,7 @@ export default function SalesStudioPanel() {
       <SectionHeader>Sales Studio</SectionHeader>
       <div style={s.tabRow}>
         {tabs.map((t) => (
-          <button key={t.key} style={s.tab(tab === t.key)} onClick={() => setTab(t.key)}>{t.label}</button>
+          <button key={t.key} style={s.tab(tab === t.key)} onClick={() => setTab(t.key)} data-tour={`sales-studio-tab-${t.key}`}>{t.label}</button>
         ))}
       </div>
       <ActiveComponent />
