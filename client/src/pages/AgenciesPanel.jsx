@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { Card, Badge, Button, StatTile, SectionHeader, EmptyState, ExportButton } from '../ui';
 import { downloadCsv } from '../lib/downloadCsv';
 import { emailStatusMessage } from '../lib/emailStatus';
+import { ENTITLEMENT_FIELDS, DEFAULT_ENTITLEMENTS } from '../lib/entitlementFields';
 import AnnouncementComposer from './AnnouncementComposer';
 
 function statusTone(status) {
@@ -22,7 +23,13 @@ export default function AgenciesPanel() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', ownerFirstName: '', ownerLastName: '', ownerEmail: '' });
+  const emptyForm = () => ({
+    name: '', ownerFirstName: '', ownerLastName: '', ownerEmail: '',
+    isComped: false,
+    seatPriceDollars: '',
+    ...DEFAULT_ENTITLEMENTS,
+  });
+  const [form, setForm] = useState(emptyForm);
   const [status, setStatus] = useState('');
   const [showAnnounce, setShowAnnounce] = useState(false);
 
@@ -67,9 +74,14 @@ export default function AgenciesPanel() {
     e.preventDefault();
     setStatus('Creating…');
     try {
-      const res = await api.createAgency(form);
+      const { seatPriceDollars, ...rest } = form;
+      const payload = { ...rest };
+      if (!form.isComped && seatPriceDollars.trim() !== '') {
+        payload.seatPriceCents = Math.round(parseFloat(seatPriceDollars) * 100);
+      }
+      const res = await api.createAgency(payload);
       setStatus(emailStatusMessage('Agency created.', res.invitation.emailStatus));
-      setForm({ name: '', ownerFirstName: '', ownerLastName: '', ownerEmail: '' });
+      setForm(emptyForm());
       setShowForm(false);
       await refresh();
     } catch (err) {
@@ -160,6 +172,42 @@ export default function AgenciesPanel() {
             <input style={s.input} placeholder="Owner first name" value={form.ownerFirstName} onChange={(e) => setForm({ ...form, ownerFirstName: e.target.value })} required />
             <input style={s.input} placeholder="Owner last name" value={form.ownerLastName} onChange={(e) => setForm({ ...form, ownerLastName: e.target.value })} required />
             <input style={s.input} type="email" placeholder="Owner email" value={form.ownerEmail} onChange={(e) => setForm({ ...form, ownerEmail: e.target.value })} required />
+
+            <div style={s.formSectionLabel}>BILLING</div>
+            <label style={s.checkboxRow}>
+              <input
+                type="checkbox"
+                checked={form.isComped}
+                onChange={(e) => setForm({ ...form, isComped: e.target.checked })}
+              />
+              Comp this account (no monthly charge)
+            </label>
+            {!form.isComped && (
+              <input
+                style={s.input}
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Custom price per seat ($, leave blank for the standard $35/seat)"
+                value={form.seatPriceDollars}
+                onChange={(e) => setForm({ ...form, seatPriceDollars: e.target.value })}
+              />
+            )}
+
+            <div style={s.formSectionLabel}>MODULE ACCESS</div>
+            <div style={s.entitlementGrid}>
+              {ENTITLEMENT_FIELDS.map((f) => (
+                <label key={f.key} style={s.checkboxRow}>
+                  <input
+                    type="checkbox"
+                    checked={!!form[f.key]}
+                    onChange={(e) => setForm({ ...form, [f.key]: e.target.checked })}
+                  />
+                  {f.label}
+                </label>
+              ))}
+            </div>
+
             <Button variant="primary" type="submit">Send Invitation</Button>
           </form>
         </Card>
@@ -225,6 +273,9 @@ const s = {
   formCard: { marginBottom: 16 },
   form: { display: 'flex', flexDirection: 'column', gap: 10 },
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },
+  formSectionLabel: { color: 'var(--text-muted)', fontSize: 11, letterSpacing: 1, fontWeight: 700, marginTop: 6 },
+  checkboxRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-secondary)' },
+  entitlementGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 },
   status: { color: 'var(--accent)', marginBottom: 16, fontSize: 13 },
   linkBox: { color: 'var(--text-secondary)', fontSize: 13, marginBottom: 16, background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 12 },
   link: { color: 'var(--accent)', wordBreak: 'break-all' },

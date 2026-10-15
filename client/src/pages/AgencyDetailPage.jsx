@@ -6,6 +6,7 @@ import { resolveDateRange } from '../lib/dateRange';
 import { downloadCsv } from '../lib/downloadCsv';
 import { emailStatusMessage, lastEmailStatusInfo, lastEmailDeliveryInfo } from '../lib/emailStatus';
 import AgencySettingsModal from './AgencySettingsModal';
+import { ENTITLEMENT_FIELDS } from '../lib/entitlementFields';
 
 const ACTIVITY_PERIODS = [
   { key: 'month', label: 'This month', from: () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); } },
@@ -32,15 +33,6 @@ const PURGE_BLOCKER_LABELS = {
   announcementsCreated: 'announcements they sent',
   invitationsSent: 'invitations they sent to others',
 };
-
-const ENTITLEMENT_FIELDS = [
-  { key: 'crmEnabled', label: 'CRM' },
-  { key: 'transfersEnabled', label: 'Yield Transfers' },
-  { key: 'coachingEnabled', label: 'Sales Studio (unlocked)' },
-  { key: 'salesStudioGateEnabled', label: 'Sales Studio gate enforced (off = always open)' },
-  { key: 'breakRoomEnabled', label: 'Break Room Arcade' },
-  { key: 'hrEnabled', label: 'Backstage HR' },
-];
 
 export default function AgencyDetailPage() {
   const { agencyId } = useParams();

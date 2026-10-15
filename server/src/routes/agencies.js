@@ -101,7 +101,21 @@ const createAgencySchema = z.object({
   ownerEmail: z.string().email(),
   timezone: z.string().default('America/New_York'),
   products: z.array(z.string()).optional().default([]),
+  // Optional billing + module setup at invite time, all additive — leaving
+  // every one of these out behaves byte-identical to before: no
+  // AgencySubscription is created, and every entitlement falls back to the
+  // Agency schema's own defaults.
+  seatPriceCents: z.number().int().min(0).optional(),
+  isComped: z.boolean().optional().default(false),
+  crmEnabled: z.boolean().optional(),
+  transfersEnabled: z.boolean().optional(),
+  coachingEnabled: z.boolean().optional(),
+  salesStudioGateEnabled: z.boolean().optional(),
+  breakRoomEnabled: z.boolean().optional(),
+  hrEnabled: z.boolean().optional(),
 });
+
+const ENTITLEMENT_KEYS = ['crmEnabled', 'transfersEnabled', 'coachingEnabled', 'salesStudioGateEnabled', 'breakRoomEnabled', 'hrEnabled'];
 
 // Platform Owner only: invite a brand-new agency + its owner in one atomic transaction.
 router.post('/', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
@@ -117,13 +131,19 @@ router.post('/', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
       return res.status(409).json({ success: false, error: 'EMAIL_IN_USE', message: 'That email is already registered.' });
     }
 
-    const { agency, invitation, rawToken } = await prisma.$transaction(async (tx) => {
+    const entitlementOverrides = {};
+    for (const key of ENTITLEMENT_KEYS) {
+      if (parsed.data[key] !== undefined) entitlementOverrides[key] = parsed.data[key];
+    }
+
+    const { agency, invitation, rawToken, subscription } = await prisma.$transaction(async (tx) => {
       const agency = await tx.agency.create({
         data: {
           name: parsed.data.name,
           timezone: parsed.data.timezone,
           products: parsed.data.products,
           status: 'INVITED',
+          ...entitlementOverrides,
         },
       });
       const owner = await tx.user.create({
@@ -148,7 +168,36 @@ router.post('/', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
           expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         },
       });
-      return { agency, invitation, rawToken };
+
+      // Billing setup at invite time — fully optional, manual/admin-mode
+      // only (same Stripe-free path as POST /billing/agencies/:id/subscription),
+      // never a self-serve Stripe call. Comped takes precedence over any
+      // seat price given alongside it.
+      let subscription = null;
+      if (parsed.data.isComped) {
+        const compedPlan = (await tx.plan.findFirst({ where: { name: 'Comped' } }))
+          || (await tx.plan.create({ data: { name: 'Comped', priceCents: 0, perSeat: false, isActive: true } }));
+        subscription = await tx.agencySubscription.create({
+          data: { agencyId: agency.id, planId: compedPlan.id, status: 'ACTIVE', assignedById: req.user.id },
+        });
+      } else if (parsed.data.seatPriceCents !== undefined) {
+        const customPlan = await tx.plan.create({
+          data: {
+            name: `${agency.name} — Custom Seat Plan`,
+            priceCents: parsed.data.seatPriceCents,
+            perSeat: true,
+            isActive: true,
+            crmEnabled: entitlementOverrides.crmEnabled ?? true,
+            transfersEnabled: entitlementOverrides.transfersEnabled ?? false,
+            coachingEnabled: entitlementOverrides.coachingEnabled ?? false,
+          },
+        });
+        subscription = await tx.agencySubscription.create({
+          data: { agencyId: agency.id, planId: customPlan.id, status: 'ACTIVE', assignedById: req.user.id },
+        });
+      }
+
+      return { agency, invitation, rawToken, subscription };
     });
 
     await recordAudit({
@@ -158,7 +207,7 @@ router.post('/', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
       action: 'agency.created',
       entityType: 'Agency',
       entityId: agency.id,
-      after: agency,
+      after: { ...agency, subscription },
       correlationId: req.correlationId,
     });
 
@@ -173,6 +222,7 @@ router.post('/', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
     return res.status(201).json({
       success: true,
       agency,
+      subscription,
       invitation: {
         id: invitation.id,
         expiresAt: invitation.expiresAt,
