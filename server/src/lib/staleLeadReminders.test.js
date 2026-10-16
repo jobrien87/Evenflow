@@ -6,7 +6,7 @@
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { prisma } = require('./db');
-const { checkStaleLeads, STALE_HOURS } = require('./staleLeadReminders');
+const { checkStaleLeads, DEFAULT_STALE_HOURS } = require('./staleLeadReminders');
 
 const suffix = Date.now();
 let agencyId;
@@ -16,7 +16,7 @@ let staleLeadId;
 let notedLeadId;
 let freshLeadId;
 
-const past = new Date(Date.now() - (STALE_HOURS + 1) * 60 * 60 * 1000);
+const past = new Date(Date.now() - (DEFAULT_STALE_HOURS + 1) * 60 * 60 * 1000);
 
 before(async () => {
   const agency = await prisma.agency.create({ data: { name: `Test Agency ${suffix}` } });
@@ -84,6 +84,29 @@ test('checkStaleLeads notifies the assigned producer only for the genuinely stal
 
   const updatedStaleLead = await prisma.lead.findUnique({ where: { id: staleLeadId } });
   assert.ok(updatedStaleLead.lastReminderSentAt, 'lastReminderSentAt must be set after a reminder is sent');
+});
+
+test('a configured Agency.staleLeadHours is honored over the default — a lead not yet past the agency\'s own longer threshold is not reminded', async () => {
+  const agency = await prisma.agency.create({ data: { name: `Stale Configured Agency ${suffix}`, staleLeadHours: 48 } });
+  const producer = await prisma.user.create({
+    data: { email: `producer-stale-configured-${suffix}@test.local`, firstName: 'Test', lastName: 'Configured', role: 'PRODUCER', status: 'ACTIVE', agencyId: agency.id },
+  });
+  const customer = await prisma.customer.create({ data: { firstName: 'Configured', lastName: 'Stale' } });
+  // Past the DEFAULT_STALE_HOURS (4) but not past this agency's own 48h threshold.
+  const assignedAt = new Date(Date.now() - 10 * 60 * 60 * 1000);
+  const lead = await prisma.lead.create({
+    data: { agencyId: agency.id, customerId: customer.id, status: 'NEW', assignedToId: producer.id, assignedAt, receivedAt: assignedAt },
+  });
+
+  await checkStaleLeads();
+  const notification = await prisma.notification.findFirst({ where: { relatedEntityId: lead.id, type: 'lead.stale' } });
+  assert.equal(notification, null, 'not yet past the agency\'s own 48-hour threshold, so it must not be reminded');
+
+  await prisma.notification.deleteMany({ where: { userId: producer.id } });
+  await prisma.lead.deleteMany({ where: { id: lead.id } });
+  await prisma.customer.delete({ where: { id: customer.id } });
+  await prisma.user.delete({ where: { id: producer.id } });
+  await prisma.agency.delete({ where: { id: agency.id } });
 });
 
 test('checkStaleLeads does not re-notify the same lead again within the staleness window', async () => {

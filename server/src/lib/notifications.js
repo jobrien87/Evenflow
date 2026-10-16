@@ -24,6 +24,7 @@ async function notifyUser({ userId, agencyId, type, severity = 'INFO', title, bo
   // behavior, including the recipient's email preference.
   const inAppOnly = type === 'lead.stale'
     || type === 'lead.first_attempt_overdue'
+    || type === 'lead.follow_up_due'
     || (type === 'chat.message' && relatedEntityType === 'AGENCY');
   const emailEnabled = !inAppOnly && (!pref || pref.emailEnabled);
   if (emailEnabled && isConfigured()) {

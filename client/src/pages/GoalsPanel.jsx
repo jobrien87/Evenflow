@@ -3,8 +3,18 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { EdSuggestionBox } from '../ui';
 import { fireCelebration } from '../lib/celebrations';
+import { money, centsToDollarInput, dollarsToCents } from '../lib/format';
 
 const METRICS = ['sales', 'quotes', 'calls', 'contacts', 'premium_cents', 'cross_sells', 'winbacks', 'transfers'];
+// The one metric whose targetValue/actual are dollar-denominated (stored
+// as integer cents) rather than a plain count — everywhere a number for
+// this metric is entered or displayed must go through the dollar<->cents
+// conversion below, never a raw integer.
+const isMoneyMetric = (metric) => metric === 'premium_cents';
+function formatMetricValue(metric, value) {
+  if (value === null || value === undefined) return null;
+  return isMoneyMetric(metric) ? money(value) : value;
+}
 
 function formatUserName(user) {
   if (!user) return 'Producer';
@@ -16,7 +26,7 @@ function formatUserName(user) {
 // marker for where the current pace projects landing by period end. The
 // marker is clamped to the visible track even when the projection exceeds
 // the goal — the exact number is always also in the caption text below.
-function PaceBar({ actual, target, pace }) {
+function PaceBar({ actual, target, pace, metric }) {
   const actualPct = Math.max(0, Math.min(100, target > 0 ? ((actual ?? 0) / target) * 100 : 0));
   const projectedPct = pace && pace.projectedValue != null && target > 0
     ? Math.max(0, Math.min(100, (pace.projectedValue / target) * 100))
@@ -27,20 +37,20 @@ function PaceBar({ actual, target, pace }) {
       {projectedPct !== null && (
         <div
           style={{ ...s.paceMarker, left: `${projectedPct}%` }}
-          title={`On pace for ${pace.projectedValue} (${pace.projectedPercent}%) by period end`}
+          title={`On pace for ${formatMetricValue(metric, pace.projectedValue)} (${pace.projectedPercent}%) by period end`}
         />
       )}
     </div>
   );
 }
 
-function paceCaption(pace) {
+function paceCaption(pace, metric) {
   if (!pace) return null;
   if (pace.workingDaysElapsed <= 0) {
     return 'Not enough elapsed working days yet to project a pace.';
   }
   const word = pace.onPace === true ? 'On pace to hit goal' : pace.onPace === false ? 'Off pace to hit goal' : 'Not on pace to hit goal at this rate';
-  return `${word} — on pace for ${pace.projectedValue} (${pace.projectedPercent}%) by period end · ${pace.workingDaysElapsed} of ${pace.workingDaysTotal} working days elapsed (Mon–Fri, ${pace.timeZone})`;
+  return `${word} — on pace for ${formatMetricValue(metric, pace.projectedValue)} (${pace.projectedPercent}%) by period end · ${pace.workingDaysElapsed} of ${pace.workingDaysTotal} working days elapsed (Mon–Fri, ${pace.timeZone})`;
 }
 
 export default function GoalsPanel() {
@@ -58,7 +68,7 @@ export default function GoalsPanel() {
   const [aiBusy, setAiBusy] = useState(false);
   const [aiNote, setAiNote] = useState('');
   const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState({ targetValue: '', periodStart: '', periodEnd: '' });
+  const [editForm, setEditForm] = useState({ metric: 'sales', targetValue: '', periodStart: '', periodEnd: '' });
 
   useEffect(() => {
     load();
@@ -115,7 +125,7 @@ export default function GoalsPanel() {
       setForm({
         userId: d.userId || '',
         metric: d.metric,
-        targetValue: String(d.targetValue),
+        targetValue: isMoneyMetric(d.metric) ? centsToDollarInput(d.targetValue) : String(d.targetValue),
         periodType: d.periodType,
         periodStart: d.periodStart.slice(0, 10),
         periodEnd: d.periodEnd.slice(0, 10),
@@ -143,7 +153,7 @@ export default function GoalsPanel() {
       await api.createGoal({
         userId: form.userId || undefined,
         metric: form.metric,
-        targetValue: parseInt(form.targetValue, 10),
+        targetValue: isMoneyMetric(form.metric) ? dollarsToCents(form.targetValue) : parseInt(form.targetValue, 10),
         periodType: form.periodType,
         periodStart: new Date(form.periodStart).toISOString(),
         periodEnd: new Date(form.periodEnd).toISOString(),
@@ -166,7 +176,8 @@ export default function GoalsPanel() {
   function startEdit(g) {
     setEditingId(g.id);
     setEditForm({
-      targetValue: String(g.targetValue),
+      metric: g.metric,
+      targetValue: isMoneyMetric(g.metric) ? centsToDollarInput(g.targetValue) : String(g.targetValue),
       periodStart: new Date(g.periodStart).toISOString().slice(0, 10),
       periodEnd: new Date(g.periodEnd).toISOString().slice(0, 10),
     });
@@ -174,7 +185,7 @@ export default function GoalsPanel() {
 
   async function saveEdit() {
     await api.updateGoal(editingId, {
-      targetValue: parseInt(editForm.targetValue, 10),
+      targetValue: isMoneyMetric(editForm.metric) ? dollarsToCents(editForm.targetValue) : parseInt(editForm.targetValue, 10),
       periodStart: new Date(editForm.periodStart).toISOString(),
       periodEnd: new Date(editForm.periodEnd).toISOString(),
     });
@@ -236,7 +247,16 @@ export default function GoalsPanel() {
           <select style={s.input} value={form.metric} onChange={(e) => setForm({ ...form, metric: e.target.value })}>
             {METRICS.map((m) => <option key={m} value={m}>{m.replace('_', ' ')}</option>)}
           </select>
-          <input style={s.input} type="number" min="1" placeholder="Target value" value={form.targetValue} onChange={(e) => setForm({ ...form, targetValue: e.target.value })} required />
+          <input
+            style={s.input}
+            type="number"
+            min={isMoneyMetric(form.metric) ? '0.01' : '1'}
+            step={isMoneyMetric(form.metric) ? '0.01' : '1'}
+            placeholder={isMoneyMetric(form.metric) ? 'Target value ($)' : 'Target value'}
+            value={form.targetValue}
+            onChange={(e) => setForm({ ...form, targetValue: e.target.value })}
+            required
+          />
           <select style={s.input} value={form.periodType} onChange={(e) => setForm({ ...form, periodType: e.target.value })}>
             <option value="monthly">Monthly</option>
             <option value="weekly">Weekly</option>
@@ -265,11 +285,11 @@ export default function GoalsPanel() {
               </div>
               <div style={s.progressWrap}>
                 <div style={s.progressLabel}>
-                  <span>{t.totalActual} / {t.totalTarget}</span>
+                  <span>{formatMetricValue(t.metric, t.totalActual)} / {formatMetricValue(t.metric, t.totalTarget)}</span>
                   <span>{t.totalPercent === null ? '—' : `${t.totalPercent}%`}</span>
                 </div>
-                <PaceBar actual={t.totalActual} target={t.totalTarget} pace={t.pace} />
-                {t.pace && <div style={s.paceCaption}>{paceCaption(t.pace)}</div>}
+                <PaceBar actual={t.totalActual} target={t.totalTarget} pace={t.pace} metric={t.metric} />
+                {t.pace && <div style={s.paceCaption}>{paceCaption(t.pace, t.metric)}</div>}
               </div>
             </div>
           ))}
@@ -293,7 +313,14 @@ export default function GoalsPanel() {
 
           {canManage && editingId === g.id ? (
             <div style={s.editRow}>
-              <input style={s.input} type="number" min="1" value={editForm.targetValue} onChange={(e) => setEditForm({ ...editForm, targetValue: e.target.value })} />
+              <input
+                style={s.input}
+                type="number"
+                min={isMoneyMetric(editForm.metric) ? '0.01' : '1'}
+                step={isMoneyMetric(editForm.metric) ? '0.01' : '1'}
+                value={editForm.targetValue}
+                onChange={(e) => setEditForm({ ...editForm, targetValue: e.target.value })}
+              />
               <input style={s.input} type="date" value={editForm.periodStart} onChange={(e) => setEditForm({ ...editForm, periodStart: e.target.value })} />
               <input style={s.input} type="date" value={editForm.periodEnd} onChange={(e) => setEditForm({ ...editForm, periodEnd: e.target.value })} />
               <button style={s.smallButton} onClick={saveEdit}>SAVE</button>
@@ -302,11 +329,11 @@ export default function GoalsPanel() {
           ) : (
             <div style={s.progressWrap} data-tour="goals-pace-bar">
               <div style={s.progressLabel}>
-                <span>{g.actual === null ? 'No data yet' : `${g.actual} / ${g.targetValue}`}</span>
+                <span>{g.actual === null ? 'No data yet' : `${formatMetricValue(g.metric, g.actual)} / ${formatMetricValue(g.metric, g.targetValue)}`}</span>
                 <span>{g.progressPercent === null ? '—' : `${g.progressPercent}%`}</span>
               </div>
-              <PaceBar actual={g.actual} target={g.targetValue} pace={g.pace} />
-              {g.pace && <div style={s.paceCaption}>{paceCaption(g.pace)}</div>}
+              <PaceBar actual={g.actual} target={g.targetValue} pace={g.pace} metric={g.metric} />
+              {g.pace && <div style={s.paceCaption}>{paceCaption(g.pace, g.metric)}</div>}
             </div>
           )}
         </div>

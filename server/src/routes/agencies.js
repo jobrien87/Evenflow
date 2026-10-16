@@ -353,7 +353,16 @@ router.get('/:agencyId/activity', async (req, res, next) => {
   }
 });
 
-const LEAD_TYPES = ['TRANSFER', 'REFERRAL', 'PAID_AD', 'META_AD', 'INTERNET', 'DIRECT_MAIL', 'MANUAL', 'WINBACK', 'CROSS_SELL'];
+// Kept in sync with the real LeadType/LeadStatus enums (schema.prisma) —
+// previously missing GOOGLE_AD/AI_APPOINTMENT here, which meant the Lead
+// Priority settings UI's own default typeRank (which does include them)
+// could never be saved unmodified. Fixed as part of the agency-
+// customization round.
+const LEAD_TYPES = ['TRANSFER', 'REFERRAL', 'PAID_AD', 'META_AD', 'GOOGLE_AD', 'INTERNET', 'DIRECT_MAIL', 'MANUAL', 'WINBACK', 'CROSS_SELL', 'AI_APPOINTMENT'];
+const LEAD_STATUSES = [
+  'NEW', 'CONTACTED', 'LEFT_VM', 'APPOINTMENT', 'QUOTED', 'QUOTED_HOT', 'FOLLOW_UP',
+  'SOLD', 'LOST', 'NOT_INTERESTED', 'BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT', 'INELIGIBLE', 'ARCHIVED',
+];
 const priorityRulesSchema = z.object({
   typeRank: z.array(z.enum(LEAD_TYPES)).min(1).optional(),
   statusRules: z.record(z.object({
@@ -362,12 +371,25 @@ const priorityRulesSchema = z.object({
   })).optional(),
 }).nullable();
 
+// { [LeadStatus]: afterDays } — see lib/leadFollowUp.js. Distinct from
+// priorityRulesSchema.statusRules above (score-ordering only, never
+// schedules anything real).
+const followUpRulesSchema = z.record(z.enum(LEAD_STATUSES), z.number().int().min(1).max(365)).nullable();
+
 const updateAgencySchema = z.object({
   name: z.string().min(2).optional(),
   timezone: z.string().optional(),
   officeHours: z.record(z.string()).nullable().optional(),
   products: z.array(z.string()).optional(),
   priorityRules: priorityRulesSchema.optional(),
+  followUpRules: followUpRulesSchema.optional(),
+  // Null = fall back to this app's existing env-var/hardcoded default —
+  // see each field's schema.prisma comment for the exact file it drives.
+  firstAttemptSlaMinutes: z.number().int().positive().nullable().optional(),
+  staleLeadHours: z.number().int().positive().nullable().optional(),
+  saleDuplicateWindowDays: z.number().int().min(0).max(90).optional(),
+  requireDispositionNoteStatuses: z.array(z.enum(LEAD_STATUSES)).optional(),
+  coachingThreshold: z.number().int().min(0).max(100).optional(),
   // Company contact info — collected during Record Store setup when
   // missing (master spec §6) and reused for any future Boberdoo action.
   address: z.string().trim().min(1).max(200).optional(),

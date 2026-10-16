@@ -57,6 +57,39 @@ router.post('/types', requireHrRole('HR_ADMIN'), async (req, res, next) => {
   }
 });
 
+const updateLeaveTypeSchema = z.object({
+  name: z.string().trim().min(1).max(80).optional(),
+  isPaid: z.boolean().optional(),
+  isProtected: z.boolean().optional(),
+  // Deactivating a leave type doesn't delete it or its history — existing
+  // policies/ledger entries/requests referencing it are untouched, and it
+  // simply stops being offered for new policies/requests (the same
+  // soft-disable convention `isActive` already follows on every other
+  // model in this app).
+  isActive: z.boolean().optional(),
+});
+
+router.patch('/types/:id', requireHrRole('HR_ADMIN'), async (req, res, next) => {
+  try {
+    const parsed = updateLeaveTypeSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+    const existing = await prisma.hrLeaveType.findUnique({ where: { id: req.params.id } });
+    if (!existing || existing.agencyId !== req.hrAgencyId) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+
+    const leaveType = await prisma.hrLeaveType.update({ where: { id: existing.id }, data: parsed.data });
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: req.hrAgencyId,
+      action: 'hr.leave_type_updated', entityType: 'HrLeaveType', entityId: leaveType.id,
+      before: existing, after: leaveType, correlationId: req.correlationId,
+    });
+    return res.json({ success: true, leaveType });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ---- Leave policies (HR_ADMIN config) ----
 
 router.get('/policies', requireHrRole('HR_ADMIN', 'HR_AUDITOR'), async (req, res, next) => {
@@ -77,6 +110,9 @@ const createPolicySchema = z.object({
   name: z.string().trim().min(1).max(120),
   accrualMethod: z.enum(['FRONT_LOADED', 'PER_PAY_PERIOD', 'PER_HOUR_WORKED']),
   accrualAmountMinutes: z.number().int().positive().optional(),
+  // PER_HOUR_WORKED only — see the schema's own comment on this field.
+  // Omitted/undefined falls through to the column default (60).
+  accrualWorkedMinutesDenominator: z.number().int().positive().optional(),
   annualCapMinutes: z.number().int().positive().optional(),
   carryoverCapMinutes: z.number().int().min(0).optional(),
   waitingPeriodDays: z.number().int().min(0).optional(),
@@ -99,6 +135,46 @@ router.post('/policies', requireHrRole('HR_ADMIN'), async (req, res, next) => {
       after: policy, correlationId: req.correlationId,
     });
     return res.status(201).json({ success: true, policy });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const updatePolicySchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  accrualMethod: z.enum(['FRONT_LOADED', 'PER_PAY_PERIOD', 'PER_HOUR_WORKED']).optional(),
+  accrualAmountMinutes: z.number().int().positive().optional(),
+  accrualWorkedMinutesDenominator: z.number().int().positive().optional(),
+  annualCapMinutes: z.number().int().positive().nullable().optional(),
+  carryoverCapMinutes: z.number().int().min(0).nullable().optional(),
+  waitingPeriodDays: z.number().int().min(0).optional(),
+  // Deactivate a policy by setting effectiveTo (reuses the policy's own
+  // existing effective-dating — the same "ended, not deleted" precedent
+  // HrLeavePolicyAssignment/TelemarketerAssignment already use — rather
+  // than a second isActive flag). Pass null to reopen an ended policy.
+  effectiveTo: z.coerce.date().nullable().optional(),
+});
+
+// leaveTypeId is deliberately not editable here — same reasoning as
+// HrLeaveRequest's own update route: changing which balance a policy
+// posts against would span two different ledgers for assignments
+// already running under it. Create a new policy and reassign instead.
+router.patch('/policies/:id', requireHrRole('HR_ADMIN'), async (req, res, next) => {
+  try {
+    const parsed = updatePolicySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+    const existing = await prisma.hrLeavePolicy.findUnique({ where: { id: req.params.id } });
+    if (!existing || existing.agencyId !== req.hrAgencyId) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+
+    const policy = await prisma.hrLeavePolicy.update({ where: { id: existing.id }, data: parsed.data, include: { leaveType: true } });
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: req.hrAgencyId,
+      action: 'hr.leave_policy_updated', entityType: 'HrLeavePolicy', entityId: policy.id,
+      before: existing, after: policy, correlationId: req.correlationId,
+    });
+    return res.json({ success: true, policy });
   } catch (err) {
     next(err);
   }

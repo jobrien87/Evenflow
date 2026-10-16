@@ -14,12 +14,15 @@ const MINUTE_MS = 60 * 1000;
 
 // A shift still open (no clockOutAt) longer than this is treated as
 // stale and flagged for human review — never silently closed, never
-// fabricated an end time.
+// fabricated an end time. This is the fallback used when an agency has
+// no HrSettings row yet (or HrSettings.staleOpenShiftHours is unset);
+// once a row exists, buildTimesheetForEmployee/detectMissedPunches both
+// read the real per-agency value instead.
 const STALE_OPEN_SHIFT_HOURS = 16;
 
-// Placeholder until Part C's real per-agency HrSettings field exists —
-// a plain scheduling heads-up, never a jurisdiction-aware payroll
-// overtime calculation.
+// Fallback used the same way, for HrSettings.weeklyOvertimeThresholdMinutes
+// — a plain scheduling/timesheet heads-up, never a jurisdiction-aware
+// payroll overtime calculation.
 const DEFAULT_WEEKLY_OVERTIME_THRESHOLD_MINUTES = 40 * 60;
 
 function minutesBetween(start, end) {
@@ -31,8 +34,11 @@ function sameCalendarDay(a, b) {
 }
 
 // Pure function: derive an array of segment objects from one
-// TimeClockEntry row. Never touches the database.
-function segmentsForEntry(entry, now) {
+// TimeClockEntry row. Never touches the database. staleOpenShiftHours
+// defaults to the module constant for callers (and existing tests) that
+// don't pass it explicitly — real callers thread the agency's own
+// HrSettings.staleOpenShiftHours through instead.
+function segmentsForEntry(entry, now, staleOpenShiftHours = STALE_OPEN_SHIFT_HOURS) {
   const { id, clockInAt, clockOutAt, lunchStartAt, lunchEndAt, breakStartAt, breakEndAt } = entry;
 
   // Ordering validation — if anything is inconsistent (a start after its
@@ -89,7 +95,7 @@ function segmentsForEntry(entry, now) {
       // open implausibly long — an in-progress "today" shift isn't a
       // problem, it's just not finished yet.
       const hoursOpen = (now.getTime() - startedAt.getTime()) / (60 * MINUTE_MS);
-      if (hoursOpen > STALE_OPEN_SHIFT_HOURS) {
+      if (hoursOpen > staleOpenShiftHours) {
         isException = true;
         exceptionReason = 'STILL_OPEN_PAST_EXPECTED_SHIFT_LENGTH';
       }
@@ -116,16 +122,21 @@ function segmentsForEntry(entry, now) {
 // timesheet from real TimeClockEntry rows in [periodStart, periodEnd).
 // Read-only: the only prisma call here is a findMany.
 async function buildTimesheetForEmployee({ employeeProfileId, userId, agencyId, periodStart, periodEnd, now = new Date() }) {
-  const entries = await prisma.timeClockEntry.findMany({
-    where: { userId, agencyId, clockInAt: { gte: periodStart, lt: periodEnd } },
-    orderBy: { clockInAt: 'asc' },
-  });
+  const [entries, settings] = await Promise.all([
+    prisma.timeClockEntry.findMany({
+      where: { userId, agencyId, clockInAt: { gte: periodStart, lt: periodEnd } },
+      orderBy: { clockInAt: 'asc' },
+    }),
+    prisma.hrSettings.findUnique({ where: { agencyId } }),
+  ]);
+  const staleOpenShiftHours = settings?.staleOpenShiftHours ?? STALE_OPEN_SHIFT_HOURS;
+  const weeklyOvertimeThresholdMinutes = settings?.weeklyOvertimeThresholdMinutes ?? DEFAULT_WEEKLY_OVERTIME_THRESHOLD_MINUTES;
 
-  const segments = entries.flatMap((entry) => segmentsForEntry(entry, now));
+  const segments = entries.flatMap((entry) => segmentsForEntry(entry, now, staleOpenShiftHours));
   const regularMinutes = segments
     .filter((s) => s.segmentType === 'WORK' && typeof s.minutes === 'number')
     .reduce((sum, s) => sum + s.minutes, 0);
-  const overtimeMinutes = Math.max(0, regularMinutes - DEFAULT_WEEKLY_OVERTIME_THRESHOLD_MINUTES);
+  const overtimeMinutes = Math.max(0, regularMinutes - weeklyOvertimeThresholdMinutes);
 
   return {
     employeeProfileId,

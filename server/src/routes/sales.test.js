@@ -242,6 +242,40 @@ test('different customers with the same carrier+policyType+saleDate are never fl
 // Genuine duplicate protection is retained: the SAME customer (name match
 // is case-insensitive) with the same carrier+policyType+saleDate is still
 // caught, and confirmDuplicate still lets a real re-entry through.
+test('Agency.saleDuplicateWindowDays configures the HistoricalRecord cross-check window instead of the hardcoded ±3 days', async () => {
+  const saleDate = new Date('2027-06-15T00:00:00Z');
+  const sharedLastName = `WindowConfig${Date.now()}`;
+  // 5 days before saleDate -- outside the default ±3 window, inside a
+  // configured ±7 window.
+  const importBatch = await prisma.leadImportBatch.create({
+    data: { agencyId, uploadedById: ownerId, isHistorical: true, totalRows: 1, created: 1, skipped: 0 },
+  });
+  const historicalRecord = await prisma.historicalRecord.create({
+    data: { agencyId, importBatchId: importBatch.id, firstName: 'Window', lastName: sharedLastName, product: 'AUTO', premiumCents: 10000, isSold: true, recordDate: new Date('2027-06-10T00:00:00Z'), sourceSystem: 'OTHER' },
+  });
+
+  try {
+    const checkPayload = { carrier: 'Allstate', policyType: 'Auto-Standard', saleDate: saleDate.toISOString(), firstName: 'Window', lastName: sharedLastName };
+    const defaultRes = await fetch(`${baseUrl}/api/sales/check-duplicate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie }, body: JSON.stringify(checkPayload),
+    });
+    const defaultBody = await defaultRes.json();
+    assert.equal(defaultBody.historicalRecords.length, 0, 'a 5-day-old record is outside the default ±3-day window');
+
+    await prisma.agency.update({ where: { id: agencyId }, data: { saleDuplicateWindowDays: 7 } });
+    const widenedRes = await fetch(`${baseUrl}/api/sales/check-duplicate`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie }, body: JSON.stringify(checkPayload),
+    });
+    const widenedBody = await widenedRes.json();
+    assert.equal(widenedBody.historicalRecords.length, 1, 'the same 5-day-old record is now inside the configured ±7-day window');
+    assert.equal(widenedBody.historicalRecords[0].id, historicalRecord.id);
+  } finally {
+    await prisma.agency.update({ where: { id: agencyId }, data: { saleDuplicateWindowDays: 3 } });
+    await prisma.historicalRecord.delete({ where: { id: historicalRecord.id } });
+    await prisma.leadImportBatch.delete({ where: { id: importBatch.id } });
+  }
+});
+
 test('a genuine duplicate (same customer, carrier+policyType+saleDate) is flagged and blocked without confirmDuplicate', async () => {
   const saleDate = new Date().toISOString();
   const sharedLastName = `DupCustomer${Date.now()}`;

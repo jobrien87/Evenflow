@@ -53,10 +53,15 @@ async function findPossibleDuplicates({ agencyId, excludeSaleId, leadId, policyN
     take: 10,
   });
 
+  // Agency.saleDuplicateWindowDays configures how wide a net the
+  // HistoricalRecord cross-check casts around saleDate — defaults to the
+  // original hardcoded ±3 days when an agency hasn't set its own value.
+  const agency = await prisma.agency.findUnique({ where: { id: agencyId }, select: { saleDuplicateWindowDays: true } });
+  const windowDays = agency?.saleDuplicateWindowDays ?? 3;
   const from = new Date(saleDate);
-  from.setUTCDate(from.getUTCDate() - 3);
+  from.setUTCDate(from.getUTCDate() - windowDays);
   const to = new Date(saleDate);
-  to.setUTCDate(to.getUTCDate() + 3);
+  to.setUTCDate(to.getUTCDate() + windowDays);
   const historicalMatches = await prisma.historicalRecord.findMany({
     where: {
       agencyId,

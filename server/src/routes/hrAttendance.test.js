@@ -51,6 +51,7 @@ after(async () => {
   await prisma.hrAttendanceException.deleteMany({ where: { agencyId: { in: [agencyId, otherAgencyId] } } });
   await prisma.hrTimesheetSegment.deleteMany({ where: { timesheet: { agencyId: { in: [agencyId, otherAgencyId] } } } });
   await prisma.hrTimesheet.deleteMany({ where: { agencyId: { in: [agencyId, otherAgencyId] } } });
+  await prisma.hrSettings.deleteMany({ where: { agencyId: { in: [agencyId, otherAgencyId] } } });
   await prisma.timeClockEntry.deleteMany({ where: { agencyId: { in: [agencyId, otherAgencyId] } } });
   await prisma.hrEmployeeProfile.deleteMany({ where: { agencyId: { in: [agencyId, otherAgencyId] } } });
   await prisma.session.deleteMany({ where: { user: { agencyId: { in: [agencyId, otherAgencyId] } } } });
@@ -182,4 +183,33 @@ test('attendance-exception detection: a stale open shift creates exactly one MIS
   assert.ok(reviewed.reviewedAt);
 
   await prisma.timeClockEntry.deleteMany({ where: { agencyId, userId: producerId } });
+});
+
+test('detectMissedPunches reads the agency\'s real HrSettings.staleOpenShiftHours instead of the hardcoded 16h default', async () => {
+  // Scoped to status OPEN, not just exceptionType — an earlier test in
+  // this file leaves behind its own RESOLVED_EXCUSED MISSED_PUNCH row for
+  // this same employeeProfileId, which must not be mistaken for a fresh
+  // detection here.
+  await prisma.hrAttendanceException.deleteMany({ where: { employeeProfileId, exceptionType: 'MISSED_PUNCH', status: 'OPEN' } });
+  const clockInAt = new Date(Date.now() - 4 * 60 * 60 * 1000); // 4 hours ago — not stale under the default 16h
+  await prisma.timeClockEntry.create({ data: { userId: producerId, agencyId, clockInAt } });
+
+  await detectMissedPunches();
+  let exceptions = await prisma.hrAttendanceException.findMany({ where: { employeeProfileId, exceptionType: 'MISSED_PUNCH', status: 'OPEN' } });
+  assert.equal(exceptions.length, 0, 'a 4-hour-open shift is not stale under the default 16h threshold');
+
+  await prisma.hrSettings.upsert({
+    where: { agencyId },
+    create: { agencyId, staleOpenShiftHours: 2 },
+    update: { staleOpenShiftHours: 2 },
+  });
+  try {
+    await detectMissedPunches();
+    exceptions = await prisma.hrAttendanceException.findMany({ where: { employeeProfileId, exceptionType: 'MISSED_PUNCH', status: 'OPEN' } });
+    assert.equal(exceptions.length, 1, 'the same 4-hour-open shift IS stale once the agency configures a 2h threshold');
+  } finally {
+    await prisma.hrSettings.deleteMany({ where: { agencyId } });
+    await prisma.hrAttendanceException.deleteMany({ where: { employeeProfileId, exceptionType: 'MISSED_PUNCH', status: 'OPEN' } });
+    await prisma.timeClockEntry.deleteMany({ where: { agencyId, userId: producerId } });
+  }
 });

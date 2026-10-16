@@ -6,6 +6,7 @@ const { prisma } = require('../lib/db');
 const { requireAuth, requireRole, scopeAgencyId } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { scoreLead } = require('../lib/priority');
+const { computeFollowUpAt } = require('../lib/leadFollowUp');
 const { deriveLeadType, BULK_UPLOAD_CATEGORIES, applyBulkUploadCategory } = require('../lib/leadType');
 const { normalizePhone, normalizeEmail } = require('../lib/normalize');
 const { PRODUCTS, PRODUCT_LABELS } = require('../lib/products');
@@ -1848,9 +1849,27 @@ router.post('/:leadId/disposition', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER'
     const access = authorizeLeadAccess(req, lead, { write: true });
     if (!access.ok) return res.status(access.status).json({ success: false, error: access.error });
 
+    const agencyRow = await prisma.agency.findUnique({
+      where: { id: lead.agencyId },
+      select: { priorityRules: true, followUpRules: true, requireDispositionNoteStatuses: true },
+    });
+
+    // Agency-configurable: some agencies require a real note before a
+    // disposition to specific statuses is accepted at all (e.g. LOST,
+    // NOT_INTERESTED) — empty list (the default) means never required,
+    // today's exact behavior.
+    if (agencyRow?.requireDispositionNoteStatuses?.includes(parsed.data.status) && !parsed.data.note?.trim()) {
+      return res.status(400).json({ success: false, error: 'NOTE_REQUIRED', message: `A note is required when dispositioning a lead to ${parsed.data.status}.` });
+    }
+
     const fromStatus = lead.status;
     const now = new Date();
     const patch = { status: parsed.data.status };
+    // Agency-configurable disposition-based follow-up (lib/leadFollowUp.js)
+    // — a new disposition always supersedes whatever follow-up was
+    // previously pending (including clearing it to null when the new
+    // status has no configured rule).
+    patch.followUpAt = computeFollowUpAt(parsed.data.status, agencyRow?.followUpRules, now);
     if (fromStatus === 'NEW') {
       if (!lead.firstAttemptAt && parsed.data.status === 'CONTACTED') {
         patch.firstAttemptAt = now;
@@ -1895,7 +1914,6 @@ router.post('/:leadId/disposition', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER'
         : []),
     ]);
 
-    const agencyRow = await prisma.agency.findUnique({ where: { id: lead.agencyId }, select: { priorityRules: true } });
     const { priorityScore, priorityReason } = scoreLead(updated, agencyRow?.priorityRules);
     await prisma.lead.update({ where: { id: lead.id }, data: { priorityScore, priorityReason } });
 

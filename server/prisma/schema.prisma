@@ -548,6 +548,35 @@ model Agency {
   // { [LeadStatus]: { afterDays: number, action: 'BUMP_UP' | 'BUMP_DOWN' |
   // 'DROP_OFF' } } }. Null = lib/priority.js's seeded default applies.
   priorityRules          Json?
+  // Disposition-based follow-up rules: { [LeadStatus]: afterDays }. When a
+  // lead is dispositioned into one of these statuses, lib/leadFollowUp.js
+  // schedules a real Follow-Up Task afterDays later (see Lead.followUpAt).
+  // A status with no entry here never schedules anything. Null/empty =
+  // no agency-configured follow-up rules at all (today's exact behavior —
+  // nothing is auto-scheduled). Distinct from priorityRules.statusRules
+  // above, which only ever adjusts sort order and never schedules
+  // anything real.
+  followUpRules          Json?
+  // Null = fall back to the FIRST_ATTEMPT_SLA_MINUTES env var (or its own
+  // 30-minute default) in lib/firstAttemptSlaAlerts.js — same null-falls-
+  // back-to-default convention as priorityRules above.
+  firstAttemptSlaMinutes Int?
+  // Null = fall back to the STALE_LEAD_HOURS env var (or its own 4-hour
+  // default) in lib/staleLeadReminders.js.
+  staleLeadHours         Int?
+  // Window (in days, both directions) lib/sales.js's findPossibleDuplicates
+  // uses when cross-checking a new Closed Sale against existing
+  // HistoricalRecord rows by customer name. Matches today's hardcoded
+  // default exactly until an agency changes it.
+  saleDuplicateWindowDays Int     @default(3)
+  // Lead statuses that require a note before a disposition to that status
+  // is accepted (POST /:leadId/disposition). Empty = never required —
+  // today's exact behavior.
+  requireDispositionNoteStatuses String[] @default([])
+  // The score (0-100) below which a call-scoring category becomes a
+  // flagged "coaching opportunity" in lib/callScoring.js's
+  // computeCoachingBreakdown. Only meaningful when coachingEnabled.
+  coachingThreshold      Int     @default(75)
   crmEnabled             Boolean      @default(true)
   transfersEnabled       Boolean      @default(false)
   coachingEnabled        Boolean      @default(false)
@@ -732,6 +761,11 @@ model Office {
   // WHICH office in the legacy no-geo-match fallback, never the producer
   // within it.
   roundRobinCursor Int               @default(0)
+  // Default false, matching a prior fix: a selling AGENCY_MANAGER must not
+  // be silently enrolled into ordinary ROUND_ROBIN lead flow she never
+  // opted into. An agency that explicitly wants its office manager(s) in
+  // the round-robin pool can opt back in per office.
+  includeManagersInRoundRobin Boolean @default(false)
 
   users             User[]
   alphaAssignments  OfficeAlphaAssignment[]
@@ -957,6 +991,15 @@ model Lead {
   // than the general staleness reminder above, so it needs its own
   // re-notify guard rather than sharing lastReminderSentAt.
   firstAttemptSlaAlertSentAt DateTime?
+
+  // Set at disposition time from the agency's own configurable
+  // Agency.followUpRules (e.g. "LEFT_VM -> follow up again in 2 days") —
+  // see lib/leadFollowUp.js. Null = no pending auto-follow-up for this
+  // lead's current disposition. Cleared (set back to null) the moment the
+  // follow-up job actually creates the Follow-Up Task, and overwritten
+  // (to a new value, or back to null) by every subsequent disposition —
+  // a new disposition always supersedes a still-pending one.
+  followUpAt DateTime?
 
   // A telemarketer flags a lead as a live transfer (the caller is on the
   // line right now) at submission time — makes it claimable through the
@@ -3108,6 +3151,15 @@ model HrLeavePolicy {
   name                 String
   accrualMethod        String // FRONT_LOADED | PER_PAY_PERIOD | PER_HOUR_WORKED
   accrualAmountMinutes Int? // meaning depends on accrualMethod
+  // PER_HOUR_WORKED only: the worked-minutes denominator accrualAmountMinutes
+  // is earned per. Together they express an exact ratio — e.g. "0.5 hours
+  // (30 min) earned per 8 hours (480 min) worked" is accrualAmountMinutes:
+  // 30, accrualWorkedMinutesDenominator: 480 — with no rounding error,
+  // unlike trying to express that same ratio as a single minutes-per-hour
+  // rate. Unused by FRONT_LOADED/PER_PAY_PERIOD. Defaults to 60 (the old,
+  // implicit "per hour" denominator) so every pre-existing row keeps its
+  // exact prior behavior.
+  accrualWorkedMinutesDenominator Int @default(60)
   annualCapMinutes     Int?
   carryoverCapMinutes  Int?
   waitingPeriodDays    Int         @default(0)
@@ -3193,17 +3245,20 @@ enum HrLeaveTransactionType {
 
 // A single per-agency scheduling-heads-up threshold — explicitly NOT a
 // jurisdiction-aware payroll overtime calculation (that's the Payroll
-// phase, after legal/payroll review). Drives only the Part C scheduling
-// warning; HrTimesheet's own Part B overtimeMinutes field keeps using its
-// existing DEFAULT_WEEKLY_OVERTIME_THRESHOLD_MINUTES constant until a
-// future pass wires timesheets to this same setting, to avoid touching
-// Part B's already-shipped, already-tested lib/hrTimesheetBuilder.js in
-// this round.
+// phase, after legal/payroll review). Also drives lib/hrTimesheetBuilder.js's
+// real HrTimesheet.overtimeMinutes computation (wired to this field, not a
+// hardcoded constant, as of the agency-customization round).
 model HrSettings {
   id                             String   @id @default(uuid())
   agencyId                       String   @unique
   agency                         Agency   @relation(fields: [agencyId], references: [id])
   weeklyOvertimeThresholdMinutes Int      @default(2400)
+  // How long a TimeClockEntry can stay open before lib/hrTimesheetBuilder.js
+  // flags it as an exception (a likely forgot-to-clock-out) and
+  // jobs/hrAttendanceDetection.js raises a MISSED_PUNCH candidate. An
+  // agency with legitimate long/overnight shifts can raise this; default
+  // matches the module's own prior hardcoded constant exactly.
+  staleOpenShiftHours            Int      @default(16)
   createdAt                      DateTime @default(now())
   updatedAt                      DateTime @updatedAt
 }

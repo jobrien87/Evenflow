@@ -641,13 +641,17 @@ function SettingsTab({ roleGrants, agencyUsers, agencyId, canWrite, canManageGra
 
 function SchedulingSettingsCard({ canWrite }) {
   const [thresholdHours, setThresholdHours] = useState('');
+  const [staleHours, setStaleHours] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     api.hrSchedulingSettings()
-      .then((data) => setThresholdHours(String((data.settings?.weeklyOvertimeThresholdMinutes || 2400) / 60)))
+      .then((data) => {
+        setThresholdHours(String((data.settings?.weeklyOvertimeThresholdMinutes || 2400) / 60));
+        setStaleHours(String(data.settings?.staleOpenShiftHours ?? 16));
+      })
       .catch((err) => setError(err.data?.message || err.message || 'Could not load scheduling settings.'));
   }, []);
 
@@ -656,7 +660,10 @@ function SchedulingSettingsCard({ canWrite }) {
     setError('');
     setSaved(false);
     try {
-      await api.updateHrSchedulingSettings({ weeklyOvertimeThresholdMinutes: Math.round(Number(thresholdHours) * 60) });
+      await api.updateHrSchedulingSettings({
+        weeklyOvertimeThresholdMinutes: Math.round(Number(thresholdHours) * 60),
+        staleOpenShiftHours: Math.round(Number(staleHours)),
+      });
       setSaved(true);
     } catch (err) {
       setError(err.data?.message || err.message || 'Could not save this setting.');
@@ -667,19 +674,29 @@ function SchedulingSettingsCard({ canWrite }) {
 
   return (
     <Card>
-      <SectionHeader>SCHEDULING</SectionHeader>
+      <SectionHeader>SCHEDULING &amp; TIME CLOCK</SectionHeader>
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-        A plain weekly-hours heads-up used only to flag a shift that pushes someone over this threshold — not a jurisdiction-aware payroll overtime calculation.
+        A plain weekly-hours heads-up used only to flag a shift that pushes someone over this threshold — not a jurisdiction-aware payroll overtime calculation. The stale-shift threshold controls how long a forgotten clock-out can sit open before it's flagged for review.
       </div>
       {canWrite ? (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <label style={labelStyle}>Weekly Overtime Threshold (hours)</label>
-          <input type="number" min="0" step="1" value={thresholdHours} onChange={(e) => setThresholdHours(e.target.value)} style={{ ...inputStyle, width: 90 }} />
-          <Button size="sm" onClick={save} disabled={busy}>{busy ? 'SAVING…' : 'SAVE'}</Button>
-          {saved && <span style={{ color: 'var(--success, #4caf50)', fontSize: 12 }}>Saved.</span>}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <label style={labelStyle}>Weekly Overtime Threshold (hours)</label>
+            <input type="number" min="0" step="1" value={thresholdHours} onChange={(e) => setThresholdHours(e.target.value)} style={{ ...inputStyle, width: 90 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <label style={labelStyle}>Stale Open-Shift Threshold (hours)</label>
+            <input type="number" min="1" step="1" value={staleHours} onChange={(e) => setStaleHours(e.target.value)} style={{ ...inputStyle, width: 90 }} />
+          </div>
+          <div>
+            <Button size="sm" onClick={save} disabled={busy}>{busy ? 'SAVING…' : 'SAVE'}</Button>
+            {saved && <span style={{ color: 'var(--success, #4caf50)', fontSize: 12, marginLeft: 8 }}>Saved.</span>}
+          </div>
         </div>
       ) : (
-        <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Weekly Overtime Threshold: {thresholdHours || '—'} hours</div>
+        <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+          Weekly Overtime Threshold: {thresholdHours || '—'} hours · Stale Open-Shift Threshold: {staleHours || '—'} hours
+        </div>
       )}
       {error && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 8 }}>{error}</div>}
     </Card>
@@ -1205,7 +1222,9 @@ function LeavePoliciesTab({ employees, agencyId, canWrite }) {
   const [requests, setRequests] = useState([]);
   const [error, setError] = useState('');
   const [showTypeCreate, setShowTypeCreate] = useState(false);
+  const [editingType, setEditingType] = useState(null);
   const [showPolicyCreate, setShowPolicyCreate] = useState(false);
+  const [editingPolicy, setEditingPolicy] = useState(null);
   const [showAssign, setShowAssign] = useState(false);
 
   useEffect(() => {
@@ -1278,9 +1297,11 @@ function LeavePoliciesTab({ employees, agencyId, canWrite }) {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {leaveTypes.map((lt) => (
-              <div key={lt.id} style={{ fontSize: 13, color: 'var(--text-secondary)', display: 'flex', gap: 8, alignItems: 'center' }}>
+              <div key={lt.id} style={{ fontSize: 13, color: lt.isActive ? 'var(--text-secondary)' : 'var(--text-muted)', display: 'flex', gap: 8, alignItems: 'center' }}>
                 {lt.name} <Badge tone={lt.isPaid ? 'green' : 'neutral'}>{lt.isPaid ? 'PAID' : 'UNPAID'}</Badge>
                 {lt.isProtected && <Badge tone="lime">PROTECTED</Badge>}
+                {!lt.isActive && <Badge tone="neutral">INACTIVE</Badge>}
+                {canWrite && <Button size="sm" variant="secondary" onClick={() => setEditingType(lt)}>EDIT</Button>}
               </div>
             ))}
           </div>
@@ -1295,13 +1316,23 @@ function LeavePoliciesTab({ employees, agencyId, canWrite }) {
           <EmptyState description="No leave policies configured yet." />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {policies.map((p) => (
-              <div key={p.id} style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                {p.name} — {p.leaveType.name} · {p.accrualMethod}
-                {p.accrualAmountMinutes ? ` · ${minutesToHours(p.accrualAmountMinutes)}h/period` : ''}
-                {p.annualCapMinutes ? ` · cap ${minutesToHours(p.annualCapMinutes)}h/yr` : ''}
-              </div>
-            ))}
+            {policies.map((p) => {
+              const deactivated = p.effectiveTo && new Date(p.effectiveTo) <= new Date();
+              return (
+                <div key={p.id} style={{ fontSize: 13, color: deactivated ? 'var(--text-muted)' : 'var(--text-secondary)', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span>
+                    {p.name} — {p.leaveType.name} · {p.accrualMethod}
+                    {p.accrualMethod === 'PER_HOUR_WORKED' && p.accrualAmountMinutes
+                      ? ` · ${minutesToHours(p.accrualAmountMinutes)}h / ${minutesToHours(p.accrualWorkedMinutesDenominator || 60)}h worked`
+                      : p.accrualAmountMinutes ? ` · ${minutesToHours(p.accrualAmountMinutes)}h/period` : ''}
+                    {p.annualCapMinutes ? ` · cap ${minutesToHours(p.annualCapMinutes)}h/yr` : ''}
+                    {p.waitingPeriodDays > 0 ? ` · ${p.waitingPeriodDays}d waiting period` : ''}
+                  </span>
+                  {deactivated && <Badge tone="neutral">INACTIVE</Badge>}
+                  {canWrite && <Button size="sm" variant="secondary" onClick={() => setEditingPolicy(p)}>EDIT</Button>}
+                </div>
+              );
+            })}
           </div>
         )}
       </Card>
@@ -1309,8 +1340,14 @@ function LeavePoliciesTab({ employees, agencyId, canWrite }) {
       {showTypeCreate && canWrite && (
         <CreateLeaveTypeModal onClose={() => setShowTypeCreate(false)} onCreated={() => { setShowTypeCreate(false); load(); }} />
       )}
+      {editingType && canWrite && (
+        <CreateLeaveTypeModal leaveType={editingType} onClose={() => setEditingType(null)} onCreated={() => { setEditingType(null); load(); }} />
+      )}
       {showPolicyCreate && canWrite && (
         <CreateLeavePolicyModal leaveTypes={leaveTypes} onClose={() => setShowPolicyCreate(false)} onCreated={() => { setShowPolicyCreate(false); load(); }} />
+      )}
+      {editingPolicy && canWrite && (
+        <CreateLeavePolicyModal leaveTypes={leaveTypes} policy={editingPolicy} onClose={() => setEditingPolicy(null)} onCreated={() => { setEditingPolicy(null); load(); }} />
       )}
       {showAssign && canWrite && (
         <AssignLeavePolicyModal employees={employees} policies={policies} onClose={() => setShowAssign(false)} onCreated={() => setShowAssign(false)} />
@@ -1319,10 +1356,12 @@ function LeavePoliciesTab({ employees, agencyId, canWrite }) {
   );
 }
 
-function CreateLeaveTypeModal({ onClose, onCreated }) {
-  const [name, setName] = useState('');
-  const [isPaid, setIsPaid] = useState(true);
-  const [isProtected, setIsProtected] = useState(false);
+function CreateLeaveTypeModal({ leaveType, onClose, onCreated }) {
+  const isEdit = !!leaveType;
+  const [name, setName] = useState(leaveType?.name || '');
+  const [isPaid, setIsPaid] = useState(leaveType ? leaveType.isPaid : true);
+  const [isProtected, setIsProtected] = useState(leaveType ? leaveType.isProtected : false);
+  const [isActive, setIsActive] = useState(leaveType ? leaveType.isActive : true);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -1331,17 +1370,21 @@ function CreateLeaveTypeModal({ onClose, onCreated }) {
     setBusy(true);
     setError('');
     try {
-      await api.createHrLeaveType({ name: name.trim(), isPaid, isProtected });
+      if (isEdit) {
+        await api.updateHrLeaveType(leaveType.id, { name: name.trim(), isPaid, isProtected, isActive });
+      } else {
+        await api.createHrLeaveType({ name: name.trim(), isPaid, isProtected });
+      }
       onCreated();
     } catch (err) {
-      setError(err.data?.message || err.message || 'Could not create this leave type.');
+      setError(err.data?.message || err.message || `Could not ${isEdit ? 'save' : 'create'} this leave type.`);
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <Modal title="Add Leave Type" onClose={onClose}>
+    <Modal title={isEdit ? 'Edit Leave Type' : 'Add Leave Type'} onClose={onClose}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <label style={labelStyle}>Name</label>
         <input value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} placeholder="e.g. Vacation, Sick, FMLA" />
@@ -1351,50 +1394,93 @@ function CreateLeaveTypeModal({ onClose, onCreated }) {
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
           <input type="checkbox" checked={isProtected} onChange={(e) => setIsProtected(e.target.checked)} /> Protected (e.g. FMLA) — skips balance-denial, flagged for manual HR review, redacted on the team calendar
         </label>
+        {isEdit && (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+            <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} /> Active — uncheck to deactivate (existing policies/history are kept, this type just stops being offered for new policies/requests)
+          </label>
+        )}
         {error && <div style={{ color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
-        <Button onClick={submit} disabled={busy}>{busy ? 'ADDING…' : 'ADD LEAVE TYPE'}</Button>
+        <Button onClick={submit} disabled={busy}>{busy ? 'SAVING…' : isEdit ? 'SAVE CHANGES' : 'ADD LEAVE TYPE'}</Button>
       </div>
     </Modal>
   );
 }
 
-function CreateLeavePolicyModal({ leaveTypes, onClose, onCreated }) {
-  const [leaveTypeId, setLeaveTypeId] = useState('');
-  const [name, setName] = useState('');
-  const [accrualMethod, setAccrualMethod] = useState('FRONT_LOADED');
-  const [accrualAmountHours, setAccrualAmountHours] = useState('');
-  const [annualCapHours, setAnnualCapHours] = useState('');
-  const [carryoverCapHours, setCarryoverCapHours] = useState('');
+function CreateLeavePolicyModal({ leaveTypes, policy, onClose, onCreated }) {
+  const isEdit = !!policy;
+  const [leaveTypeId, setLeaveTypeId] = useState(policy?.leaveTypeId || '');
+  const [name, setName] = useState(policy?.name || '');
+  const [accrualMethod, setAccrualMethod] = useState(policy?.accrualMethod || 'FRONT_LOADED');
+  const [accrualAmountHours, setAccrualAmountHours] = useState(policy?.accrualAmountMinutes ? String(policy.accrualAmountMinutes / 60) : '');
+  // Only meaningful for PER_HOUR_WORKED: "accrue [accrualAmountHours] hours
+  // for every [workedHoursPerRatio] hours worked" — an exact ratio (e.g.
+  // 0.5 / 8), not a single derived rate, so it can express a fraction a
+  // flat "minutes per hour" field never could without rounding error.
+  const [workedHoursPerRatio, setWorkedHoursPerRatio] = useState(
+    policy?.accrualWorkedMinutesDenominator ? String(policy.accrualWorkedMinutesDenominator / 60) : '1',
+  );
+  const [annualCapHours, setAnnualCapHours] = useState(policy?.annualCapMinutes ? String(policy.annualCapMinutes / 60) : '');
+  const [carryoverCapHours, setCarryoverCapHours] = useState(policy?.carryoverCapMinutes ? String(policy.carryoverCapMinutes / 60) : '');
+  const [waitingPeriodDays, setWaitingPeriodDays] = useState(policy?.waitingPeriodDays != null ? String(policy.waitingPeriodDays) : '0');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
   async function submit() {
-    if (!leaveTypeId || !name.trim()) { setError('Leave type and name are required.'); return; }
+    if (!isEdit && (!leaveTypeId || !name.trim())) { setError('Leave type and name are required.'); return; }
+    if (isEdit && !name.trim()) { setError('Name is required.'); return; }
     setBusy(true);
     setError('');
     try {
-      await api.createHrLeavePolicy({
-        leaveTypeId, name: name.trim(), accrualMethod,
+      const payload = {
+        name: name.trim(), accrualMethod,
         accrualAmountMinutes: accrualAmountHours ? Math.round(Number(accrualAmountHours) * 60) : undefined,
         annualCapMinutes: annualCapHours ? Math.round(Number(annualCapHours) * 60) : undefined,
         carryoverCapMinutes: carryoverCapHours ? Math.round(Number(carryoverCapHours) * 60) : undefined,
-      });
+        waitingPeriodDays: waitingPeriodDays !== '' ? Math.round(Number(waitingPeriodDays)) : undefined,
+      };
+      if (accrualMethod === 'PER_HOUR_WORKED') {
+        payload.accrualWorkedMinutesDenominator = workedHoursPerRatio ? Math.round(Number(workedHoursPerRatio) * 60) : undefined;
+      }
+      if (isEdit) {
+        await api.updateHrLeavePolicy(policy.id, payload);
+      } else {
+        await api.createHrLeavePolicy({ leaveTypeId, ...payload });
+      }
       onCreated();
     } catch (err) {
-      setError(err.data?.message || err.message || 'Could not create this policy.');
+      setError(err.data?.message || err.message || `Could not ${isEdit ? 'save' : 'create'} this policy.`);
     } finally {
       setBusy(false);
     }
   }
 
+  async function toggleActive() {
+    setBusy(true);
+    setError('');
+    try {
+      await api.updateHrLeavePolicy(policy.id, { effectiveTo: policy.effectiveTo ? null : new Date().toISOString() });
+      onCreated();
+    } catch (err) {
+      setError(err.data?.message || err.message || 'Could not change this policy\'s active state.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const isDeactivated = isEdit && policy.effectiveTo && new Date(policy.effectiveTo) <= new Date();
+
   return (
-    <Modal title="Add Leave Policy" onClose={onClose}>
+    <Modal title={isEdit ? 'Edit Leave Policy' : 'Add Leave Policy'} onClose={onClose}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <label style={labelStyle}>Leave Type</label>
-        <select value={leaveTypeId} onChange={(e) => setLeaveTypeId(e.target.value)} style={selectStyle}>
-          <option value="">Select leave type…</option>
-          {leaveTypes.map((lt) => <option key={lt.id} value={lt.id}>{lt.name}</option>)}
-        </select>
+        {!isEdit && (
+          <>
+            <label style={labelStyle}>Leave Type</label>
+            <select value={leaveTypeId} onChange={(e) => setLeaveTypeId(e.target.value)} style={selectStyle}>
+              <option value="">Select leave type…</option>
+              {leaveTypes.map((lt) => <option key={lt.id} value={lt.id}>{lt.name}</option>)}
+            </select>
+          </>
+        )}
         <label style={labelStyle}>Policy Name</label>
         <input value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} placeholder="e.g. Standard Vacation" />
         <label style={labelStyle}>Accrual Method</label>
@@ -1403,14 +1489,33 @@ function CreateLeavePolicyModal({ leaveTypes, onClose, onCreated }) {
           <option value="PER_PAY_PERIOD">Per pay period (semi-monthly)</option>
           <option value="PER_HOUR_WORKED">Per hour worked</option>
         </select>
-        <label style={labelStyle}>{accrualMethod === 'PER_HOUR_WORKED' ? 'Hours earned per hour worked' : 'Hours per accrual'}</label>
-        <input type="number" min="0" step="0.1" value={accrualAmountHours} onChange={(e) => setAccrualAmountHours(e.target.value)} style={inputStyle} />
+        {accrualMethod === 'PER_HOUR_WORKED' ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Accrue</span>
+            <input type="number" min="0" step="0.1" value={accrualAmountHours} onChange={(e) => setAccrualAmountHours(e.target.value)} style={{ ...inputStyle, width: 80 }} />
+            <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>hours for every</span>
+            <input type="number" min="0.1" step="0.1" value={workedHoursPerRatio} onChange={(e) => setWorkedHoursPerRatio(e.target.value)} style={{ ...inputStyle, width: 80 }} />
+            <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>hours worked</span>
+          </div>
+        ) : (
+          <>
+            <label style={labelStyle}>Hours per accrual</label>
+            <input type="number" min="0" step="0.1" value={accrualAmountHours} onChange={(e) => setAccrualAmountHours(e.target.value)} style={inputStyle} />
+          </>
+        )}
         <label style={labelStyle}>Annual Cap (hours, optional)</label>
         <input type="number" min="0" step="0.1" value={annualCapHours} onChange={(e) => setAnnualCapHours(e.target.value)} style={inputStyle} />
         <label style={labelStyle}>Carryover Cap (hours, optional)</label>
         <input type="number" min="0" step="0.1" value={carryoverCapHours} onChange={(e) => setCarryoverCapHours(e.target.value)} style={inputStyle} />
+        <label style={labelStyle}>Waiting Period (days before accrual starts)</label>
+        <input type="number" min="0" step="1" value={waitingPeriodDays} onChange={(e) => setWaitingPeriodDays(e.target.value)} style={inputStyle} />
         {error && <div style={{ color: 'var(--danger)', fontSize: 12 }}>{error}</div>}
-        <Button onClick={submit} disabled={busy}>{busy ? 'ADDING…' : 'ADD POLICY'}</Button>
+        <Button onClick={submit} disabled={busy}>{busy ? 'SAVING…' : isEdit ? 'SAVE CHANGES' : 'ADD POLICY'}</Button>
+        {isEdit && (
+          <Button variant={isDeactivated ? 'secondary' : 'danger'} onClick={toggleActive} disabled={busy}>
+            {isDeactivated ? 'REACTIVATE POLICY' : 'DEACTIVATE POLICY'}
+          </Button>
+        )}
       </div>
     </Modal>
   );

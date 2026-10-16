@@ -3,6 +3,12 @@ import { api } from '../lib/api';
 import { ExportButton, DateRangeFilter } from '../ui';
 import { resolveDateRange } from '../lib/dateRange';
 import { downloadCsv } from '../lib/downloadCsv';
+import { money } from '../lib/format';
+
+// The 'premium_cents' goal metric stores/returns dollar amounts as
+// integer cents — every display of its targetValue/actual must go
+// through money(), never show the raw cents integer.
+const formatGoalValue = (metric, value) => (value === null || value === undefined ? null : metric === 'premium_cents' ? money(value) : value);
 
 const PERIODS = [
   { key: 'month', label: 'This month', from: () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); } },
@@ -163,8 +169,8 @@ export default function RunningReportPage({ scope = 'me', agencyId, onClose }) {
           {goals.length > 0 && (
             <ExportButton onExport={() => downloadCsv('goals', goals, [
               { key: 'metric', label: 'Metric' },
-              { key: 'targetValue', label: 'Target' },
-              { key: 'actual', label: 'Actual' },
+              { key: (g) => formatGoalValue(g.metric, g.targetValue), label: 'Target' },
+              { key: (g) => formatGoalValue(g.metric, g.actual), label: 'Actual' },
               { key: 'progressPercent', label: 'Progress %' },
               { key: 'periodStart', label: 'Period Start' },
               { key: 'periodEnd', label: 'Period End' },
@@ -178,7 +184,7 @@ export default function RunningReportPage({ scope = 'me', agencyId, onClose }) {
             <div key={g.id} style={s.goalRow}>
               <div style={s.goalHeader}>
                 <span>{g.metric.replace(/_/g, ' ')}</span>
-                <span>{g.actual ?? '—'} / {g.targetValue}</span>
+                <span>{g.actual === null ? '—' : formatGoalValue(g.metric, g.actual)} / {formatGoalValue(g.metric, g.targetValue)}</span>
               </div>
               <div style={s.goalBarTrack}>
                 <div style={s.goalBarFill(Math.min(100, g.progressPercent ?? 0))} />

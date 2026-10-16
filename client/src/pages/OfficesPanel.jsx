@@ -27,6 +27,7 @@ export default function OfficesPanel() {
   const [pastePreview, setPastePreview] = useState(null);
   const [isDefaultOffice, setIsDefaultOffice] = useState(false);
   const [routingMode, setRoutingMode] = useState('ROUND_ROBIN');
+  const [includeManagersInRoundRobin, setIncludeManagersInRoundRobin] = useState(false);
   const [geoError, setGeoError] = useState('');
   const [geoSaving, setGeoSaving] = useState(false);
   const [geoSaved, setGeoSaved] = useState(false);
@@ -62,6 +63,7 @@ export default function OfficesPanel() {
       setZipRanges(ranges);
       setIsDefaultOffice(!!found.isDefaultOffice);
       setRoutingMode(found.routingMode || 'ROUND_ROBIN');
+      setIncludeManagersInRoundRobin(!!found.includeManagersInRoundRobin);
       const existingByUser = new Map((found.alphaAssignments || []).map((a) => [a.userId, a]));
       setAssignments(
         (found.users || []).map((u) => {
@@ -138,7 +140,7 @@ export default function OfficesPanel() {
     setGeoSaved(false);
     setGeoSaving(true);
     try {
-      await api.updateOffice(officeId, { routingCities: cities, routingZipRanges: zipRanges, isDefaultOffice, routingMode });
+      await api.updateOffice(officeId, { routingCities: cities, routingZipRanges: zipRanges, isDefaultOffice, routingMode, includeManagersInRoundRobin });
       setGeoSaved(true);
       await load();
     } catch (err) {
@@ -293,6 +295,18 @@ export default function OfficesPanel() {
             <option value="ALPHA_SPLIT">Alpha Split — explicit last-name letter assignment (configure below)</option>
           </select>
         </div>
+
+        {routingMode === 'ROUND_ROBIN' && (
+          <div style={s.fieldBlock}>
+            <label style={s.checkboxLabel}>
+              <input type="checkbox" checked={includeManagersInRoundRobin} onChange={(e) => setIncludeManagersInRoundRobin(e.target.checked)} />
+              Include this office's Agency Manager(s) in the round robin, alongside producers
+            </label>
+            <div style={s.hint}>
+              Off by default — a selling manager is never auto-enrolled in ordinary round-robin lead flow unless this office explicitly opts in.
+            </div>
+          </div>
+        )}
 
         {geoError && <div style={s.formError}>{geoError}</div>}
         {geoSaved && <div style={s.savedNote}>Saved.</div>}

@@ -9,10 +9,10 @@ const { prisma } = require('../../lib/db');
 const { recordAudit } = require('../../lib/audit');
 const { requireHrRole, hasHrRole } = require('../../middleware/hrAuth');
 const { resolveShiftInstants, workDateOverlapsLeave, isoWeekRange, wallClockHHMM } = require('../../lib/hrScheduling');
+const { DEFAULT_WEEKLY_OVERTIME_THRESHOLD_MINUTES, STALE_OPEN_SHIFT_HOURS } = require('../../lib/hrTimesheetBuilder');
 
 const router = express.Router();
 
-const DEFAULT_WEEKLY_OVERTIME_THRESHOLD_MINUTES = 40 * 60;
 const DEFAULT_WORK_TIME_ZONE = 'America/New_York';
 
 // Scheduling is a line-manager task, not exclusively an "HR" one —
@@ -450,18 +450,33 @@ router.post('/schedule/swap-requests/:id/deny', requireHrAdminOrManager(), async
   }
 });
 
-// ---- Settings (weekly overtime scheduling heads-up) ----
+// ---- Settings (weekly overtime scheduling heads-up + stale-open-shift threshold) ----
+// Both fields drive real math, not just display: weeklyOvertimeThresholdMinutes
+// feeds both this file's own scheduled-minutes warning (computeWarnings,
+// above) and lib/hrTimesheetBuilder.js's real timesheet overtimeMinutes;
+// staleOpenShiftHours feeds that same builder's exception flagging and
+// jobs/hrAttendanceDetection.js's missed-punch detection.
 
 router.get('/settings', requireHrRole('HR_ADMIN', 'HR_AUDITOR'), async (req, res, next) => {
   try {
     const settings = await prisma.hrSettings.findUnique({ where: { agencyId: req.hrAgencyId } });
-    return res.json({ success: true, settings: settings || { agencyId: req.hrAgencyId, weeklyOvertimeThresholdMinutes: DEFAULT_WEEKLY_OVERTIME_THRESHOLD_MINUTES } });
+    return res.json({
+      success: true,
+      settings: settings || {
+        agencyId: req.hrAgencyId,
+        weeklyOvertimeThresholdMinutes: DEFAULT_WEEKLY_OVERTIME_THRESHOLD_MINUTES,
+        staleOpenShiftHours: STALE_OPEN_SHIFT_HOURS,
+      },
+    });
   } catch (err) {
     next(err);
   }
 });
 
-const settingsSchema = z.object({ weeklyOvertimeThresholdMinutes: z.number().int().positive() });
+const settingsSchema = z.object({
+  weeklyOvertimeThresholdMinutes: z.number().int().positive().optional(),
+  staleOpenShiftHours: z.number().int().positive().optional(),
+});
 
 router.patch('/settings', requireHrRole('HR_ADMIN'), async (req, res, next) => {
   try {
@@ -471,8 +486,8 @@ router.patch('/settings', requireHrRole('HR_ADMIN'), async (req, res, next) => {
     }
     const settings = await prisma.hrSettings.upsert({
       where: { agencyId: req.hrAgencyId },
-      create: { agencyId: req.hrAgencyId, weeklyOvertimeThresholdMinutes: parsed.data.weeklyOvertimeThresholdMinutes },
-      update: { weeklyOvertimeThresholdMinutes: parsed.data.weeklyOvertimeThresholdMinutes },
+      create: { agencyId: req.hrAgencyId, ...parsed.data },
+      update: parsed.data,
     });
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role, agencyId: req.hrAgencyId,

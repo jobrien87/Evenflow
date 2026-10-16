@@ -329,3 +329,56 @@ test('cross-agency denial: an owner cannot approve or view a leave request belon
   });
   assert.equal(crossTypeCreate.status, 400, 'a leaveTypeId from a different agency is rejected');
 });
+
+test('PATCH /hr/leave/types/:id edits a leave type in place and can deactivate it; cross-agency and non-HR_ADMIN access are denied', async () => {
+  const createRes = await call('/hr/leave/types', { method: 'POST', cookie: ownerCookie, body: { name: `Editable Type ${suffix}`, isPaid: true } });
+  const typeId = createRes.body.leaveType.id;
+
+  const editRes = await call(`/hr/leave/types/${typeId}`, { method: 'PATCH', cookie: ownerCookie, body: { name: `Renamed Type ${suffix}`, isPaid: false } });
+  assert.equal(editRes.status, 200);
+  assert.equal(editRes.body.leaveType.name, `Renamed Type ${suffix}`);
+  assert.equal(editRes.body.leaveType.isPaid, false);
+
+  const deactivateRes = await call(`/hr/leave/types/${typeId}`, { method: 'PATCH', cookie: ownerCookie, body: { isActive: false } });
+  assert.equal(deactivateRes.status, 200);
+  assert.equal(deactivateRes.body.leaveType.isActive, false);
+  const stillThere = await prisma.hrLeaveType.findUnique({ where: { id: typeId } });
+  assert.ok(stillThere, 'deactivating never deletes the row');
+
+  const crossEdit = await call(`/hr/leave/types/${typeId}`, { method: 'PATCH', cookie: otherOwnerCookie, body: { name: 'Hijacked' } });
+  assert.equal(crossEdit.status, 404, 'a different agency cannot see or edit this leave type');
+
+  const nonAdminEdit = await call(`/hr/leave/types/${typeId}`, { method: 'PATCH', cookie: producerCookie, body: { name: 'Nope' } });
+  assert.equal(nonAdminEdit.status, 403, 'a non-HR_ADMIN producer cannot edit a leave type');
+});
+
+test('PATCH /hr/leave/policies/:id edits accrual settings in place and can deactivate via effectiveTo; cross-agency denied', async () => {
+  const typeRes = await call('/hr/leave/types', { method: 'POST', cookie: ownerCookie, body: { name: `Policy Type ${suffix}`, isPaid: true } });
+  const leaveTypeId = typeRes.body.leaveType.id;
+  const createRes = await call('/hr/leave/policies', {
+    method: 'POST', cookie: ownerCookie,
+    body: { leaveTypeId, name: `Editable Policy ${suffix}`, accrualMethod: 'PER_HOUR_WORKED', accrualAmountMinutes: 1, waitingPeriodDays: 0 },
+  });
+  assert.equal(createRes.status, 201);
+  const policyId = createRes.body.policy.id;
+  assert.equal(createRes.body.policy.accrualWorkedMinutesDenominator, 60, 'schema default applies on create');
+
+  const editRes = await call(`/hr/leave/policies/${policyId}`, {
+    method: 'PATCH', cookie: ownerCookie,
+    body: { accrualAmountMinutes: 30, accrualWorkedMinutesDenominator: 480, waitingPeriodDays: 90 },
+  });
+  assert.equal(editRes.status, 200);
+  assert.equal(editRes.body.policy.accrualAmountMinutes, 30);
+  assert.equal(editRes.body.policy.accrualWorkedMinutesDenominator, 480);
+  assert.equal(editRes.body.policy.waitingPeriodDays, 90);
+
+  const deactivateAt = new Date().toISOString();
+  const deactivateRes = await call(`/hr/leave/policies/${policyId}`, { method: 'PATCH', cookie: ownerCookie, body: { effectiveTo: deactivateAt } });
+  assert.equal(deactivateRes.status, 200);
+  assert.ok(deactivateRes.body.policy.effectiveTo, 'effectiveTo is set rather than the row being deleted');
+  const stillThere = await prisma.hrLeavePolicy.findUnique({ where: { id: policyId } });
+  assert.ok(stillThere, 'deactivating a policy never deletes it');
+
+  const crossEdit = await call(`/hr/leave/policies/${policyId}`, { method: 'PATCH', cookie: otherOwnerCookie, body: { name: 'Hijacked' } });
+  assert.equal(crossEdit.status, 404, 'a different agency cannot see or edit this leave policy');
+});

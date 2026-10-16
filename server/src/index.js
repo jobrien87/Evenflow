@@ -1,5 +1,6 @@
 const app = require('./app');
 const { checkStaleLeads } = require('./lib/staleLeadReminders');
+const { checkLeadFollowUps } = require('./lib/leadFollowUp');
 const { recomputeAllLeadPriorities } = require('./lib/leadPriorityRecompute');
 const { checkFirstAttemptSla } = require('./lib/firstAttemptSlaAlerts');
 const { checkAgentOfMonth } = require('./lib/agentOfMonth');
@@ -18,6 +19,12 @@ app.listen(PORT, () => {
 setInterval(() => {
   checkStaleLeads().catch((err) => console.error('[staleLeadReminders] check failed', err.message));
 }, 30 * 60 * 1000);
+
+// Agency-configurable disposition-based follow-up (Agency.followUpRules)
+// — same in-process pattern. See lib/leadFollowUp.js.
+setInterval(() => {
+  checkLeadFollowUps().catch((err) => console.error('[leadFollowUp] check failed', err.message));
+}, 15 * 60 * 1000);
 
 // Same in-process pattern — keeps stored Lead/Opportunity priorityScore
 // fresh between creation/disposition events. See lib/leadPriorityRecompute.js.

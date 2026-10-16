@@ -294,6 +294,21 @@ test('an office on plain ROUND_ROBIN never assigns to its own manager, even when
   await prisma.user.update({ where: { id: managerId }, data: { officeId: null } });
 });
 
+test('Office.includeManagersInRoundRobin is an explicit, default-false opt-in — off by default (prior test), on it lets a manager-only office actually assign via plain ROUND_ROBIN', async () => {
+  const office = await prisma.office.create({
+    data: { agencyId, name: 'Manager Opt-In RR Office', isDefaultOffice: true, routingMode: 'ROUND_ROBIN', includeManagersInRoundRobin: true },
+  });
+  await prisma.user.update({ where: { id: managerId }, data: { officeId: office.id } });
+
+  const vendor = await prisma.vendor.findUnique({ where: { id: officeSplitVendorId } });
+  const result = await prisma.$transaction((tx) => resolveVendorAssignment(tx, vendor, { lastName: 'Adams' }));
+  assert.equal(result.assignedToId, managerId, 'with the opt-in enabled, a manager-only ROUND_ROBIN office must actually route to her, not the Moshpit');
+  assert.equal(result.mode, 'OFFICE_SPLIT');
+
+  await prisma.office.delete({ where: { id: office.id } });
+  await prisma.user.update({ where: { id: managerId }, data: { officeId: null } });
+});
+
 test('a manager-only office (zero producers, one manager holding a real Alpha seat) is still a valid candidate for the legacy no-geography-match fallback, and routes to her via ALPHA_SPLIT', async () => {
   const office = await prisma.office.create({
     data: { agencyId, name: 'Manager Alpha Office', routingMode: 'ALPHA_SPLIT' },

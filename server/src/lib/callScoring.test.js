@@ -132,6 +132,28 @@ test('computeCoachingBreakdown averages real call scores and surfaces the real w
   assert.ok(opportunity.courseId, 'expected a real linked TrainingCourse id');
 });
 
+test('a configured Agency.coachingThreshold is honored over the default — a lower threshold excludes a category the default would have flagged', async () => {
+  // Objection Handling averages 35 here, which is below the
+  // DEFAULT_COACHING_THRESHOLD (75) and so is flagged as a coaching
+  // opportunity in the test above. Lowering this agency's own configured
+  // threshold below 35 must exclude it instead.
+  await prisma.agency.update({ where: { id: agencyId }, data: { coachingThreshold: 10 } });
+  try {
+    const from = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const to = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const result = await computeCoachingBreakdown({ prisma, agencyId, userId: producerId, from, to });
+
+    const objection = result.categoryBreakdown.find((c) => c.category === 'Objection Handling');
+    assert.ok(objection, 'expected Objection Handling to still appear in the breakdown');
+    assert.equal(objection.averageScore, 35);
+
+    const opportunity = result.coachingOpportunities.find((c) => c.category === 'Objection Handling');
+    assert.equal(opportunity, undefined, 'a configured threshold of 10 must not flag a 35 average as a coaching opportunity');
+  } finally {
+    await prisma.agency.update({ where: { id: agencyId }, data: { coachingThreshold: 75 } });
+  }
+});
+
 test('computeCoachingBreakdown returns an honest empty shape (never fabricated numbers) when there are no analyzed calls in range', async () => {
   const from = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
   const to = new Date(Date.now() - 300 * 24 * 60 * 60 * 1000);

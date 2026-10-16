@@ -83,3 +83,28 @@ test('checkFirstAttemptSla only alerts the real vendor-API lead, never the non-v
   });
   assert.equal(nonVendorNotification, null, 'no notification must be created for the non-vendor lead');
 });
+
+test('a configured Agency.firstAttemptSlaMinutes is honored over the default — a lead not yet past the agency\'s own longer threshold is not alerted', async () => {
+  const agency = await prisma.agency.create({ data: { name: `SLA Configured Agency ${suffix}`, firstAttemptSlaMinutes: 180 } }); // 3h threshold
+  const producer = await prisma.user.create({
+    data: { agencyId: agency.id, email: `sla-configured-${suffix}@test.local`, passwordHash: 'x', firstName: 'Sla', lastName: 'Configured', role: 'PRODUCER', status: 'ACTIVE' },
+  });
+  const vendor = await prisma.vendor.create({ data: { agencyId: agency.id, name: `SLA Configured Vendor ${suffix}`, email: `sla-cv-${suffix}@test.local`, product: 'AUTO' } });
+  const customer = await prisma.customer.create({ data: { firstName: 'Configured', lastName: 'Lead' } });
+
+  // 2h ago — past the DEFAULT_SLA_MINUTES (30) but NOT past this agency's
+  // own configured 180-minute threshold.
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  const lead = await prisma.lead.create({
+    data: { agencyId: agency.id, customerId: customer.id, assignedToId: producer.id, status: 'NEW', vendorId: vendor.id, assignedAt: twoHoursAgo, firstAttemptAt: null, firstAttemptSlaAlertSentAt: null },
+  });
+
+  await checkFirstAttemptSla();
+  const leadAfter = await prisma.lead.findUnique({ where: { id: lead.id } });
+  assert.equal(leadAfter.firstAttemptSlaAlertSentAt, null, 'not yet past the agency\'s own 180-minute threshold, so it must not be alerted');
+
+  await prisma.lead.deleteMany({ where: { agencyId: agency.id } });
+  await prisma.vendor.deleteMany({ where: { agencyId: agency.id } });
+  await prisma.user.deleteMany({ where: { agencyId: agency.id } });
+  await prisma.agency.delete({ where: { id: agency.id } });
+});

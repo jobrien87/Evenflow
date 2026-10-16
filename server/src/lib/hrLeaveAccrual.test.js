@@ -127,6 +127,60 @@ test('PER_HOUR_WORKED: accrual is proportional to that month\'s real HrTimesheet
   assert.equal(entries[0].minutes, 10, '600 minutes worked * (1 minute leave / 60 minutes worked) = 10');
 });
 
+test('PER_HOUR_WORKED: accrualWorkedMinutesDenominator expresses an exact ratio (0.5hr per 8hr worked) with no rounding error', async () => {
+  const leaveType = await makeLeaveType();
+  // 30 minutes of leave per 480 minutes (8 hours) worked — the user's own
+  // worked example, which a single "minutes per hour" rate (3.75/hr)
+  // cannot represent exactly.
+  const policy = await prisma.hrLeavePolicy.create({
+    data: { agencyId, leaveTypeId: leaveType.id, name: 'Exact Ratio', accrualMethod: 'PER_HOUR_WORKED', accrualAmountMinutes: 30, accrualWorkedMinutesDenominator: 480, effectiveFrom: FAR_PAST },
+  });
+  await prisma.hrLeavePolicyAssignment.create({ data: { employeeProfileId, leavePolicyId: policy.id, effectiveFrom: FAR_PAST } });
+
+  await prisma.hrTimesheet.create({ data: { employeeProfileId, agencyId, periodStart: new Date('2026-05-01T00:00:00Z'), periodEnd: new Date('2026-05-08T00:00:00Z'), regularMinutes: 960 } });
+
+  await postAccrualsForOpenPolicies({ now: new Date('2026-05-25T12:00:00Z') });
+  const entries = await ledgerEntries(leaveType.id);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].minutes, 60, '960 minutes worked * (30 / 480) = 60, with no rounding error');
+});
+
+test('PER_HOUR_WORKED: an unset accrualWorkedMinutesDenominator defaults to 60, preserving every pre-existing policy\'s behavior unchanged', async () => {
+  const leaveType = await makeLeaveType();
+  const policy = await prisma.hrLeavePolicy.create({
+    data: { agencyId, leaveTypeId: leaveType.id, name: 'Default Denominator', accrualMethod: 'PER_HOUR_WORKED', accrualAmountMinutes: 2, effectiveFrom: FAR_PAST },
+  });
+  assert.equal(policy.accrualWorkedMinutesDenominator, 60, 'schema default');
+  await prisma.hrLeavePolicyAssignment.create({ data: { employeeProfileId, leavePolicyId: policy.id, effectiveFrom: FAR_PAST } });
+
+  await prisma.hrTimesheet.create({ data: { employeeProfileId, agencyId, periodStart: new Date('2026-07-01T00:00:00Z'), periodEnd: new Date('2026-07-08T00:00:00Z'), regularMinutes: 300 } });
+
+  await postAccrualsForOpenPolicies({ now: new Date('2026-07-25T12:00:00Z') });
+  const entries = await ledgerEntries(leaveType.id);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].minutes, 10, '300 minutes worked * (2 / 60) = 10, same as the old hardcoded-60 behavior');
+});
+
+test('waitingPeriodDays: no accrual posts until the assignment\'s own effectiveFrom plus the waiting period has elapsed', async () => {
+  const leaveType = await makeLeaveType();
+  const policy = await prisma.hrLeavePolicy.create({
+    data: { agencyId, leaveTypeId: leaveType.id, name: 'Waiting Period', accrualMethod: 'FRONT_LOADED', accrualAmountMinutes: 2400, waitingPeriodDays: 90, effectiveFrom: FAR_PAST },
+  });
+  const assignmentStart = new Date('2026-01-01T00:00:00Z');
+  await prisma.hrLeavePolicyAssignment.create({ data: { employeeProfileId, leavePolicyId: policy.id, effectiveFrom: assignmentStart } });
+
+  // 60 days in — still inside the 90-day waiting period.
+  await postAccrualsForOpenPolicies({ now: new Date('2026-03-02T12:00:00Z') });
+  let entries = await ledgerEntries(leaveType.id);
+  assert.equal(entries.length, 0, 'no accrual posts while the waiting period has not yet elapsed');
+
+  // 100 days in — past the waiting period, accrual now posts.
+  await postAccrualsForOpenPolicies({ now: new Date('2026-04-11T12:00:00Z') });
+  entries = await ledgerEntries(leaveType.id);
+  assert.equal(entries.length, 1, 'accrual posts once the waiting period has elapsed');
+  assert.equal(entries[0].minutes, 2400);
+});
+
 test('annual cap: a FRONT_LOADED grant that would exceed annualCapMinutes is trimmed to exactly fill the remaining room, and nothing posts once fully used', async () => {
   const leaveType = await makeLeaveType();
   const policy = await prisma.hrLeavePolicy.create({

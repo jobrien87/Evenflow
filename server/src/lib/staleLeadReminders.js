@@ -8,7 +8,10 @@
 const { prisma } = require('./db');
 const { notifyUser } = require('./notifications');
 
-const STALE_HOURS = Number(process.env.STALE_LEAD_HOURS) || 4;
+// DEFAULT_STALE_HOURS is the env-var/global fallback used when an agency
+// has never set its own Agency.staleLeadHours — every agency's real,
+// configured value (set via Agency Settings) takes precedence.
+const DEFAULT_STALE_HOURS = Number(process.env.STALE_LEAD_HOURS) || 4;
 
 // Terminal statuses mean the lead is closed out one way or another —
 // nothing to remind anyone about.
@@ -33,25 +36,34 @@ function lastEngagementAt(lead) {
 }
 
 async function checkStaleLeads() {
-  const cutoff = hoursAgo(STALE_HOURS);
-
+  // Each lead's own agency may configure a different staleLeadHours, so
+  // the staleness cutoff can't be a single DB-level filter — it's applied
+  // in JS per lead below. The candidate set is still narrowed server-side
+  // by every other, agency-independent condition.
   const candidates = await prisma.lead.findMany({
     where: {
       assignedToId: { not: null },
+      assignedAt: { not: null },
       status: { notIn: TERMINAL_STATUSES },
-      assignedAt: { lt: cutoff },
-      OR: [{ lastReminderSentAt: null }, { lastReminderSentAt: { lt: cutoff } }],
     },
     include: {
       customer: { select: { firstName: true, lastName: true } },
+      agency: { select: { staleLeadHours: true } },
       notes: { select: { createdAt: true }, orderBy: { createdAt: 'desc' }, take: 1 },
       activities: { select: { occurredAt: true }, orderBy: { occurredAt: 'desc' }, take: 1 },
       events: { where: { type: 'lead.disposition' }, select: { createdAt: true, type: true }, orderBy: { createdAt: 'desc' }, take: 1 },
     },
   });
 
+  let checkedCount = 0;
   let remindedCount = 0;
   for (const lead of candidates) {
+    const staleHours = lead.agency?.staleLeadHours || DEFAULT_STALE_HOURS;
+    const cutoff = hoursAgo(staleHours);
+    if (lead.assignedAt >= cutoff) continue;
+    if (lead.lastReminderSentAt && lead.lastReminderSentAt >= cutoff) continue;
+    checkedCount += 1;
+
     const engagedAt = lastEngagementAt(lead);
     if (engagedAt && engagedAt >= cutoff) continue;
 
@@ -61,7 +73,7 @@ async function checkStaleLeads() {
       type: 'lead.stale',
       severity: 'WARNING',
       title: 'Lead needs a note or update',
-      body: `${lead.customer ? `${lead.customer.firstName} ${lead.customer.lastName}` : 'This lead'} hasn't had a note, activity, or disposition in over ${STALE_HOURS} hours.`,
+      body: `${lead.customer ? `${lead.customer.firstName} ${lead.customer.lastName}` : 'This lead'} hasn't had a note, activity, or disposition in over ${staleHours} hours.`,
       relatedEntityType: 'Lead',
       relatedEntityId: lead.id,
     });
@@ -70,7 +82,7 @@ async function checkStaleLeads() {
     remindedCount += 1;
   }
 
-  return { checked: candidates.length, reminded: remindedCount };
+  return { checked: checkedCount, reminded: remindedCount };
 }
 
-module.exports = { checkStaleLeads, STALE_HOURS };
+module.exports = { checkStaleLeads, DEFAULT_STALE_HOURS };

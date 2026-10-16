@@ -151,15 +151,18 @@ async function officeAlphaAssignee(tx, { office, lastName }) {
 
 // Stage 2 for an office whose routingMode is ROUND_ROBIN: plain round robin
 // over that office's own ACTIVE producers, keyed to the office's own
-// cursor (not derived from any vendor). PRODUCER only, deliberately — a
-// prior change over-broadened this to also include AGENCY_MANAGER, which
-// would silently enroll a selling manager into ordinary round-robin lead
-// flow she never opted into. A manager's only path to receiving routed
-// leads is an explicit Alpha-split seat (officeAlphaAssignee above),
-// never plain round robin.
+// cursor (not derived from any vendor). PRODUCER only by default,
+// deliberately — a prior change over-broadened this to also include
+// AGENCY_MANAGER, which silently enrolled a selling manager into ordinary
+// round-robin lead flow she never opted into; that was reverted. The only
+// way a manager is included now is this office's own explicit, default-
+// false Office.includeManagersInRoundRobin opt-in — never a global or
+// implicit default. A manager's other path to receiving routed leads is
+// still an explicit Alpha-split seat (officeAlphaAssignee above).
 async function officeRoundRobinAssignee(tx, { office }) {
+  const roles = office.includeManagersInRoundRobin ? ['PRODUCER', 'AGENCY_MANAGER'] : ['PRODUCER'];
   const activeProducers = await tx.user.findMany({
-    where: { officeId: office.id, role: 'PRODUCER', status: 'ACTIVE' },
+    where: { officeId: office.id, role: { in: roles }, status: 'ACTIVE' },
     select: { id: true },
     orderBy: { id: 'asc' },
   });

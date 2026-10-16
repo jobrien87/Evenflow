@@ -116,6 +116,10 @@ async function postAccrualForAssignment(assignment, now) {
   if (!policy || !policy.leaveType.isActive) return false;
   if (policy.effectiveFrom > now) return false;
   if (policy.effectiveTo && policy.effectiveTo <= now) return false;
+  if (policy.waitingPeriodDays > 0) {
+    const waitingPeriodEnd = new Date(assignment.effectiveFrom.getTime() + policy.waitingPeriodDays * 24 * 60 * 60 * 1000);
+    if (now < waitingPeriodEnd) return false;
+  }
 
   return prisma.$transaction(async (tx) => {
     await postCarryoverExpirationIfNeeded(tx, { assignment, policy, now });
@@ -130,10 +134,14 @@ async function postAccrualForAssignment(assignment, now) {
       const year = now.getUTCFullYear();
       const month = now.getUTCMonth() + 1;
       const workedMinutes = await regularMinutesWorkedInMonth(tx, { employeeProfileId: assignment.employeeProfileId, year, month });
-      // accrualAmountMinutes means "minutes of leave earned per 60
-      // minutes worked" for this method — documented default (see file
-      // header), since there's only one Int field to carry the rate.
-      rawAmount = Math.round((policy.accrualAmountMinutes || 0) * (workedMinutes / 60));
+      // accrualAmountMinutes / accrualWorkedMinutesDenominator express an
+      // exact ratio of leave earned per minutes worked (e.g. 0.5hr per
+      // 8hr worked = 30 / 480) — see HrLeavePolicy's own schema comment.
+      // The denominator defaults to 60 (the old implicit "per hour
+      // worked" rate) so every pre-existing policy's behavior is
+      // unchanged until it's explicitly reconfigured.
+      const denominator = policy.accrualWorkedMinutesDenominator || 60;
+      rawAmount = Math.round((policy.accrualAmountMinutes || 0) * (workedMinutes / denominator));
     } else {
       rawAmount = policy.accrualAmountMinutes || 0;
     }

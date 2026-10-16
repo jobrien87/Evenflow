@@ -59,17 +59,20 @@ async function createOffice(name) {
   return body.office;
 }
 
-test('PATCH routingCities/routingZipRanges/isDefaultOffice/routingMode persist', async () => {
+test('PATCH routingCities/routingZipRanges/isDefaultOffice/routingMode/includeManagersInRoundRobin persist', async () => {
   const office = await createOffice('Tallahassee');
+  assert.equal(office.includeManagersInRoundRobin, false, 'must default to false, preserving today\'s producer-only ROUND_ROBIN behavior for every office that never opts in');
+
   const res = await fetch(`${baseUrl}/api/offices/${office.id}`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
-    body: JSON.stringify({ routingCities: ['tallahassee', ' Crawfordville '], routingZipRanges: [{ start: '32300', end: '32399' }], isDefaultOffice: true, routingMode: 'ALPHA_SPLIT' }),
+    body: JSON.stringify({ routingCities: ['tallahassee', ' Crawfordville '], routingZipRanges: [{ start: '32300', end: '32399' }], isDefaultOffice: true, routingMode: 'ALPHA_SPLIT', includeManagersInRoundRobin: true }),
   });
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.deepEqual(body.office.routingCities, ['TALLAHASSEE', 'CRAWFORDVILLE']);
   assert.equal(body.office.isDefaultOffice, true);
   assert.equal(body.office.routingMode, 'ALPHA_SPLIT');
+  assert.equal(body.office.includeManagersInRoundRobin, true);
 });
 
 test('isDefaultOffice is exclusive — setting it on a second office unsets the first', async () => {

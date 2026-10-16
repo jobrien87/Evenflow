@@ -452,8 +452,10 @@ export const api = {
 
   hrLeaveTypes: () => request('/hr/leave/types'),
   createHrLeaveType: (payload) => request('/hr/leave/types', { method: 'POST', body: payload }),
+  updateHrLeaveType: (id, payload) => request(`/hr/leave/types/${id}`, { method: 'PATCH', body: payload }),
   hrLeavePolicies: () => request('/hr/leave/policies'),
   createHrLeavePolicy: (payload) => request('/hr/leave/policies', { method: 'POST', body: payload }),
+  updateHrLeavePolicy: (id, payload) => request(`/hr/leave/policies/${id}`, { method: 'PATCH', body: payload }),
   hrLeavePolicyAssignments: (params = '') => request(`/hr/leave/policy-assignments${params}`),
   createHrLeavePolicyAssignment: (payload) => request('/hr/leave/policy-assignments', { method: 'POST', body: payload }),
   hrLeaveBalance: (params = '') => request(`/hr/leave/balance${params}`),

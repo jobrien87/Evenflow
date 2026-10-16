@@ -64,6 +64,7 @@ after(async () => {
   await prisma.hrShiftSwapRequest.deleteMany({ where: { shiftAssignment: { agencyId: { in: [agencyId, otherAgencyId] } } } });
   await prisma.hrShiftAssignment.deleteMany({ where: { agencyId: { in: [agencyId, otherAgencyId] } } });
   await prisma.hrShiftTemplate.deleteMany({ where: { agencyId: { in: [agencyId, otherAgencyId] } } });
+  await prisma.hrSettings.deleteMany({ where: { agencyId: { in: [agencyId, otherAgencyId] } } });
   await prisma.hrLeaveLedgerEntry.deleteMany({ where: { agencyId: { in: [agencyId, otherAgencyId] } } });
   await prisma.hrLeaveRequest.deleteMany({ where: { agencyId: { in: [agencyId, otherAgencyId] } } });
   await prisma.hrLeaveType.deleteMany({ where: { agencyId: { in: [agencyId, otherAgencyId] } } });
@@ -211,6 +212,26 @@ test('shift swap deny: leaves the assignment completely untouched', async () => 
   const shift = await prisma.hrShiftAssignment.findUnique({ where: { id: shiftId } });
   assert.equal(shift.employeeProfileId, producerProfileId);
   assert.equal(shift.status, 'SCHEDULED');
+});
+
+test('GET/PATCH /hr/settings defaults to the module constants and persists a real agency override of both fields', async () => {
+  const getDefault = await call('/hr/settings', { cookie: ownerCookie });
+  assert.equal(getDefault.status, 200);
+  assert.equal(getDefault.body.settings.weeklyOvertimeThresholdMinutes, 2400);
+  assert.equal(getDefault.body.settings.staleOpenShiftHours, 16);
+
+  const patchRes = await call('/hr/settings', { method: 'PATCH', cookie: ownerCookie, body: { weeklyOvertimeThresholdMinutes: 1800, staleOpenShiftHours: 8 } });
+  assert.equal(patchRes.status, 200);
+  assert.equal(patchRes.body.settings.weeklyOvertimeThresholdMinutes, 1800);
+  assert.equal(patchRes.body.settings.staleOpenShiftHours, 8);
+
+  const getAfter = await call('/hr/settings', { cookie: ownerCookie });
+  assert.equal(getAfter.body.settings.weeklyOvertimeThresholdMinutes, 1800, 'persisted across a fresh read, not just echoed back');
+  assert.equal(getAfter.body.settings.staleOpenShiftHours, 8);
+
+  // A non-HR_ADMIN producer cannot change these settings.
+  const producerPatch = await call('/hr/settings', { method: 'PATCH', cookie: producerCookie, body: { staleOpenShiftHours: 1 } });
+  assert.equal(producerPatch.status, 403);
 });
 
 void otherProfileId; // kept for setup symmetry with the other Part C test files

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { Card, Badge, Button, StatTile, SectionHeader, EmptyState } from '../ui';
+import { centsToDollarInput, dollarsToCents } from '../lib/format';
 
 function centsToDollars(cents) {
   if (cents === null || cents === undefined) return '—';
@@ -268,11 +269,11 @@ export default function RecordStoreAdminPanel() {
 
 function TemplateEditModal({ template, onClose, onSave, busy }) {
   const [form, setForm] = useState({
-    wholesalePriceCents: template.wholesalePriceCents ?? '',
+    wholesalePrice: centsToDollarInput(template.wholesalePriceCents),
     minimumDailyVolume: template.minimumDailyVolume,
     maximumDailyVolume: template.maximumDailyVolume,
     defaultDailyVolume: template.defaultDailyVolume,
-    minimumDepositCents: template.minimumDepositCents,
+    minimumDeposit: centsToDollarInput(template.minimumDepositCents),
     boberdooTypeId: template.boberdooTypeId || '',
     boberdooTemplateReference: template.boberdooTemplateReference || '',
     active: template.active,
@@ -290,11 +291,11 @@ function TemplateEditModal({ template, onClose, onSave, busy }) {
       return;
     }
     onSave({
-      wholesalePriceCents: form.wholesalePriceCents === '' ? null : Number(form.wholesalePriceCents),
+      wholesalePriceCents: dollarsToCents(form.wholesalePrice),
       minimumDailyVolume: Number(form.minimumDailyVolume),
       maximumDailyVolume: Number(form.maximumDailyVolume),
       defaultDailyVolume: Number(form.defaultDailyVolume),
-      minimumDepositCents: Number(form.minimumDepositCents),
+      minimumDepositCents: dollarsToCents(form.minimumDeposit),
       boberdooTypeId: form.boberdooTypeId || null,
       boberdooTemplateReference: form.boberdooTemplateReference || null,
       active: form.active,
@@ -307,13 +308,13 @@ function TemplateEditModal({ template, onClose, onSave, busy }) {
       <Card style={s.modal} onClick={(e) => e.stopPropagation()}>
         <SectionHeader>EDIT — {template.displayName.toUpperCase()}</SectionHeader>
         <form onSubmit={submit} style={s.form}>
-          <label style={s.fieldLabel}>Wholesale price (cents per lead/call)<input style={s.input} type="number" value={form.wholesalePriceCents} onChange={(e) => setForm({ ...form, wholesalePriceCents: e.target.value })} /></label>
+          <label style={s.fieldLabel}>Wholesale price ($ per lead/call)<input style={s.input} type="number" step="0.01" min="0" value={form.wholesalePrice} onChange={(e) => setForm({ ...form, wholesalePrice: e.target.value })} /></label>
           <div style={s.row3}>
             <label style={s.fieldLabel}>Min volume<input style={s.input} type="number" value={form.minimumDailyVolume} onChange={(e) => setForm({ ...form, minimumDailyVolume: e.target.value })} /></label>
             <label style={s.fieldLabel}>Default volume<input style={s.input} type="number" value={form.defaultDailyVolume} onChange={(e) => setForm({ ...form, defaultDailyVolume: e.target.value })} /></label>
             <label style={s.fieldLabel}>Max volume<input style={s.input} type="number" value={form.maximumDailyVolume} onChange={(e) => setForm({ ...form, maximumDailyVolume: e.target.value })} /></label>
           </div>
-          <label style={s.fieldLabel}>Minimum deposit (cents)<input style={s.input} type="number" value={form.minimumDepositCents} onChange={(e) => setForm({ ...form, minimumDepositCents: e.target.value })} /></label>
+          <label style={s.fieldLabel}>Minimum deposit ($)<input style={s.input} type="number" step="0.01" min="0" value={form.minimumDeposit} onChange={(e) => setForm({ ...form, minimumDeposit: e.target.value })} /></label>
           <label style={s.fieldLabel}>Boberdoo Lead_Type ID<input style={s.input} value={form.boberdooTypeId} onChange={(e) => setForm({ ...form, boberdooTypeId: e.target.value })} placeholder="e.g. 21" /></label>
           <label style={s.fieldLabel}>Boberdoo template reference (label only)<input style={s.input} value={form.boberdooTemplateReference} onChange={(e) => setForm({ ...form, boberdooTemplateReference: e.target.value })} /></label>
           <label style={s.fieldLabel}>

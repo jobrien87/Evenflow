@@ -53,7 +53,10 @@ function computeDrillScore(dimensionScores) {
   };
 }
 
-const COACHING_THRESHOLD = 75; // below this, a category is a real coaching opportunity, not just "room to grow"
+// DEFAULT_COACHING_THRESHOLD is the fallback used when the agency has
+// never configured its own Agency.coachingThreshold — below this, a
+// category is a real coaching opportunity, not just "room to grow".
+const DEFAULT_COACHING_THRESHOLD = 75;
 
 // Combines one producer's calls (already-analyzed, in a date range) into
 // a real, non-fabricated coaching breakdown: average scores per real
@@ -102,7 +105,9 @@ async function computeCoachingBreakdown({ prisma, agencyId, userId, from, to }) 
     };
   }).filter(Boolean).sort((a, b) => a.averageScore - b.averageScore);
 
-  const weakCategories = categoryBreakdown.filter((c) => c.averageScore < COACHING_THRESHOLD).slice(0, 3);
+  const agency = agencyId ? await prisma.agency.findUnique({ where: { id: agencyId }, select: { coachingThreshold: true } }) : null;
+  const coachingThreshold = agency?.coachingThreshold ?? DEFAULT_COACHING_THRESHOLD;
+  const weakCategories = categoryBreakdown.filter((c) => c.averageScore < coachingThreshold).slice(0, 3);
   const coachingOpportunities = await Promise.all(
     weakCategories.map(async (c) => {
       const course = await prisma.trainingCourse.findFirst({ where: { title: c.category }, select: { id: true, title: true } });
@@ -126,4 +131,4 @@ async function computeCoachingBreakdown({ prisma, agencyId, userId, from, to }) 
   };
 }
 
-module.exports = { computeDrillScore, computeCoachingBreakdown, CATEGORIES };
+module.exports = { computeDrillScore, computeCoachingBreakdown, CATEGORIES, DEFAULT_COACHING_THRESHOLD };

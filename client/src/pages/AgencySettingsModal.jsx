@@ -30,6 +30,22 @@ export default function AgencySettingsModal({ agency, onClose, onSaved }) {
     Object.entries(agency.priorityRules?.statusRules || DEFAULT_STATUS_RULES)
       .map(([status, r]) => ({ status, afterDays: r.afterDays, action: r.action }))
   );
+  // Distinct from the Lead Priority rules above — these schedule a real
+  // Follow-Up Task when a lead has sat in a disposition for N days,
+  // rather than only adjusting sort order. Empty by default (nothing
+  // auto-scheduled) unless the agency has already configured one.
+  const [followUpRows, setFollowUpRows] = useState(() =>
+    Object.entries(agency.followUpRules || {}).map(([status, afterDays]) => ({ status, afterDays }))
+  );
+  // Thresholds & automation — every agency-configurable constant that
+  // used to be a hardcoded/env-var fallback across the app. The two SLA
+  // fields are left blank (null) to mean "use this app's own built-in
+  // default" — never forced to a number just to have one.
+  const [slaMinutes, setSlaMinutes] = useState(agency.firstAttemptSlaMinutes != null ? String(agency.firstAttemptSlaMinutes) : '');
+  const [staleHours, setStaleHours] = useState(agency.staleLeadHours != null ? String(agency.staleLeadHours) : '');
+  const [duplicateWindowDays, setDuplicateWindowDays] = useState(String(agency.saleDuplicateWindowDays ?? 3));
+  const [coachingThreshold, setCoachingThreshold] = useState(String(agency.coachingThreshold ?? 75));
+  const [requireNoteStatuses, setRequireNoteStatuses] = useState(agency.requireDispositionNoteStatuses || []);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -90,6 +106,22 @@ export default function AgencySettingsModal({ agency, onClose, onSaved }) {
     setRuleRows(ruleRows.filter((_, idx) => idx !== i));
   }
 
+  function addFollowUpRule() {
+    const used = new Set(followUpRows.map((r) => r.status));
+    const status = STATUS_OPTIONS.find((s) => !used.has(s)) || STATUS_OPTIONS[0];
+    setFollowUpRows([...followUpRows, { status, afterDays: 2 }]);
+  }
+  function updateFollowUpRule(i, patch) {
+    setFollowUpRows(followUpRows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  }
+  function removeFollowUpRule(i) {
+    setFollowUpRows(followUpRows.filter((_, idx) => idx !== i));
+  }
+
+  function toggleRequireNoteStatus(status) {
+    setRequireNoteStatuses((prev) => (prev.includes(status) ? prev.filter((s) => s !== status) : [...prev, status]));
+  }
+
   async function submit(e) {
     e.preventDefault();
     setBusy(true);
@@ -98,11 +130,20 @@ export default function AgencySettingsModal({ agency, onClose, onSaved }) {
       const statusRules = Object.fromEntries(
         ruleRows.map((r) => [r.status, { afterDays: Number(r.afterDays) || 0, action: r.action }])
       );
+      const followUpRules = Object.fromEntries(
+        followUpRows.map((r) => [r.status, Number(r.afterDays) || 1])
+      );
       await api.updateAgency(agency.id, {
         name: form.name,
         timezone: form.timezone,
         products: form.products.split(',').map((p) => p.trim()).filter(Boolean),
         priorityRules: { typeRank, statusRules },
+        followUpRules: Object.keys(followUpRules).length > 0 ? followUpRules : null,
+        firstAttemptSlaMinutes: slaMinutes.trim() === '' ? null : Math.round(Number(slaMinutes)),
+        staleLeadHours: staleHours.trim() === '' ? null : Math.round(Number(staleHours)),
+        saleDuplicateWindowDays: Math.round(Number(duplicateWindowDays)) || 0,
+        coachingThreshold: Math.round(Number(coachingThreshold)) || 0,
+        requireDispositionNoteStatuses: requireNoteStatuses,
       });
       onSaved();
     } catch (error) {
@@ -153,6 +194,60 @@ export default function AgencySettingsModal({ agency, onClose, onSaved }) {
             </div>
           ))}
           <button type="button" style={s.addRuleButton} onClick={addRule}>+ ADD RULE</button>
+        </div>
+
+        <div style={s.divider} />
+        <SectionHeader>Follow-Up Rules</SectionHeader>
+        <div style={s.helpText}>
+          When a lead is dispositioned to one of these statuses, automatically put a real Follow-Up Task on the assigned producer's queue after N days — e.g. "Left VM" followed up again in 2 days. A new disposition always replaces any still-pending follow-up.
+        </div>
+        <div style={s.rulesTable}>
+          {followUpRows.map((rule, i) => (
+            <div key={i} style={s.ruleRow}>
+              <select style={s.select} value={rule.status} onChange={(e) => updateFollowUpRule(i, { status: e.target.value })}>
+                {STATUS_OPTIONS.map((st) => <option key={st} value={st}>{st.replace(/_/g, ' ')}</option>)}
+              </select>
+              <span style={s.ruleLabel}>follow up after</span>
+              <input style={s.miniInput} type="number" min={1} value={rule.afterDays} onChange={(e) => updateFollowUpRule(i, { afterDays: e.target.value })} />
+              <span style={s.ruleLabel}>day(s)</span>
+              <button type="button" style={s.removeButton} onClick={() => removeFollowUpRule(i)}>✕</button>
+            </div>
+          ))}
+          <button type="button" style={s.addRuleButton} onClick={addFollowUpRule}>+ ADD FOLLOW-UP RULE</button>
+        </div>
+
+        <div style={s.divider} />
+        <SectionHeader>Thresholds &amp; Automation</SectionHeader>
+        <div style={s.helpText}>Leave a field blank to use this app's own built-in default.</div>
+        <label style={s.fieldLabel}>
+          First-Attempt SLA (minutes) — alert if a new lead sits unattempted this long
+          <input style={s.input} type="number" min={1} placeholder="Default: 30" value={slaMinutes} onChange={(e) => setSlaMinutes(e.target.value)} />
+        </label>
+        <label style={s.fieldLabel}>
+          Stale-Lead Reminder (hours) — nudge the assigned producer after no activity this long
+          <input style={s.input} type="number" min={1} placeholder="Default: 4" value={staleHours} onChange={(e) => setStaleHours(e.target.value)} />
+        </label>
+        <label style={s.fieldLabel}>
+          Sale Duplicate-Detection Window (days) — how far back/forward to cross-check historical records
+          <input style={s.input} type="number" min={0} max={90} value={duplicateWindowDays} onChange={(e) => setDuplicateWindowDays(e.target.value)} />
+        </label>
+        <label style={s.fieldLabel}>
+          Coaching Score Threshold — a drill category below this average is flagged as a coaching opportunity
+          <input style={s.input} type="number" min={0} max={100} value={coachingThreshold} onChange={(e) => setCoachingThreshold(e.target.value)} />
+        </label>
+
+        <div style={s.helpText}>Require a note when dispositioning a lead to any of these statuses:</div>
+        <div style={s.chipRow}>
+          {STATUS_OPTIONS.map((st) => (
+            <button
+              type="button"
+              key={st}
+              style={requireNoteStatuses.includes(st) ? s.chipActive : s.chip}
+              onClick={() => toggleRequireNoteStatus(st)}
+            >
+              {st.replace(/_/g, ' ')}
+            </button>
+          ))}
         </div>
 
         {err && <div style={s.error}>{err}</div>}
@@ -234,4 +329,7 @@ const s = {
   removeButton: { background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 12 },
   addRuleButton: { alignSelf: 'flex-start', background: 'none', border: '1px dashed var(--border-strong)', borderRadius: 6, color: 'var(--accent)', cursor: 'pointer', fontSize: 11, padding: '6px 10px' },
   dangerZoneBox: { display: 'flex', flexDirection: 'column', gap: 10, padding: 12, border: '1px solid rgba(255, 77, 94, 0.3)', borderRadius: 8 },
+  chipRow: { display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
+  chip: { padding: '5px 10px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 999, color: 'var(--text-secondary)', fontSize: 11, cursor: 'pointer' },
+  chipActive: { padding: '5px 10px', background: 'var(--accent)', border: '1px solid var(--accent)', borderRadius: 999, color: 'var(--bg)', fontSize: 11, cursor: 'pointer', fontWeight: 600 },
 };

@@ -67,6 +67,7 @@ const updateSchema = z.object({
   routingZipRanges: z.array(zipRangeSchema).max(50).optional(),
   isDefaultOffice: z.boolean().optional(),
   routingMode: z.enum(['ROUND_ROBIN', 'ALPHA_SPLIT']).optional(),
+  includeManagersInRoundRobin: z.boolean().optional(),
 });
 
 // A city/zip-range value configured on one office while it's already
@@ -132,6 +133,7 @@ router.patch('/:officeId', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFO
       ...(parsed.data.routingZipRanges !== undefined ? { routingZipRanges: parsed.data.routingZipRanges } : {}),
       ...(parsed.data.routingMode !== undefined ? { routingMode: parsed.data.routingMode } : {}),
       ...(parsed.data.isDefaultOffice !== undefined ? { isDefaultOffice: parsed.data.isDefaultOffice } : {}),
+      ...(parsed.data.includeManagersInRoundRobin !== undefined ? { includeManagersInRoundRobin: parsed.data.includeManagersInRoundRobin } : {}),
     };
 
     const updated = await prisma.$transaction(async (tx) => {

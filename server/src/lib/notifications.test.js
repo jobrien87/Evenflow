@@ -205,6 +205,7 @@ test('speed-to-lead sweep keeps its critical in-app alert and one-time alert tim
   h.prisma.lead = {
     findMany: async () => [{
       id: 'overdue', agencyId: 'agency', assignedToId: 'producer',
+      assignedAt: new Date(Date.now() - 60 * 60 * 1000), agency: { firstAttemptSlaMinutes: null },
       customer: { firstName: 'Test', lastName: 'Lead' },
     }],
     update: async (args) => { updates.push(args); },

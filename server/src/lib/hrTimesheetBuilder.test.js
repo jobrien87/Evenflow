@@ -132,6 +132,7 @@ before(async () => {
 after(async () => {
   await prisma.hrTimesheetSegment.deleteMany({ where: { timesheet: { agencyId } } });
   await prisma.hrTimesheet.deleteMany({ where: { agencyId } });
+  await prisma.hrSettings.deleteMany({ where: { agencyId } });
   await prisma.timeClockEntry.deleteMany({ where: { agencyId } });
   await prisma.hrEmployeeProfile.deleteMany({ where: { agencyId } });
   await prisma.user.deleteMany({ where: { agencyId } });
@@ -148,6 +149,45 @@ test('buildTimesheetForEmployee sums real TimeClockEntry rows correctly for a pe
   const built = await buildTimesheetForEmployee({ employeeProfileId, userId, agencyId, periodStart, periodEnd });
   assert.equal(built.regularMinutes, 450); // 480 - 30 min lunch
   assert.equal(built.paidLeaveMinutes, 0, 'Part C has not shipped yet — never fabricate a leave figure');
+});
+
+test('buildTimesheetForEmployee reads the agency\'s real HrSettings.weeklyOvertimeThresholdMinutes instead of the hardcoded 40h default', async () => {
+  await prisma.timeClockEntry.deleteMany({ where: { agencyId } });
+  await prisma.hrSettings.upsert({
+    where: { agencyId },
+    create: { agencyId, weeklyOvertimeThresholdMinutes: 100 },
+    update: { weeklyOvertimeThresholdMinutes: 100 },
+  });
+  try {
+    const periodStart = at(0, 0, -1);
+    const periodEnd = at(0, 0, 1);
+    await prisma.timeClockEntry.create({ data: { userId, agencyId, clockInAt: at(9), clockOutAt: at(17) } }); // 480 regular minutes
+    const built = await buildTimesheetForEmployee({ employeeProfileId, userId, agencyId, periodStart, periodEnd });
+    assert.equal(built.regularMinutes, 480);
+    assert.equal(built.overtimeMinutes, 380, '480 - the configured 100-minute threshold = 380, not 480 - the old hardcoded 2400-minute (40h) default');
+  } finally {
+    await prisma.hrSettings.deleteMany({ where: { agencyId } });
+  }
+});
+
+test('buildTimesheetForEmployee reads the agency\'s real HrSettings.staleOpenShiftHours instead of the hardcoded 16h default', async () => {
+  await prisma.timeClockEntry.deleteMany({ where: { agencyId } });
+  await prisma.hrSettings.upsert({
+    where: { agencyId },
+    create: { agencyId, staleOpenShiftHours: 2 },
+    update: { staleOpenShiftHours: 2 },
+  });
+  try {
+    const clockInAt = new Date(Date.now() - 4 * 60 * 60 * 1000); // 4 hours ago — stale under a 2h threshold, not under the default 16h
+    await prisma.timeClockEntry.create({ data: { userId, agencyId, clockInAt, clockOutAt: null } });
+    const built = await buildTimesheetForEmployee({ employeeProfileId, userId, agencyId, periodStart: at(0, 0, -1), periodEnd: at(0, 0, 1) });
+    const last = built.segments[built.segments.length - 1];
+    assert.equal(last.isException, true);
+    assert.equal(last.exceptionReason, 'STILL_OPEN_PAST_EXPECTED_SHIFT_LENGTH');
+  } finally {
+    await prisma.hrSettings.deleteMany({ where: { agencyId } });
+    await prisma.timeClockEntry.deleteMany({ where: { agencyId } });
+  }
 });
 
 test('computeAndStoreTimesheet persists segments and recomputing updates them, but an APPROVED timesheet is locked', async () => {

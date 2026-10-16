@@ -15,7 +15,7 @@
 // deferred to once Part C's scheduling data exists — never guessed at
 // here.
 const { prisma } = require('../lib/db');
-const { segmentsForEntry } = require('../lib/hrTimesheetBuilder');
+const { segmentsForEntry, STALE_OPEN_SHIFT_HOURS } = require('../lib/hrTimesheetBuilder');
 
 async function detectMissedPunches({ now = new Date() } = {}) {
   const agencies = await prisma.agency.findMany({ where: { hrEnabled: true }, select: { id: true } });
@@ -24,16 +24,20 @@ async function detectMissedPunches({ now = new Date() } = {}) {
   let created = 0;
   for (const agency of agencies) {
     // eslint-disable-next-line no-await-in-loop
-    const openEntries = await prisma.timeClockEntry.findMany({
-      where: { agencyId: agency.id, clockOutAt: null },
-      include: { user: { select: { id: true, hrEmployeeProfile: { select: { id: true } } } } },
-    });
+    const [openEntries, settings] = await Promise.all([
+      prisma.timeClockEntry.findMany({
+        where: { agencyId: agency.id, clockOutAt: null },
+        include: { user: { select: { id: true, hrEmployeeProfile: { select: { id: true } } } } },
+      }),
+      prisma.hrSettings.findUnique({ where: { agencyId: agency.id } }),
+    ]);
+    const staleOpenShiftHours = settings?.staleOpenShiftHours ?? STALE_OPEN_SHIFT_HOURS;
 
     for (const entry of openEntries) {
       const profile = entry.user?.hrEmployeeProfile;
       if (!profile) continue; // no HR profile for this user yet — nothing to attach the exception to
 
-      const segs = segmentsForEntry(entry, now);
+      const segs = segmentsForEntry(entry, now, staleOpenShiftHours);
       const lastSeg = segs[segs.length - 1];
       if (!lastSeg.isException || lastSeg.exceptionReason !== 'STILL_OPEN_PAST_EXPECTED_SHIFT_LENGTH') continue;
 
