@@ -344,6 +344,13 @@ model User {
   // and day). Never required, never shown to anyone but the account owner
   // and their agency leadership.
   birthday                  DateTime?
+  // Personalize page — Main Stage dashboard customization. Keys from
+  // DASHBOARD_WIDGETS (client/src/lib/dashboardWidgets.js) this user has
+  // hidden. Empty array = nothing hidden = today's dashboard exactly as
+  // it renders now (the per-user default), with zero special-case code.
+  // A key no longer present in the registry (e.g. a retired widget)
+  // simply never matches in isWidgetVisible() — harmless, self-healing.
+  hiddenDashboardWidgets    String[]       @default([])
   // Set the first time this user's post-signup "welcome" celebration
   // (confetti) has been shown — mirrors tourCompletedAt's exact pattern,
   // just for a one-time celebratory moment instead of the product tour.

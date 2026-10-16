@@ -104,15 +104,23 @@ router.get('/coaching', requireRole('PRODUCER', 'AGENCY_MANAGER', 'AGENCY_OWNER'
       // breakdown, never another producer's.
       targetUserId = req.user.id;
       agencyId = req.user.agencyId;
-    } else {
+    } else if (req.query.userId) {
       targetUserId = req.query.userId;
-      if (!targetUserId) return res.status(400).json({ success: false, error: 'USER_REQUIRED', message: 'userId is required.' });
       const target = await prisma.user.findUnique({ where: { id: targetUserId }, select: { agencyId: true, role: true } });
       if (!target) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
       if (req.user.role !== 'PLATFORM_OWNER' && target.agencyId !== req.user.agencyId) {
         return res.status(403).json({ success: false, error: 'FORBIDDEN' });
       }
       agencyId = target.agencyId;
+    } else if (req.user.role === 'AGENCY_OWNER' || req.user.role === 'AGENCY_MANAGER') {
+      // Agency-wide breakdown for the Main Stage dashboard's Call
+      // Coaching widget — computeCoachingBreakdown already treats an
+      // omitted userId as agency-wide. Every existing caller still always
+      // passes a real userId, so this branch is purely additive.
+      targetUserId = undefined;
+      agencyId = req.user.agencyId;
+    } else {
+      return res.status(400).json({ success: false, error: 'USER_REQUIRED', message: 'userId is required.' });
     }
 
     const to = req.query.to ? new Date(req.query.to) : new Date();

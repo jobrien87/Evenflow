@@ -584,6 +584,9 @@ function publicUser(user) {
     birthday: user.birthday,
     firstLoginCelebratedAt: user.firstLoginCelebratedAt,
     mfaEnabled: user.mfaEnabled,
+    // Personalize page — Main Stage dashboard widget visibility. See
+    // client/src/lib/dashboardWidgets.js's isWidgetVisible().
+    hiddenDashboardWidgets: user.hiddenDashboardWidgets,
   };
 }
 

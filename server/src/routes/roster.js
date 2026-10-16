@@ -136,6 +136,48 @@ router.get('/birthdays', requireRole(...LEADERSHIP_ROLES), async (req, res, next
 });
 
 // ---------------------------------------------------------------------
+// Work anniversaries — upcoming, within the next 30 days, agency-scoped.
+// Mirrors /birthdays exactly, against HrEmployeeProfile.hireDate instead
+// of User.birthday (the real hire-date field from the merged HR suite).
+// ---------------------------------------------------------------------
+
+router.get('/anniversaries', requireRole(...LEADERSHIP_ROLES), async (req, res, next) => {
+  try {
+    const agencyId = scopeAgencyIdForRoster(req);
+    if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+
+    const profiles = await prisma.hrEmployeeProfile.findMany({
+      where: { agencyId, hireDate: { not: null }, terminationDate: null, user: { status: 'ACTIVE' } },
+      select: { hireDate: true, user: { select: { id: true, firstName: true, lastName: true } } },
+    });
+
+    const today = new Date();
+    const todayMD = today.getUTCMonth() * 100 + today.getUTCDate();
+    const withNextOccurrence = profiles.map((p) => {
+      const h = new Date(p.hireDate);
+      const hMD = h.getUTCMonth() * 100 + h.getUTCDate();
+      let daysUntil = Math.round((new Date(Date.UTC(today.getUTCFullYear(), h.getUTCMonth(), h.getUTCDate())) - new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()))) / 86400000);
+      if (hMD < todayMD) daysUntil += 365;
+      let yearsOfService = today.getUTCFullYear() - h.getUTCFullYear();
+      if (hMD < todayMD) yearsOfService += 1;
+      return {
+        id: p.user.id, firstName: p.user.firstName, lastName: p.user.lastName,
+        month: h.getUTCMonth() + 1, day: h.getUTCDate(), daysUntil, yearsOfService,
+      };
+    });
+
+    // Never celebrate a same-day hire as a "0-year anniversary" — matches
+    // useAccountCelebrations.js's own rule for the per-user popup.
+    const upcoming = withNextOccurrence
+      .filter((u) => u.daysUntil <= 30 && u.yearsOfService > 0)
+      .sort((a, b) => a.daysUntil - b.daysUntil);
+    return res.json({ success: true, anniversaries: upcoming });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------
 // PTO requests
 // ---------------------------------------------------------------------
 

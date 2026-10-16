@@ -3,6 +3,7 @@ export { default as Icon } from './Icon';
 export { default as Logo } from './Logo';
 export { default as LeadTypeIcon } from './LeadTypeIcon';
 export { default as Button } from './Button';
+export { default as Toggle } from './Toggle';
 export { default as Badge } from './Badge';
 export { default as StatTile } from './StatTile';
 export { default as ProgressRing } from './ProgressRing';

@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { useOwnBackgroundImage } from '../lib/useOwnBackgroundImage';
-import { Card, SectionHeader, Button, FileDropzone, pushToast } from '../ui';
+import { Card, SectionHeader, Button, FileDropzone, Toggle, pushToast } from '../ui';
+import { widgetsForRole } from '../lib/dashboardWidgets';
 
 // Reachable by every role at /personalize (see App.jsx) — a per-account
 // cosmetic settings page, not tied to any role's nav tree. Background
@@ -23,6 +24,9 @@ export default function PersonalizePage() {
   const [birthday, setBirthday] = useState(user?.birthday ? user.birthday.slice(0, 10) : '');
   const [savingBirthday, setSavingBirthday] = useState(false);
   const [error, setError] = useState('');
+  const [hiddenWidgets, setHiddenWidgets] = useState(user?.hiddenDashboardWidgets || []);
+  const [savingWidgets, setSavingWidgets] = useState(false);
+  const [widgetsSaved, setWidgetsSaved] = useState(false);
 
   async function handleFile(file) {
     setError('');
@@ -66,6 +70,33 @@ export default function PersonalizePage() {
     }
   }
 
+  function toggleWidget(key, visible) {
+    setWidgetsSaved(false);
+    setHiddenWidgets((prev) => (visible ? prev.filter((k) => k !== key) : [...new Set([...prev, key])]));
+  }
+
+  async function handleSaveWidgets() {
+    setError('');
+    setSavingWidgets(true);
+    try {
+      await api.updatePersonalization({ hiddenDashboardWidgets: hiddenWidgets });
+      await refreshUser();
+      setWidgetsSaved(true);
+      pushToast({ title: 'Main Stage updated', body: 'Your dashboard layout is saved.', icon: 'checklist' });
+    } catch (err) {
+      setError(err.data?.message || 'Could not save your Main Stage layout.');
+    } finally {
+      setSavingWidgets(false);
+    }
+  }
+
+  const widgetGroups = widgetsForRole(user).reduce((groups, w) => {
+    const last = groups[groups.length - 1];
+    if (last && last.name === w.group) last.items.push(w);
+    else groups.push({ name: w.group, items: [w] });
+    return groups;
+  }, []);
+
   return (
     <div style={s.wrap}>
       <Card style={{ marginBottom: 'var(--space-5)' }}>
@@ -105,6 +136,34 @@ export default function PersonalizePage() {
           </Button>
         </form>
       </Card>
+
+      <Card style={{ marginTop: 'var(--space-5)' }}>
+        <SectionHeader>Main Stage Dashboard</SectionHeader>
+        <div style={s.hint}>
+          Choose which sections appear on your Main Stage dashboard. Nothing you turn off is deleted — it's just
+          hidden from your own view.
+        </div>
+        {widgetGroups.map((g) => (
+          <div key={g.name} style={s.widgetGroup}>
+            <div style={s.widgetGroupHeading}>{g.name}</div>
+            {g.items.map((w) => (
+              <div key={w.key} style={s.widgetRow}>
+                <span style={s.widgetLabel}>{w.label}</span>
+                <Toggle
+                  checked={!hiddenWidgets.includes(w.key)}
+                  onChange={(visible) => toggleWidget(w.key, visible)}
+                  label={w.label}
+                />
+              </div>
+            ))}
+          </div>
+        ))}
+        <div style={s.widgetFooter}>
+          <Button variant="primary" onClick={handleSaveWidgets} disabled={savingWidgets}>
+            {savingWidgets ? 'Saving…' : widgetsSaved ? 'Saved ✓' : 'Save'}
+          </Button>
+        </div>
+      </Card>
     </div>
   );
 }
@@ -123,4 +182,9 @@ const s = {
   },
   birthdayForm: { display: 'flex', gap: 10, alignItems: 'center' },
   input: { padding: '8px 10px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 13 },
+  widgetGroup: { marginBottom: 14 },
+  widgetGroupHeading: { color: 'var(--text-primary)', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
+  widgetRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--border-hairline)' },
+  widgetLabel: { fontSize: 13, color: 'var(--text-secondary)' },
+  widgetFooter: { display: 'flex', justifyContent: 'flex-end', marginTop: 14 },
 };

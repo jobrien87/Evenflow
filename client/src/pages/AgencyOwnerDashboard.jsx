@@ -15,6 +15,22 @@ import PerformanceLeaderboards from './PerformanceLeaderboards';
 import TeamClockStatusBox from './TeamClockStatusBox';
 import AnnouncementComposer from './AnnouncementComposer';
 import { emailStatusMessage, lastEmailStatusInfo, lastEmailDeliveryInfo } from '../lib/emailStatus';
+import { isWidgetVisible } from '../lib/dashboardWidgets';
+import BillboardPanel from './BillboardPanel';
+import LeadSearchBox from './LeadSearchBox';
+import OpportunitiesPanel from './OpportunitiesPanel';
+import MoshpitPanel from './MoshpitPanel';
+import ClosedSalesPanel from './ClosedSalesPanel';
+import GoalsPanel from './GoalsPanel';
+import FinancialsPanel from './FinancialsPanel';
+import ChatThread from './ChatThread';
+import AgencyActivityFeedBox from './AgencyActivityFeedBox';
+import AppointmentsBox from './AppointmentsBox';
+import AgencyCoachingBreakdownBox from './AgencyCoachingBreakdownBox';
+import WorkAnniversariesBox from './WorkAnniversariesBox';
+import TrainingRollupBox from './TrainingRollupBox';
+import BreakRoomEngagementBox from './BreakRoomEngagementBox';
+import FlowScoreBreakdownCard from './FlowScoreBreakdownCard';
 
 export default function AgencyOwnerDashboard() {
   const { user } = useAuth();
@@ -184,6 +200,7 @@ export default function AgencyOwnerDashboard() {
   }
 
   const producers = users.filter((u) => u.role === 'PRODUCER' && u.status === 'ACTIVE');
+  const isVisible = (key) => isWidgetVisible(key, user);
 
   return (
     <div style={s.wrap}>
@@ -202,32 +219,65 @@ export default function AgencyOwnerDashboard() {
             <Button variant="secondary" size="sm" onClick={() => setShowSettings(true)}>AGENCY SETTINGS</Button>
           </div>
         </div>
-        <div style={isMobile ? s.topStacked : s.topSplit}>
-          <FlowScoreCard scope="agency" agencyId={user?.agencyId} title="AGENCY FLOW SCORE" onViewReport={() => setShowReport(true)} />
-          <LeadsSnapshotBox agencyId={user?.agencyId} />
-        </div>
+        {(isVisible('agencyFlowScore') || isVisible('leadsSnapshot')) && (
+          <div style={isMobile ? s.topStacked : (isVisible('agencyFlowScore') && isVisible('leadsSnapshot') ? s.topSplit : s.topSplitSingle)}>
+            {isVisible('agencyFlowScore') && (
+              <FlowScoreCard scope="agency" agencyId={user?.agencyId} title="AGENCY FLOW SCORE" onViewReport={() => setShowReport(true)} />
+            )}
+            {isVisible('leadsSnapshot') && <LeadsSnapshotBox agencyId={user?.agencyId} />}
+          </div>
+        )}
       </section>
 
-      <section style={s.section}>
-        <ZipCodeBox agencyId={user?.agencyId} onViewReport={() => setShowZipReport(true)} />
-      </section>
+      {isVisible('zipCodePerformance') && (
+        <section style={s.section}>
+          <ZipCodeBox agencyId={user?.agencyId} onViewReport={() => setShowZipReport(true)} />
+        </section>
+      )}
 
-      <section style={s.section}>
-        <TeamClockStatusBox />
-      </section>
+      {isVisible('teamClockStatus') && (
+        <section style={s.section}>
+          <TeamClockStatusBox />
+        </section>
+      )}
 
-      <section style={s.section}>
-        <EdSuggestionBox pageContext="agency_dashboard" />
-      </section>
+      {isVisible('edSuggestion') && (
+        <section style={s.section}>
+          <EdSuggestionBox pageContext="agency_dashboard" />
+        </section>
+      )}
 
-      <section style={s.section}>
-        <FunnelMetricsCard scope="agency" title="AGENCY FUNNEL" onSelectStage={selectFunnelStage} />
-      </section>
+      {isVisible('agencyFunnel') && (
+        <section style={s.section}>
+          <FunnelMetricsCard scope="agency" title="AGENCY FUNNEL" onSelectStage={selectFunnelStage} />
+        </section>
+      )}
 
-      <section style={s.section} data-tour="agency-leaderboard-section">
-        <PerformanceLeaderboards agencyId={user?.agencyId} linkToDetail />
-      </section>
+      {isVisible('performanceLeaderboards') && (
+        <section style={s.section} data-tour="agency-leaderboard-section">
+          <PerformanceLeaderboards agencyId={user?.agencyId} linkToDetail />
+        </section>
+      )}
 
+      {isVisible('agencyFlowScoreBreakdown') && (
+        <section style={s.section}>
+          <FlowScoreBreakdownCard agencyId={user?.agencyId} />
+        </section>
+      )}
+
+      {isVisible('agencyCoachingBreakdown') && (
+        <section style={s.section}>
+          <AgencyCoachingBreakdownBox />
+        </section>
+      )}
+
+      {isVisible('billboardSnapshot') && (
+        <section style={s.section}>
+          <BillboardPanel />
+        </section>
+      )}
+
+      {isVisible('officesManagement') && (
       <section style={s.section}>
         <div style={s.headerRow}>
           <h3 style={s.h3}>OFFICES ({offices.length})</h3>
@@ -264,7 +314,9 @@ export default function AgencyOwnerDashboard() {
           </>
         )}
       </section>
+      )}
 
+      {isVisible('teamRoster') && (
       <section style={s.section} data-tour="agency-roster-section">
         <div style={s.headerRow}>
           <h3 style={s.h3}>TEAM ({users.length})</h3>
@@ -370,7 +422,9 @@ export default function AgencyOwnerDashboard() {
           );
         })}
       </section>
+      )}
 
+      {isVisible('telemarketersRoster') && (
       <section style={s.section}>
         <div style={s.headerRow}>
           <h3 style={s.h3}>TELEMARKETERS ({telemarketers.length})</h3>
@@ -399,6 +453,79 @@ export default function AgencyOwnerDashboard() {
           );
         })}
       </section>
+      )}
+
+      {isVisible('moshpitSnapshot') && (
+        <section style={s.section}>
+          <MoshpitPanel />
+        </section>
+      )}
+
+      {isVisible('workAnniversaries') && (
+        <section style={s.section}>
+          <WorkAnniversariesBox />
+        </section>
+      )}
+
+      {isVisible('trainingRollup') && (
+        <section style={s.section}>
+          <TrainingRollupBox />
+        </section>
+      )}
+
+      {isVisible('breakRoomEngagement') && (
+        <section style={s.section}>
+          <BreakRoomEngagementBox />
+        </section>
+      )}
+
+      {isVisible('leadSearch') && (
+        <section style={s.section}>
+          <LeadSearchBox />
+        </section>
+      )}
+
+      {isVisible('winbacksOpportunities') && (
+        <section style={s.section}>
+          <OpportunitiesPanel />
+        </section>
+      )}
+
+      {isVisible('appointments') && (
+        <section style={s.section}>
+          <AppointmentsBox />
+        </section>
+      )}
+
+      {isVisible('closedSalesRecent') && (
+        <section style={s.section}>
+          <ClosedSalesPanel />
+        </section>
+      )}
+
+      {isVisible('goalsPacing') && (
+        <section style={s.section}>
+          <GoalsPanel />
+        </section>
+      )}
+
+      {isVisible('financialsSummary') && (
+        <section style={s.section}>
+          <FinancialsPanel />
+        </section>
+      )}
+
+      {isVisible('teamChatInline') && (
+        <section style={s.section}>
+          <ChatThread entityType="AGENCY" entityId={user?.agencyId} variant="inline" title="TEAM CHAT" />
+        </section>
+      )}
+
+      {isVisible('activityFeed') && (
+        <section style={s.section}>
+          <AgencyActivityFeedBox agencyId={user?.agencyId} />
+        </section>
+      )}
 
       {showReport && (
         <div style={s.reportOverlay} onClick={() => setShowReport(false)}>
@@ -441,6 +568,7 @@ const s = {
   settingsRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8 },
   settingsRowRight: { display: 'flex', gap: 8 },
   topSplit: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'stretch' },
+  topSplitSingle: { display: 'grid', gridTemplateColumns: '1fr', gap: 20 },
   topStacked: { display: 'flex', flexDirection: 'column', gap: 20 },
   inlineEditForm: { display: 'flex', gap: 8, alignItems: 'center', padding: '8px 14px', background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 8, marginTop: -4, marginBottom: 8 },
   flowScoreBadge: (score) => ({

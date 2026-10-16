@@ -98,7 +98,12 @@ router.delete('/me/background', async (req, res, next) => {
 // the falling-effect picker that used to live at this route is retired
 // in favor of real event-driven celebrations (see lib/celebrations.js).
 const personalizeSchema = z.object({
-  birthday: z.string().date().nullable(),
+  birthday: z.string().date().nullable().optional(),
+  // Main Stage dashboard customization — keys from
+  // client/src/lib/dashboardWidgets.js the user has hidden. Not validated
+  // against the real registry here: an unknown/stale key simply never
+  // matches anything in isWidgetVisible(), same as a retired widget.
+  hiddenDashboardWidgets: z.array(z.string()).max(100).optional(),
 });
 
 router.patch('/me/personalize', async (req, res, next) => {
@@ -107,11 +112,14 @@ router.patch('/me/personalize', async (req, res, next) => {
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
     }
+    const data = {};
+    if ('birthday' in parsed.data) data.birthday = parsed.data.birthday ? new Date(parsed.data.birthday) : null;
+    if ('hiddenDashboardWidgets' in parsed.data) data.hiddenDashboardWidgets = parsed.data.hiddenDashboardWidgets;
     const updated = await prisma.user.update({
       where: { id: req.user.id },
-      data: { birthday: parsed.data.birthday ? new Date(parsed.data.birthday) : null },
+      data,
     });
-    return res.json({ success: true, birthday: updated.birthday });
+    return res.json({ success: true, birthday: updated.birthday, hiddenDashboardWidgets: updated.hiddenDashboardWidgets });
   } catch (err) {
     next(err);
   }

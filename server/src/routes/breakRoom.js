@@ -508,6 +508,68 @@ router.get('/stats', async (req, res, next) => {
 });
 
 // ---------------------------------------------------------------------
+// Agency-wide engagement summary — Main Stage dashboard widget. Leadership
+// only, intentionally outside the PRODUCER/TELEMARKETER gate above.
+// ---------------------------------------------------------------------
+router.get('/agency-summary', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const agencyId = req.user.role === 'PLATFORM_OWNER' ? req.query.agencyId : req.user.agencyId;
+    if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+
+    const agency = await prisma.agency.findUnique({ where: { id: agencyId }, select: { breakRoomEnabled: true } });
+    if (!agency?.breakRoomEnabled) {
+      return res.json({ success: true, enabled: false });
+    }
+
+    const weekStart = PERIOD_RANGES.week();
+    const monthStart = PERIOD_RANGES.month();
+    const completedBase = { agencyId, status: 'COMPLETED', excludedFromLeaderboard: false };
+
+    const [sessionsThisWeek, sessionsThisMonth, topScorer, mostActiveGroups, achievementsAllTime, achievementsThisMonth] = await Promise.all([
+      prisma.breakRoomGameSession.count({ where: { ...completedBase, createdAt: { gte: weekStart } } }),
+      prisma.breakRoomGameSession.count({ where: { ...completedBase, createdAt: { gte: monthStart } } }),
+      prisma.breakRoomHighScore.findFirst({
+        where: { agencyId },
+        orderBy: { bestScore: 'desc' },
+        include: { user: { select: { id: true, firstName: true, lastName: true } } },
+      }),
+      prisma.breakRoomGameSession.groupBy({
+        by: ['userId'],
+        where: { ...completedBase, createdAt: { gte: weekStart } },
+        _count: { _all: true },
+        orderBy: { _count: { userId: 'desc' } },
+        take: 1,
+      }),
+      prisma.breakRoomAchievement.count({ where: { agencyId } }),
+      prisma.breakRoomAchievement.count({ where: { agencyId, unlockedAt: { gte: monthStart } } }),
+    ]);
+
+    let mostActiveThisWeek = null;
+    if (mostActiveGroups.length > 0) {
+      const top = mostActiveGroups[0];
+      const user = await prisma.user.findUnique({ where: { id: top.userId }, select: { id: true, firstName: true, lastName: true } });
+      if (user) mostActiveThisWeek = { ...user, sessionCount: top._count._all };
+    }
+
+    return res.json({
+      success: true,
+      enabled: true,
+      sessionsThisWeek,
+      sessionsThisMonth,
+      topScorer: topScorer ? {
+        userId: topScorer.user.id, firstName: topScorer.user.firstName, lastName: topScorer.user.lastName,
+        gameType: topScorer.gameType, bestScore: topScorer.bestScore,
+      } : null,
+      mostActiveThisWeek,
+      achievementsAllTime,
+      achievementsThisMonth,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------
 // Admin — Platform Owner only. Agency-level toggles live on the existing
 // agencies.js entitlements/settings routes (breakRoomEnabled +
 // breakRoomSettings), not here.

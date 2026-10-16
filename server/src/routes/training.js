@@ -211,6 +211,45 @@ router.get('/assignments', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFO
   }
 });
 
+// Agency-wide completion rollup for the Main Stage dashboard's Training
+// Completion widget — cheap count-only groupBy queries (never pulling full
+// assignment+completion rows the way /assignments does for its admin
+// table), matching the completion math CoursesAdminPanel.jsx already does
+// client-side, just moved server-side and aggregate-only.
+router.get('/rollup', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const where = req.user.role === 'PLATFORM_OWNER'
+      ? {}
+      : { user: { agencyId: req.user.agencyId } };
+
+    const [overallGroups, byCourseGroups, courses] = await Promise.all([
+      prisma.trainingAssignment.groupBy({ by: ['status'], where, _count: { _all: true } }),
+      prisma.trainingAssignment.groupBy({ by: ['courseId', 'status'], where, _count: { _all: true } }),
+      prisma.trainingCourse.findMany({ select: { id: true, title: true } }),
+    ]);
+
+    const totalAssignments = overallGroups.reduce((sum, g) => sum + g._count._all, 0);
+    const completedAssignments = overallGroups.find((g) => g.status === 'COMPLETED')?._count._all || 0;
+    const overallCompletionPercent = totalAssignments > 0 ? Math.round((completedAssignments / totalAssignments) * 1000) / 10 : null;
+
+    const courseTitles = new Map(courses.map((c) => [c.id, c.title]));
+    const byCourseTotals = new Map();
+    for (const g of byCourseGroups) {
+      const entry = byCourseTotals.get(g.courseId) || { courseId: g.courseId, title: courseTitles.get(g.courseId) || 'Unknown course', total: 0, completed: 0 };
+      entry.total += g._count._all;
+      if (g.status === 'COMPLETED') entry.completed += g._count._all;
+      byCourseTotals.set(g.courseId, entry);
+    }
+    const byCourse = Array.from(byCourseTotals.values())
+      .map((c) => ({ ...c, completionPercent: c.total > 0 ? Math.round((c.completed / c.total) * 1000) / 10 : null }))
+      .sort((a, b) => b.total - a.total);
+
+    return res.json({ success: true, totalAssignments, completedAssignments, overallCompletionPercent, byCourse });
+  } catch (err) {
+    next(err);
+  }
+});
+
 const completeLessonSchema = z.object({
   assignmentId: z.string().uuid(),
   answers: z.array(z.number().int()).optional(),
