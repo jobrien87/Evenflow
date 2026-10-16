@@ -705,6 +705,7 @@ model Agency {
   breakRoomAchievements    BreakRoomAchievement[]
   sales                    Sale[]
   appointments             Appointment[]
+  flowScoreWeightConfigs   FlowScoreWeightConfig[]
 
   // Backstage HR (docs/hr-suite/)
   hrDepartments             HrDepartment[]
@@ -2384,6 +2385,13 @@ enum FlowScoreRole {
 model FlowScoreWeightConfig {
   id        String        @id @default(uuid())
   role      FlowScoreRole
+  // null = platform-wide default/fallback. PRODUCER and AGENCY configs are
+  // real per-agency rows once an Agency Owner/Manager customizes them (see
+  // "Flow Settings" in the client); TELEMARKETER stays permanently null —
+  // a Telemarketer's submissions span every agency they're assigned to,
+  // with no single agency that owns their scoring weights.
+  agencyId  String?
+  agency    Agency?       @relation(fields: [agencyId], references: [id])
   version   Int
   // { componentKey: weight } — weights for an active config always sum to 100.
   weights   Json
@@ -2392,8 +2400,8 @@ model FlowScoreWeightConfig {
 
   snapshots FlowScoreSnapshot[]
 
-  @@unique([role, version])
-  @@index([role, isActive])
+  @@unique([role, agencyId, version])
+  @@index([role, agencyId, isActive])
 }
 
 model FlowScoreSnapshot {

@@ -1,7 +1,17 @@
 const express = require('express');
 const { prisma } = require('../lib/db');
 const { requireAuth, requireRole } = require('../middleware/auth');
-const { explainScore, componentPlaceholders } = require('../lib/flowScore');
+const { recordAudit } = require('../lib/audit');
+const {
+  explainScore,
+  componentPlaceholders,
+  listWeightConfigsForAgency,
+  updateWeightConfigForAgency,
+} = require('../lib/flowScore');
+
+// Only these roles' weights are ever agency-customizable from "Flow
+// Settings" — TELEMARKETER stays platform-wide (see flowScore.js).
+const EDITABLE_ROLES = ['PRODUCER', 'AGENCY'];
 
 const router = express.Router();
 router.use(requireAuth);
@@ -103,6 +113,62 @@ router.get('/history', async (req, res, next) => {
     });
     return res.json({ success: true, snapshots });
   } catch (err) {
+    next(err);
+  }
+});
+
+// "Flow Settings" — an Agency Owner/Manager's real current Flow Score
+// weights for every role (Agency, Producer, and the platform-wide
+// Telemarketer config shown for visibility), used by the modal opened
+// from the Main Stage Flow Score box.
+router.get('/weights/:agencyId', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    if (req.user.role !== 'PLATFORM_OWNER' && req.user.agencyId !== req.params.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    const configs = await listWeightConfigsForAgency(req.params.agencyId);
+    return res.json({ success: true, configs });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Save a new weight set for one role's agency-scoped config. Only
+// PRODUCER/AGENCY are ever accepted here — TELEMARKETER is platform-wide
+// and has no per-agency config to write.
+router.patch('/weights/:agencyId/:role', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const { agencyId, role } = req.params;
+    if (req.user.role !== 'PLATFORM_OWNER' && req.user.agencyId !== agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    if (!EDITABLE_ROLES.includes(role)) {
+      return res.status(400).json({
+        success: false, error: 'NOT_EDITABLE',
+        message: 'Only Agency and Producer Flow Score weights can be customized here.',
+      });
+    }
+
+    const before = await prisma.flowScoreWeightConfig.findFirst({ where: { role, agencyId, isActive: true } });
+    const updated = await updateWeightConfigForAgency(role, agencyId, req.body?.weights);
+
+    await recordAudit({
+      actorId: req.user.id,
+      actorRole: req.user.role,
+      agencyId,
+      action: 'flow_score.weights_updated',
+      entityType: 'FlowScoreWeightConfig',
+      entityId: updated.id,
+      before: before ? { weights: before.weights, version: before.version } : null,
+      after: { weights: updated.weights, version: updated.version },
+      correlationId: req.correlationId,
+    });
+
+    return res.json({ success: true, config: { role, weights: updated.weights, version: updated.version } });
+  } catch (err) {
+    if (err.code === 'VALIDATION' || err.code === 'NOT_EDITABLE') {
+      return res.status(400).json({ success: false, error: err.code, message: err.message });
+    }
     next(err);
   }
 });

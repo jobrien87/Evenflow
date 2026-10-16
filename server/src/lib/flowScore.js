@@ -43,8 +43,19 @@ const COMPONENT_LABELS = {
   },
 };
 
-async function getActiveWeightConfig(role) {
-  const existing = await prisma.flowScoreWeightConfig.findFirst({ where: { role, isActive: true } });
+// TELEMARKETER weights are platform-wide only — a Telemarketer's
+// submissions span every agency they're assigned to, with no single
+// agency that owns their scoring weights. PRODUCER and AGENCY are real
+// per-agency rows (an Agency Owner/Manager's own "Flow Settings").
+function effectiveAgencyId(role, agencyId) {
+  return role === 'TELEMARKETER' ? null : agencyId || null;
+}
+
+async function getActiveWeightConfig(role, agencyId = null) {
+  const scopedAgencyId = effectiveAgencyId(role, agencyId);
+  const existing = await prisma.flowScoreWeightConfig.findFirst({
+    where: { role, agencyId: scopedAgencyId, isActive: true },
+  });
   const defaultKeys = Object.keys(DEFAULT_WEIGHTS[role]).sort().join(',');
 
   // A config created under an OLD DEFAULT_WEIGHTS shape (e.g. before the
@@ -59,12 +70,92 @@ async function getActiveWeightConfig(role) {
     if (existingKeys === defaultKeys) return existing;
     await prisma.flowScoreWeightConfig.update({ where: { id: existing.id }, data: { isActive: false } });
     return prisma.flowScoreWeightConfig.create({
-      data: { role, version: existing.version + 1, weights: DEFAULT_WEIGHTS[role], isActive: true },
+      data: { role, agencyId: scopedAgencyId, version: existing.version + 1, weights: DEFAULT_WEIGHTS[role], isActive: true },
     });
   }
 
   return prisma.flowScoreWeightConfig.create({
-    data: { role, version: 1, weights: DEFAULT_WEIGHTS[role], isActive: true },
+    data: { role, agencyId: scopedAgencyId, version: 1, weights: DEFAULT_WEIGHTS[role], isActive: true },
+  });
+}
+
+// An Agency Owner/Manager's real, current weight setup for every role
+// Flow Score tracks — used by the "Flow Settings" UI to show today's
+// active weights (agency-customized or still the default) alongside each
+// component's label, and whether this role is actually editable from an
+// agency's own settings (TELEMARKETER is platform-wide, shown read-only).
+async function listWeightConfigsForAgency(agencyId) {
+  const roles = Object.keys(DEFAULT_WEIGHTS);
+  const configs = await Promise.all(roles.map((role) => getActiveWeightConfig(role, agencyId)));
+  return roles.reduce((acc, role, i) => {
+    acc[role] = {
+      role,
+      weights: configs[i].weights,
+      version: configs[i].version,
+      editable: role !== 'TELEMARKETER',
+      labels: COMPONENT_LABELS[role],
+    };
+    return acc;
+  }, {});
+}
+
+// Agency Owner/Manager tuning a role's weights. Only PRODUCER/AGENCY are
+// ever editable this way — TELEMARKETER is platform-wide and has no
+// agency to scope a custom config to. Every weight must be a finite
+// number 0-100, the key set must exactly match today's real scored
+// components (never a stale or invented key), and the set must sum to
+// 100 — the same invariant the schema itself documents and
+// combineComponents relies on.
+async function updateWeightConfigForAgency(role, agencyId, weights) {
+  if (role === 'TELEMARKETER') {
+    const err = new Error('Telemarketer scoring weights are platform-wide and cannot be set per agency.');
+    err.code = 'NOT_EDITABLE';
+    throw err;
+  }
+  if (!agencyId) {
+    const err = new Error('agencyId is required.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  const expectedKeys = Object.keys(DEFAULT_WEIGHTS[role] || {}).sort();
+  if (expectedKeys.length === 0) {
+    const err = new Error(`Unknown Flow Score role: ${role}`);
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  const givenKeys = Object.keys(weights || {}).sort();
+  if (givenKeys.join(',') !== expectedKeys.join(',')) {
+    const err = new Error(`Weights must include exactly: ${expectedKeys.join(', ')}.`);
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  let sum = 0;
+  for (const key of expectedKeys) {
+    const value = weights[key];
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100) {
+      const err = new Error(`${key} must be a number between 0 and 100.`);
+      err.code = 'VALIDATION';
+      throw err;
+    }
+    sum += value;
+  }
+  if (Math.round(sum) !== 100) {
+    const err = new Error(`Weights must sum to 100 (currently ${sum}).`);
+    err.code = 'VALIDATION';
+    throw err;
+  }
+
+  const current = await prisma.flowScoreWeightConfig.findFirst({ where: { role, agencyId, isActive: true } });
+  const normalizedWeights = expectedKeys.reduce((acc, key) => ({ ...acc, [key]: weights[key] }), {});
+
+  if (current) {
+    await prisma.flowScoreWeightConfig.update({ where: { id: current.id }, data: { isActive: false } });
+    return prisma.flowScoreWeightConfig.create({
+      data: { role, agencyId, version: current.version + 1, weights: normalizedWeights, isActive: true },
+    });
+  }
+  return prisma.flowScoreWeightConfig.create({
+    data: { role, agencyId, version: 1, weights: normalizedWeights, isActive: true },
   });
 }
 
@@ -113,8 +204,8 @@ function combineComponents(rawComponents, weights) {
   return { score: Math.round(score), components, excludedComponents };
 }
 
-async function saveSnapshot({ subjectType, subjectId, role, rawComponents }) {
-  const weightConfig = await getActiveWeightConfig(role);
+async function saveSnapshot({ subjectType, subjectId, role, agencyId = null, rawComponents }) {
+  const weightConfig = await getActiveWeightConfig(role, agencyId);
   const { score, components, excludedComponents } = combineComponents(rawComponents, weightConfig.weights);
 
   // No component had any real data at all — there is genuinely nothing to
@@ -138,6 +229,7 @@ async function saveSnapshot({ subjectType, subjectId, role, rawComponents }) {
 // ---- PRODUCER ----
 
 async function computeProducerScore(userId) {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { agencyId: true } });
   const leads = await prisma.lead.findMany({
     where: { assignedToId: userId },
     select: { status: true, assignedAt: true, firstAttemptAt: true, vendorId: true },
@@ -194,7 +286,7 @@ async function computeProducerScore(userId) {
     },
   };
 
-  return saveSnapshot({ subjectType: 'USER', subjectId: userId, role: 'PRODUCER', rawComponents });
+  return saveSnapshot({ subjectType: 'USER', subjectId: userId, role: 'PRODUCER', agencyId: user?.agencyId || null, rawComponents });
 }
 
 // ---- TELEMARKETER ----
@@ -267,7 +359,7 @@ async function computeAgencyScore(agencyId) {
     },
   };
 
-  return saveSnapshot({ subjectType: 'AGENCY', subjectId: agencyId, role: 'AGENCY', rawComponents });
+  return saveSnapshot({ subjectType: 'AGENCY', subjectId: agencyId, role: 'AGENCY', agencyId, rawComponents });
 }
 
 // Turns a stored snapshot's components into "strongest area" / "biggest
@@ -321,6 +413,8 @@ module.exports = {
   computeAgencyScore,
   explainScore,
   getActiveWeightConfig,
+  listWeightConfigsForAgency,
+  updateWeightConfigForAgency,
   combineComponents,
   componentPlaceholders,
   COMPONENT_LABELS,

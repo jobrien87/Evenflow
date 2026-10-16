@@ -261,6 +261,9 @@ export const api = {
   userFlowScore: (userId) => request(`/flow-score/user/${userId}`),
   agencyFlowScore: (agencyId) => request(`/flow-score/agency/${agencyId}`),
   flowScoreHistory: (subjectType, subjectId) => request(`/flow-score/history?subjectType=${subjectType}&subjectId=${subjectId}`),
+  flowScoreWeights: (agencyId) => request(`/flow-score/weights/${agencyId}`),
+  updateFlowScoreWeights: (agencyId, role, weights) =>
+    request(`/flow-score/weights/${agencyId}/${role}`, { method: 'PATCH', body: { weights } }),
 
   edStatus: () => request('/ed/status'),
   edAsk: (message, humorLevel) => request('/ed/ask', { method: 'POST', body: { message, humorLevel } }),

@@ -1,13 +1,26 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
+import { useAuth } from '../lib/AuthContext';
 import { Card, SectionHeader, ProgressRing, Button } from '../ui';
+import FlowSettingsModal from './FlowSettingsModal';
+
+const WEIGHT_EDITOR_ROLES = ['AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'];
 
 // A real Flow Score card — reads a computed snapshot, never fabricates a
 // number. Shows an honest "not enough activity yet" state instead of a
 // fake score when nothing has been computed.
 export default function FlowScoreCard({ scope = 'me', agencyId, title = 'FLOW SCORE', onViewReport }) {
+  const { user } = useAuth();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
+  const [showSettings, setShowSettings] = useState(false);
+
+  const canEditWeights = scope === 'agency' && agencyId && WEIGHT_EDITOR_ROLES.includes(user?.role);
+  const settingsButton = canEditWeights && (
+    <Button variant="secondary" size="sm" onClick={() => setShowSettings(true)}>
+      FLOW SETTINGS
+    </Button>
+  );
 
   useEffect(() => {
     load();
@@ -28,7 +41,7 @@ export default function FlowScoreCard({ scope = 'me', agencyId, title = 'FLOW SC
   if (!data.snapshot) {
     return (
       <Card data-tour="flow-score">
-        <SectionHeader>{title}</SectionHeader>
+        <SectionHeader right={settingsButton}>{title}</SectionHeader>
         <div style={s.scoreRow}>
           <ProgressRing value={null} size={88} strokeWidth={7} />
           <div style={s.driversWrap}>
@@ -49,6 +62,7 @@ export default function FlowScoreCard({ scope = 'me', agencyId, title = 'FLOW SC
             View full report →
           </Button>
         )}
+        {showSettings && <FlowSettingsModal agencyId={agencyId} onClose={() => setShowSettings(false)} />}
       </Card>
     );
   }
@@ -57,7 +71,14 @@ export default function FlowScoreCard({ scope = 'me', agencyId, title = 'FLOW SC
 
   return (
     <Card data-tour="flow-score">
-      <SectionHeader right={<span style={s.updated}>Updated {new Date(snapshot.computedAt).toLocaleString()}</span>}>
+      <SectionHeader
+        right={
+          <div style={s.headerRight}>
+            {settingsButton}
+            <span style={s.updated}>Updated {new Date(snapshot.computedAt).toLocaleString()}</span>
+          </div>
+        }
+      >
         {title}
       </SectionHeader>
 
@@ -101,11 +122,13 @@ export default function FlowScoreCard({ scope = 'me', agencyId, title = 'FLOW SC
           View full report →
         </Button>
       )}
+      {showSettings && <FlowSettingsModal agencyId={agencyId} onClose={() => setShowSettings(false)} />}
     </Card>
   );
 }
 
 const s = {
+  headerRight: { display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', justifyContent: 'flex-end' },
   updated: { color: 'var(--text-muted)', fontSize: 11, fontWeight: 400 },
   scoreRow: { display: 'flex', alignItems: 'center', gap: 24, marginBottom: 16, flexWrap: 'wrap' },
   driversWrap: { flex: 1, minWidth: 180, display: 'flex', flexDirection: 'column', gap: 12 },
