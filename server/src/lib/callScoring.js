@@ -61,11 +61,15 @@ const DEFAULT_COACHING_THRESHOLD = 75;
 // Combines one producer's calls (already-analyzed, in a date range) into
 // a real, non-fabricated coaching breakdown: average scores per real
 // drill category across every call, plus the weakest categories linked
-// to their real, assignable TrainingCourse.
+// to their real, assignable TrainingCourse. `userId` omitted (undefined/
+// null) runs agency-wide instead of for one producer — every existing
+// caller (Call Scoring's own routes) always passes a real userId, so this
+// is purely an additive new calling mode, never a behavior change for
+// today's callers.
 async function computeCoachingBreakdown({ prisma, agencyId, userId, from, to }) {
   const calls = await prisma.call.findMany({
     where: {
-      uploadedById: userId,
+      ...(userId ? { uploadedById: userId } : {}),
       ...(agencyId ? { agencyId } : {}),
       status: 'COMPLETE',
       createdAt: { gte: from, lte: to },

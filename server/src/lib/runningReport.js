@@ -5,7 +5,7 @@
 // functions the standalone Flow Score / funnel endpoints already use.
 
 const { prisma } = require('./db');
-const { explainScore } = require('./flowScore');
+const { explainScore, scoreToGrade } = require('./flowScore');
 const { computeFunnel } = require('./funnelMetrics');
 const { sumSalePremium, countSales, countStandaloneSales } = require('./manualSaleAggregates');
 
@@ -204,6 +204,7 @@ async function assembleAgencyReport(agencyId, range) {
         firstName: p.firstName,
         lastName: p.lastName,
         score: snapshot ? snapshot.score : null,
+        grade: snapshot ? scoreToGrade(snapshot.score) : null,
         trend: trendDirection(history),
       };
     })

@@ -1,6 +1,12 @@
+import Badge from './Badge';
+import { gradeTone } from './statusTones';
+
 // SVG radial gauge with a gradient stroke — references the shared
 // #accent-gradient defined once by <GradientDefs/> at the app root.
-export default function ProgressRing({ value, max = 100, size = 96, strokeWidth = 8, label }) {
+// `grade` (optional) renders a small colored A-F badge under the central
+// number — always a string that came from a server response field
+// (flowScore.js's scoreToGrade), never re-derived here.
+export default function ProgressRing({ value, max = 100, size = 96, strokeWidth = 8, label, grade }) {
   const hasValue = value !== null && value !== undefined;
   const pct = hasValue ? Math.max(0, Math.min(1, value / max)) : 0;
   const r = (size - strokeWidth) / 2;
@@ -36,9 +42,14 @@ export default function ProgressRing({ value, max = 100, size = 96, strokeWidth 
           justifyContent: 'center',
         }}
       >
-        <div style={{ fontFamily: 'var(--font-display)', fontSize: size * 0.28, fontWeight: 700, color: 'var(--text-primary)' }}>
+        <div style={{ fontFamily: 'var(--font-display)', fontSize: size * 0.28, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1 }}>
           {hasValue ? value : '—'}
         </div>
+        {hasValue && grade && (
+          <Badge tone={gradeTone(grade)} style={{ marginTop: 3, padding: '1px 7px', fontSize: 10 }}>
+            {grade}
+          </Badge>
+        )}
         {label && <div style={{ fontSize: 9, color: 'var(--text-muted)' }}>{label}</div>}
       </div>
     </div>

@@ -27,7 +27,7 @@ export default function FlowScoreSummaryCard({ snapshot, explanation, componentP
       ) : (
         <>
           <div style={s.scoreRow}>
-            <ProgressRing value={snapshot.score} size={88} strokeWidth={7} />
+            <ProgressRing value={snapshot.score} size={88} strokeWidth={7} grade={explanation.grade} />
             <div style={s.driversWrap}>
               {explanation.strongestAreas.length > 0 && (
                 <div>

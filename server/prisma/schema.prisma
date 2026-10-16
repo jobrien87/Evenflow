@@ -2394,7 +2394,19 @@ model FlowScoreWeightConfig {
   agency    Agency?       @relation(fields: [agencyId], references: [id])
   version   Int
   // { componentKey: weight } — weights for an active config always sum to 100.
+  // Always DERIVED from `levels` below via levelsToWeights() at write time,
+  // never edited directly by a human.
   weights   Json
+  // { componentKey: 'LOW'|'MEDIUM'|'HIGH'|'VERY_HIGH' } — the real,
+  // user-facing input behind `weights` above. Every row this app code
+  // creates always sets this alongside `weights` — the `{}` default below
+  // exists only so `prisma db push --accept-data-loss=false` (this app's
+  // real production start command) can add this column to a non-empty
+  // table without a data-loss migration; a `{}` value never matches any
+  // role's real component-key set, so getActiveWeightConfig's existing
+  // shape-mismatch auto-migration treats it exactly like a stale/retired
+  // config and replaces it with a fresh, fully-populated row on next read.
+  levels    Json          @default("{}")
   isActive  Boolean       @default(true)
   createdAt DateTime      @default(now())
 

@@ -388,7 +388,7 @@ router.post('/', requireRole('PRODUCER', 'AGENCY_MANAGER', 'AGENCY_OWNER'), uplo
     // Call Scoring's "upload a recording for a given agent" — a Manager/
     // Owner uploading a batch of recordings after the fact attributes each
     // one to the real producer who was on the call, not to themselves.
-    // uploadedById drives Flow Score's callQuality attribution
+    // uploadedById drives Flow Score's call-quality component attribution
     // (computeProducerScore), so this must be validated, never trusted
     // blindly, same as leadId above.
     let uploadedById = req.user.id;

@@ -150,7 +150,7 @@ router.patch('/weights/:agencyId/:role', requireRole('AGENCY_OWNER', 'AGENCY_MAN
     }
 
     const before = await prisma.flowScoreWeightConfig.findFirst({ where: { role, agencyId, isActive: true } });
-    const updated = await updateWeightConfigForAgency(role, agencyId, req.body?.weights);
+    const updated = await updateWeightConfigForAgency(role, agencyId, req.body?.levels);
 
     await recordAudit({
       actorId: req.user.id,
@@ -159,12 +159,12 @@ router.patch('/weights/:agencyId/:role', requireRole('AGENCY_OWNER', 'AGENCY_MAN
       action: 'flow_score.weights_updated',
       entityType: 'FlowScoreWeightConfig',
       entityId: updated.id,
-      before: before ? { weights: before.weights, version: before.version } : null,
-      after: { weights: updated.weights, version: updated.version },
+      before: before ? { levels: before.levels, weights: before.weights, version: before.version } : null,
+      after: { levels: updated.levels, weights: updated.weights, version: updated.version },
       correlationId: req.correlationId,
     });
 
-    return res.json({ success: true, config: { role, weights: updated.weights, version: updated.version } });
+    return res.json({ success: true, config: { role, levels: updated.levels, weights: updated.weights, version: updated.version } });
   } catch (err) {
     if (err.code === 'VALIDATION' || err.code === 'NOT_EDITABLE') {
       return res.status(400).json({ success: false, error: err.code, message: err.message });

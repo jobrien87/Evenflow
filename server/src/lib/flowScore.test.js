@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const {
   combineComponents, explainScore, computeTelemarketerScore, computeAgencyScore, computeProducerScore,
   getActiveWeightConfig, listWeightConfigsForAgency, updateWeightConfigForAgency,
-  COMPONENT_LABELS, DEFAULT_WEIGHTS,
+  COMPONENT_LABELS, DEFAULT_WEIGHTS, DEFAULT_LEVELS, LEVEL_POINTS, levelsToWeights, scoreToGrade,
 } = require('./flowScore');
 const { prisma } = require('./db');
 
@@ -13,6 +13,57 @@ test('COMPONENT_LABELS has exactly the same component keys as DEFAULT_WEIGHTS fo
     const labelKeys = Object.keys(COMPONENT_LABELS[role]).sort();
     assert.deepEqual(labelKeys, weightKeys, `COMPONENT_LABELS.${role} keys must match DEFAULT_WEIGHTS.${role} keys`);
   }
+});
+
+test('levelsToWeights sums to (rounding-safe) exactly 100 for every real component count, including an uneven split', () => {
+  const cases = [
+    ['TELEMARKETER (2)', DEFAULT_LEVELS.TELEMARKETER],
+    ['AGENCY (8)', DEFAULT_LEVELS.AGENCY],
+    ['PRODUCER (11)', DEFAULT_LEVELS.PRODUCER],
+    // 3-way LOW/LOW/LOW split: totalPoints=3, 100/3 doesn't divide evenly —
+    // the real edge case the "last component absorbs the remainder" design
+    // exists for.
+    ['uneven 3-way LOW/LOW/LOW split', { a: 'LOW', b: 'LOW', c: 'LOW' }],
+  ];
+  for (const [label, levels] of cases) {
+    const keys = Object.keys(levels);
+    const weights = levelsToWeights(levels, keys);
+    const sum = Object.values(weights).reduce((a, b) => a + b, 0);
+    assert.ok(Math.abs(sum - 100) < 0.05, `${label}: expected weights to sum to ~100, got ${sum}`);
+    assert.deepEqual(Object.keys(weights).sort(), keys.sort());
+  }
+});
+
+test('levelsToWeights gives a VERY_HIGH component more weight than a LOW one, proportional to LEVEL_POINTS', () => {
+  const weights = levelsToWeights({ a: 'VERY_HIGH', b: 'LOW' }, ['a', 'b']);
+  assert.equal(LEVEL_POINTS.VERY_HIGH, 4);
+  assert.equal(LEVEL_POINTS.LOW, 1);
+  assert.ok(weights.a > weights.b);
+  // 4:1 ratio -> a should be 80, b should be 20 (the last key absorbs the
+  // exact remainder here since 4/5*100=80 exactly).
+  assert.equal(weights.a, 80);
+  assert.equal(weights.b, 20);
+});
+
+test('scoreToGrade: A>=90, B>=80, C>=70, D>=60, else F; null/undefined -> null, never a fabricated letter', () => {
+  assert.equal(scoreToGrade(100), 'A');
+  assert.equal(scoreToGrade(90), 'A');
+  assert.equal(scoreToGrade(89), 'B');
+  assert.equal(scoreToGrade(80), 'B');
+  assert.equal(scoreToGrade(79), 'C');
+  assert.equal(scoreToGrade(70), 'C');
+  assert.equal(scoreToGrade(69), 'D');
+  assert.equal(scoreToGrade(60), 'D');
+  assert.equal(scoreToGrade(59), 'F');
+  assert.equal(scoreToGrade(0), 'F');
+  assert.equal(scoreToGrade(null), null);
+  assert.equal(scoreToGrade(undefined), null);
+});
+
+test('explainScore wires grade from scoreToGrade(score) — one source of truth, never a second threshold set', () => {
+  const snapshot = { score: 85, computedAt: new Date(), components: [], excludedComponents: [] };
+  assert.equal(explainScore(snapshot).grade, 'B');
+  assert.equal(explainScore({ ...snapshot, score: 55 }).grade, 'F');
 });
 
 test('combineComponents excludes zero-sample components and renormalizes the rest', () => {
@@ -221,52 +272,282 @@ test('getActiveWeightConfig lazily creates a real per-agency row for AGENCY/PROD
   assert.equal(tmConfig.agencyId, null, 'TELEMARKETER must never be scoped to an agency, even when one is passed');
 });
 
-test('updateWeightConfigForAgency validates role, key set, range, and the sum-to-100 invariant', async () => {
-  await assert.rejects(() => updateWeightConfigForAgency('TELEMARKETER', agencyXId, { leadQuality: 60, downstreamQuality: 40 }), /NOT_EDITABLE|platform-wide/);
-  await assert.rejects(() => updateWeightConfigForAgency('AGENCY', agencyXId, { responseSpeed: 50, funnelHealth: 50 }), /must include exactly/);
-  await assert.rejects(() => updateWeightConfigForAgency('AGENCY', agencyXId, { responseSpeed: 50, funnelHealth: 30, teamCallQuality: 30 }), /sum to 100/);
-  await assert.rejects(() => updateWeightConfigForAgency('AGENCY', agencyXId, { responseSpeed: -5, funnelHealth: 65, teamCallQuality: 40 }), /between 0 and 100/);
+test('updateWeightConfigForAgency validates role, key set, and level values — the old sum-to-100 numeric check is gone entirely', async () => {
+  await assert.rejects(() => updateWeightConfigForAgency('TELEMARKETER', agencyXId, DEFAULT_LEVELS.TELEMARKETER), /NOT_EDITABLE|platform-wide/);
+  const { funnelHealth, ...incompleteAgencyLevels } = DEFAULT_LEVELS.AGENCY;
+  await assert.rejects(() => updateWeightConfigForAgency('AGENCY', agencyXId, incompleteAgencyLevels), /must include exactly/);
+  await assert.rejects(() => updateWeightConfigForAgency('AGENCY', agencyXId, { ...DEFAULT_LEVELS.AGENCY, funnelHealth: 'EXTREME' }), /LOW, MEDIUM, HIGH, VERY_HIGH/);
 });
 
-test('an agency\'s own custom AGENCY/PRODUCER weights never leak into or get overwritten by another agency\'s config', async () => {
-  await updateWeightConfigForAgency('AGENCY', agencyXId, { responseSpeed: 70, funnelHealth: 20, teamCallQuality: 10 });
-  await updateWeightConfigForAgency('PRODUCER', agencyXId, { responsiveness: 70, pipelineDiscipline: 10, conversion: 10, callQuality: 10 });
+test('an agency\'s own custom AGENCY/PRODUCER levels never leak into or get overwritten by another agency\'s config', async () => {
+  const agencyLevels = { ...DEFAULT_LEVELS.AGENCY, responseSpeed: 'VERY_HIGH', funnelHealth: 'LOW' };
+  const producerLevels = { ...DEFAULT_LEVELS.PRODUCER, responsiveness: 'VERY_HIGH', conversion: 'LOW' };
+  await updateWeightConfigForAgency('AGENCY', agencyXId, agencyLevels);
+  await updateWeightConfigForAgency('PRODUCER', agencyXId, producerLevels);
 
   const xConfigs = await listWeightConfigsForAgency(agencyXId);
   const yConfigs = await listWeightConfigsForAgency(agencyYId);
 
-  assert.deepEqual(xConfigs.AGENCY.weights, { responseSpeed: 70, funnelHealth: 20, teamCallQuality: 10 });
-  assert.deepEqual(xConfigs.PRODUCER.weights, { responsiveness: 70, pipelineDiscipline: 10, conversion: 10, callQuality: 10 });
+  assert.deepEqual(xConfigs.AGENCY.levels, agencyLevels);
+  assert.deepEqual(xConfigs.AGENCY.weights, levelsToWeights(agencyLevels, Object.keys(agencyLevels).sort()));
+  assert.deepEqual(xConfigs.PRODUCER.levels, producerLevels);
   // Agency Y, never customized, still sees the untouched platform default.
-  assert.deepEqual(yConfigs.AGENCY.weights, DEFAULT_WEIGHTS.AGENCY);
-  assert.deepEqual(yConfigs.PRODUCER.weights, DEFAULT_WEIGHTS.PRODUCER);
+  assert.deepEqual(yConfigs.AGENCY.levels, DEFAULT_LEVELS.AGENCY);
+  assert.deepEqual(yConfigs.PRODUCER.levels, DEFAULT_LEVELS.PRODUCER);
   // Telemarketer is identical and platform-wide for both — the one role
   // that was never meant to be agency-configurable.
-  assert.deepEqual(xConfigs.TELEMARKETER.weights, yConfigs.TELEMARKETER.weights);
+  assert.deepEqual(xConfigs.TELEMARKETER.levels, yConfigs.TELEMARKETER.levels);
 });
 
-test('computeAgencyScore actually applies this agency\'s own custom weights, not the platform default', async () => {
-  // Weighted entirely onto responseSpeed (100) for agency X — confirms the
-  // real computed score changes when the config does, not just that the
-  // stored row looks right.
-  await updateWeightConfigForAgency('AGENCY', agencyXId, { responseSpeed: 100, funnelHealth: 0, teamCallQuality: 0 });
+test('computeAgencyScore actually applies this agency\'s own custom levels/weights, not the platform default', async () => {
+  // Weighted heavily onto responseSpeed (VERY_HIGH) with everything else
+  // LOW — confirms the real computed score changes when the config does,
+  // not just that the stored row looks right. The raw (pre-renormalized)
+  // `weight` field is deterministic from the active config regardless of
+  // which other components happen to have real sample data.
+  const agencyLevels = {
+    ...DEFAULT_LEVELS.AGENCY, responseSpeed: 'VERY_HIGH', funnelHealth: 'LOW',
+    openingDiscovery: 'LOW', objectionClosing: 'LOW', pipelineControl: 'LOW',
+    contactRate: 'LOW', quoteRate: 'LOW', goalPace: 'LOW',
+  };
+  const expectedWeights = levelsToWeights(agencyLevels, Object.keys(agencyLevels).sort());
+  await updateWeightConfigForAgency('AGENCY', agencyXId, agencyLevels);
   const snapshot = await computeAgencyScore(agencyXId);
   assert.ok(snapshot);
   const responseSpeed = snapshot.components.find((c) => c.key === 'responseSpeed');
-  assert.ok(responseSpeed);
-  assert.equal(responseSpeed.normalizedWeight, 100);
+  assert.ok(responseSpeed, 'expected responseSpeed to be included (real vendor-sourced attempted lead)');
+  assert.equal(responseSpeed.weight, expectedWeights.responseSpeed);
   // funnelHealth still has real sample data (the SOLD lead) so it's
-  // reported as a component with weight 0, not excluded for lack of data.
+  // reported as a real component at its (now much lower, LOW-tier) weight,
+  // not excluded for lack of data.
   const funnelHealth = snapshot.components.find((c) => c.key === 'funnelHealth');
   assert.ok(funnelHealth);
-  assert.equal(funnelHealth.weight, 0);
+  assert.equal(funnelHealth.weight, expectedWeights.funnelHealth);
+  assert.ok(responseSpeed.weight > funnelHealth.weight, 'VERY_HIGH must outweigh LOW');
 });
 
 test('computeProducerScore resolves the producer\'s OWN agency\'s custom weight config automatically', async () => {
-  await updateWeightConfigForAgency('PRODUCER', agencyXId, { responsiveness: 100, pipelineDiscipline: 0, conversion: 0, callQuality: 0 });
+  const producerLevels = { ...DEFAULT_LEVELS.PRODUCER, responsiveness: 'VERY_HIGH', conversion: 'LOW' };
+  const expectedWeights = levelsToWeights(producerLevels, Object.keys(producerLevels).sort());
+  await updateWeightConfigForAgency('PRODUCER', agencyXId, producerLevels);
   const snapshot = await computeProducerScore(producerXId);
   assert.ok(snapshot);
   const responsiveness = snapshot.components.find((c) => c.key === 'responsiveness');
   assert.ok(responsiveness);
-  assert.equal(responsiveness.normalizedWeight, 100);
+  assert.equal(responsiveness.weight, expectedWeights.responsiveness);
+});
+
+test('getActiveWeightConfig auto-migrates a config created under an old/incompatible component shape, deactivating the stale row', async () => {
+  const staleAgency = await prisma.agency.create({ data: { name: `FS Depth Stale Agency ${suffix}` } });
+  try {
+    const stale = await prisma.flowScoreWeightConfig.create({
+      data: {
+        role: 'PRODUCER', agencyId: staleAgency.id, version: 1, isActive: true,
+        // The pre-this-round PRODUCER shape — 4 keys, including the now-
+        // retired `callQuality` — simulating a config saved before this
+        // round's component set changed.
+        levels: { responsiveness: 'HIGH', pipelineDiscipline: 'MEDIUM', conversion: 'VERY_HIGH', callQuality: 'MEDIUM' },
+        weights: { responsiveness: 25, pipelineDiscipline: 20, conversion: 35, callQuality: 20 },
+      },
+    });
+    const fresh = await getActiveWeightConfig('PRODUCER', staleAgency.id);
+    assert.notEqual(fresh.id, stale.id, 'expected a brand new row, not the stale one reused');
+    assert.equal(fresh.version, 2);
+    assert.deepEqual(fresh.levels, DEFAULT_LEVELS.PRODUCER);
+    assert.deepEqual(fresh.weights, DEFAULT_WEIGHTS.PRODUCER);
+
+    const reloadedStale = await prisma.flowScoreWeightConfig.findUnique({ where: { id: stale.id } });
+    assert.equal(reloadedStale.isActive, false, 'the old-shape row must be deactivated, not left active alongside the new one');
+  } finally {
+    await prisma.flowScoreWeightConfig.deleteMany({ where: { agencyId: staleAgency.id } });
+    await prisma.agency.delete({ where: { id: staleAgency.id } });
+  }
+});
+
+// ---- Flow Score depth: the 5 new real Producer components ----
+// (crossSellFollowThrough, moshpitClaimSpeed, trainingCompliance,
+// attendanceCompliance, goalPace) plus the 3-group call-quality combiner
+// shared by Producer/Agency. Each component's zero-sample-excluded case is
+// also covered via a second producer with none of this real data at all.
+
+let depthAgencyId, depthProducerId, depthOtherProducerId, depthEmployeeProfileId;
+let depthLeadIds = [], depthOppIds = [], depthTrainingAssignmentIds = [], depthCourseIds = [];
+let depthExceptionIds = [], depthGoalId, depthCallIds = [];
+
+before(async () => {
+  const agency = await prisma.agency.create({ data: { name: `FS Depth Agency ${suffix}` } });
+  depthAgencyId = agency.id;
+
+  const [producer, otherProducer] = await Promise.all([
+    prisma.user.create({ data: { email: `fs-depth-p-${suffix}@test.local`, firstName: 'Depth', lastName: 'Producer', role: 'PRODUCER', status: 'ACTIVE', agencyId: depthAgencyId } }),
+    prisma.user.create({ data: { email: `fs-depth-p2-${suffix}@test.local`, firstName: 'Depth', lastName: 'Other', role: 'PRODUCER', status: 'ACTIVE', agencyId: depthAgencyId } }),
+  ]);
+  depthProducerId = producer.id;
+  depthOtherProducerId = otherProducer.id;
+
+  // crossSellFollowThrough: 1 WON + 1 DECLINED (both resolved -> 50%) + 1
+  // still-OPEN (not resolved, excluded from the denominator entirely).
+  const customer = await prisma.customer.create({ data: { firstName: 'FS', lastName: 'Depth' } });
+  const [won, declined, open] = await Promise.all([
+    prisma.opportunity.create({ data: { agencyId: depthAgencyId, customerId: customer.id, type: 'CROSS_SELL', product: 'HOME', reason: 'test', assignedToId: depthProducerId, status: 'WON' } }),
+    prisma.opportunity.create({ data: { agencyId: depthAgencyId, customerId: customer.id, type: 'WINBACK', product: 'AUTO', reason: 'test', assignedToId: depthProducerId, status: 'DECLINED' } }),
+    prisma.opportunity.create({ data: { agencyId: depthAgencyId, customerId: customer.id, type: 'CROSS_SELL', product: 'AUTO', reason: 'test', assignedToId: depthProducerId, status: 'OPEN' } }),
+  ]);
+  depthOppIds = [won.id, declined.id, open.id];
+
+  // moshpitClaimSpeed: 1 fast claim (<=15 min), 1 slow claim (>15 min).
+  const now = Date.now();
+  const fastLead = await prisma.lead.create({ data: { agencyId: depthAgencyId, assignedToId: depthProducerId, moshpitEligible: true, receivedAt: new Date(now - 10 * 60 * 1000), assignedAt: new Date(now), status: 'NEW' } });
+  const slowLead = await prisma.lead.create({ data: { agencyId: depthAgencyId, assignedToId: depthProducerId, isLiveTransfer: true, receivedAt: new Date(now - 60 * 60 * 1000), assignedAt: new Date(now), status: 'NEW' } });
+  depthLeadIds = [fastLead.id, slowLead.id];
+
+  // trainingCompliance: 1 completed decided assignment, 1 overdue-incomplete
+  // decided assignment (both due dates in the past -> 50%).
+  const [course1, course2] = await Promise.all([
+    prisma.trainingCourse.create({ data: { title: `FS Depth Course A ${suffix}` } }),
+    prisma.trainingCourse.create({ data: { title: `FS Depth Course B ${suffix}` } }),
+  ]);
+  depthCourseIds = [course1.id, course2.id];
+  const pastDue = new Date(now - 24 * 60 * 60 * 1000);
+  const [completedAssignment, overdueAssignment] = await Promise.all([
+    prisma.trainingAssignment.create({ data: { courseId: course1.id, userId: depthProducerId, dueAt: pastDue, status: 'COMPLETED', completedAt: new Date(now - 48 * 60 * 60 * 1000) } }),
+    prisma.trainingAssignment.create({ data: { courseId: course2.id, userId: depthProducerId, dueAt: pastDue, status: 'ASSIGNED' } }),
+  ]);
+  depthTrainingAssignmentIds = [completedAssignment.id, overdueAssignment.id];
+
+  // attendanceCompliance: 1 resolved-excused, 1 resolved-unexcused, and 1
+  // still-OPEN (never counted — hasn't been judged yet).
+  const employeeProfile = await prisma.hrEmployeeProfile.create({ data: { userId: depthProducerId, agencyId: depthAgencyId } });
+  depthEmployeeProfileId = employeeProfile.id;
+  const [excused, unexcused, openException] = await Promise.all([
+    prisma.hrAttendanceException.create({ data: { employeeProfileId: depthEmployeeProfileId, agencyId: depthAgencyId, exceptionType: 'LATE_ARRIVAL', status: 'RESOLVED_EXCUSED' } }),
+    prisma.hrAttendanceException.create({ data: { employeeProfileId: depthEmployeeProfileId, agencyId: depthAgencyId, exceptionType: 'MISSED_PUNCH', status: 'RESOLVED_UNEXCUSED' } }),
+    prisma.hrAttendanceException.create({ data: { employeeProfileId: depthEmployeeProfileId, agencyId: depthAgencyId, exceptionType: 'LATE_ARRIVAL', status: 'OPEN' } }),
+  ]);
+  depthExceptionIds = [excused.id, unexcused.id, openException.id];
+
+  // goalPace: one active goal (metric 'calls', target 10) + 2 real Call
+  // rows in its period -> 20% progress.
+  const periodStart = new Date(now - 24 * 60 * 60 * 1000);
+  const periodEnd = new Date(now + 24 * 60 * 60 * 1000);
+  const goal = await prisma.goal.create({ data: { agencyId: depthAgencyId, userId: depthProducerId, metric: 'calls', targetValue: 10, periodType: 'custom', periodStart, periodEnd } });
+  depthGoalId = goal.id;
+  const [call1, call2] = await Promise.all([
+    prisma.call.create({ data: { agencyId: depthAgencyId, uploadedById: depthProducerId, filename: 'depth-call-1.mp3' } }),
+    prisma.call.create({ data: { agencyId: depthAgencyId, uploadedById: depthProducerId, filename: 'depth-call-2.mp3' } }),
+  ]);
+  depthCallIds = [call1.id, call2.id];
+});
+
+after(async () => {
+  await prisma.flowScoreSnapshot.deleteMany({ where: { subjectType: 'USER', subjectId: { in: [depthProducerId, depthOtherProducerId] } } });
+  await prisma.flowScoreSnapshot.deleteMany({ where: { subjectType: 'AGENCY', subjectId: depthAgencyId } });
+  await prisma.call.deleteMany({ where: { id: { in: depthCallIds } } });
+  await prisma.goal.delete({ where: { id: depthGoalId } });
+  await prisma.hrAttendanceException.deleteMany({ where: { id: { in: depthExceptionIds } } });
+  await prisma.hrEmployeeProfile.delete({ where: { id: depthEmployeeProfileId } });
+  await prisma.trainingAssignment.deleteMany({ where: { id: { in: depthTrainingAssignmentIds } } });
+  await prisma.trainingCourse.deleteMany({ where: { id: { in: depthCourseIds } } });
+  await prisma.lead.deleteMany({ where: { id: { in: depthLeadIds } } });
+  await prisma.opportunity.deleteMany({ where: { id: { in: depthOppIds } } });
+  await prisma.flowScoreWeightConfig.deleteMany({ where: { agencyId: depthAgencyId } });
+  await prisma.user.deleteMany({ where: { id: { in: [depthProducerId, depthOtherProducerId] } } });
+  await prisma.agency.delete({ where: { id: depthAgencyId } });
+});
+
+test('computeProducerScore: crossSellFollowThrough counts only resolved Opportunities (WON/DECLINED/INELIGIBLE), excluding a still-OPEN one from the denominator', async () => {
+  const snapshot = await computeProducerScore(depthProducerId);
+  assert.ok(snapshot);
+  const component = snapshot.components.find((c) => c.key === 'crossSellFollowThrough');
+  assert.ok(component, 'expected crossSellFollowThrough to be included');
+  assert.equal(component.sampleSize, 2, 'only the 2 resolved opportunities count, not the still-OPEN one');
+  assert.equal(component.value, 50); // 1 of 2 resolved is WON
+});
+
+test('computeProducerScore: moshpitClaimSpeed measures assignedAt-receivedAt against the real 15-minute threshold', async () => {
+  const snapshot = await computeProducerScore(depthProducerId);
+  const component = snapshot.components.find((c) => c.key === 'moshpitClaimSpeed');
+  assert.ok(component);
+  assert.equal(component.sampleSize, 2);
+  assert.equal(component.value, 50); // 1 of 2 claimed within 15 minutes
+});
+
+test('computeProducerScore: trainingCompliance only counts assignments whose due date has actually passed', async () => {
+  const snapshot = await computeProducerScore(depthProducerId);
+  const component = snapshot.components.find((c) => c.key === 'trainingCompliance');
+  assert.ok(component);
+  assert.equal(component.sampleSize, 2);
+  assert.equal(component.value, 50);
+});
+
+test('computeProducerScore: attendanceCompliance only counts RESOLVED_* exceptions, never a still-OPEN one', async () => {
+  const snapshot = await computeProducerScore(depthProducerId);
+  const component = snapshot.components.find((c) => c.key === 'attendanceCompliance');
+  assert.ok(component);
+  assert.equal(component.sampleSize, 2, 'the still-OPEN exception must not count toward the denominator');
+  assert.equal(component.value, 50);
+});
+
+test('computeProducerScore: goalPace averages real active-goal progress', async () => {
+  const snapshot = await computeProducerScore(depthProducerId);
+  const component = snapshot.components.find((c) => c.key === 'goalPace');
+  assert.ok(component);
+  assert.equal(component.sampleSize, 1);
+  assert.equal(component.value, 20); // 2 of 10 calls = 20%
+});
+
+test('every new Producer component is EXCLUDED (never fabricated), and no snapshot at all is saved, for a producer with zero real data anywhere', async () => {
+  // depthOtherProducerId has no leads/tasks/opportunities/training/
+  // attendance/goals of their own at all — every component (old and new)
+  // is excluded for lack of data, so the honest outcome is no snapshot.
+  const snapshot = await computeProducerScore(depthOtherProducerId);
+  assert.equal(snapshot, null, 'expected no snapshot to be saved when literally nothing is scoreable yet');
+});
+
+test('computeProducerScore: openingDiscovery/objectionClosing/pipelineControl group the real 6 drill categories into 3 — the old single callQuality component no longer exists', async () => {
+  const call = await prisma.call.create({
+    data: {
+      agencyId: depthAgencyId, uploadedById: depthProducerId, filename: 'depth-drill.wav', storageKey: `depth-drill/${suffix}`,
+      status: 'COMPLETE', transcript: 'test transcript',
+      analysis: {
+        create: {
+          summary: 'test', productsDiscussed: [], objections: [], buyingSignals: [],
+          missedOpportunities: [], crossSellOpportunities: [], followUpCommitments: [],
+          nextSteps: [], strengths: [], coachingOpportunities: [],
+          overallScore: 80,
+          dimensionScores: {
+            Opening: 90, Rapport: 90, Discovery: 70, 'Needs Analysis': 70, 'Question Quality': 70,
+            'Objection Handling': 40, Closing: 40, 'Next-Step Clarity': 60, 'Cross-Sell Awareness': 60, Professionalism: 100,
+          },
+          reviewRecommended: false, aiModel: 'test',
+        },
+      },
+    },
+  });
+  try {
+    const snapshot = await computeProducerScore(depthProducerId);
+    assert.ok(snapshot);
+    assert.equal(snapshot.components.find((c) => c.key === 'callQuality'), undefined, 'the old single callQuality component must no longer exist');
+    const openingDiscovery = snapshot.components.find((c) => c.key === 'openingDiscovery');
+    const objectionClosing = snapshot.components.find((c) => c.key === 'objectionClosing');
+    const pipelineControl = snapshot.components.find((c) => c.key === 'pipelineControl');
+    assert.ok(openingDiscovery && objectionClosing && pipelineControl, 'expected all 3 call-quality groups to be included');
+    // Opening & Rapport (w10, 90) + Discovery & Needs Analysis (w12, 70) -> (10*90+12*70)/22 = 79.09 -> 79
+    assert.equal(openingDiscovery.value, 79);
+    // Objection Handling (w20, 40) + Closing Techniques (w15, avg(40,60)=50) -> (20*40+15*50)/35 = 44.29 -> 44
+    assert.equal(objectionClosing.value, 44);
+    // Follow-Up & Pipeline (w10, avg(60,60)=60) + Call Control (w8, 100) -> (10*60+8*100)/18 = 77.78 -> 78
+    assert.equal(pipelineControl.value, 78);
+
+    // computeAgencyScore reuses the exact same combiner, agency-wide — with
+    // only one producer's one analyzed call in this agency, the agency-wide
+    // aggregate is numerically identical here.
+    const agencySnapshot = await computeAgencyScore(depthAgencyId);
+    assert.ok(agencySnapshot);
+    assert.equal(agencySnapshot.components.find((c) => c.key === 'teamCallQuality'), undefined, 'the old teamCallQuality component must no longer exist');
+    assert.equal(agencySnapshot.components.find((c) => c.key === 'openingDiscovery').value, 79);
+  } finally {
+    await prisma.callAnalysis.deleteMany({ where: { callId: call.id } });
+    await prisma.call.deleteMany({ where: { id: call.id } });
+  }
 });

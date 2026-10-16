@@ -21,3 +21,14 @@ export function severityTone(severity) {
   if (severity === 'ACTION') return 'accent';
   return 'neutral';
 }
+
+// Flow Score's A-F letter grade, server-computed (flowScore.js's
+// scoreToGrade) — never re-derived from a raw score here, only
+// color-mapped for display.
+export function gradeTone(grade) {
+  if (grade === 'A' || grade === 'B') return 'accent';
+  if (grade === 'C') return 'neutral';
+  if (grade === 'D') return 'warning';
+  if (grade === 'F') return 'danger';
+  return 'neutral';
+}

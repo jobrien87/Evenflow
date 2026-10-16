@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { ExportButton, DateRangeFilter } from '../ui';
+import { ExportButton, DateRangeFilter, Badge, gradeTone } from '../ui';
 import { resolveDateRange } from '../lib/dateRange';
 import { downloadCsv } from '../lib/downloadCsv';
 import { money } from '../lib/format';
@@ -143,6 +143,7 @@ export default function RunningReportPage({ scope = 'me', agencyId, onClose }) {
                 { key: 'firstName', label: 'First Name' },
                 { key: 'lastName', label: 'Last Name' },
                 { key: 'score', label: 'Score' },
+                { key: 'grade', label: 'Grade' },
                 { key: 'trend', label: 'Trend' },
               ])} />
             )}
@@ -155,6 +156,7 @@ export default function RunningReportPage({ scope = 'me', agencyId, onClose }) {
                 <span>{p.firstName} {p.lastName}</span>
                 <span style={s.rosterScore}>
                   {p.score === null ? '—' : `${p.score}/100`}
+                  {p.grade && <Badge tone={gradeTone(p.grade)} style={{ marginLeft: 6, padding: '1px 6px', fontSize: 10 }}>{p.grade}</Badge>}
                   {p.trend && <span style={s.trendArrow(p.trend)}>{p.trend === 'UP' ? ' ▲' : p.trend === 'DOWN' ? ' ▼' : ' ▬'}</span>}
                 </span>
               </div>

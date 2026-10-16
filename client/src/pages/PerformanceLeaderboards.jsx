@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
-import { Card, SectionHeader, ExportButton, DateRangeFilter } from '../ui';
+import { Card, SectionHeader, ExportButton, DateRangeFilter, Badge, gradeTone } from '../ui';
 import { resolveDateRange } from '../lib/dateRange';
 import { downloadCsv } from '../lib/downloadCsv';
 
@@ -138,6 +138,7 @@ export default function PerformanceLeaderboards({ agencyId, title = 'PERFORMANCE
                 { key: 'conversionRate', label: 'Conversion %' },
                 { key: 'revenue', label: 'Revenue ($)' },
                 { key: 'flowScore', label: 'Flow Score' },
+                { key: 'flowScoreGrade', label: 'Grade' },
               ])} />
             )}
           </div>
@@ -177,7 +178,14 @@ export default function PerformanceLeaderboards({ agencyId, title = 'PERFORMANCE
                   <div style={s.colNum}>{a.salesCount}</div>
                   <div style={s.colNum}>{pct(a.conversionRate)}</div>
                   <div style={{ ...s.colNum, color: 'var(--accent)', fontWeight: 700 }}>{money(a.revenue)}</div>
-                  <div style={s.colNum}>{a.flowScore === null ? '—' : a.flowScore}</div>
+                  <div style={{ ...s.colNum, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                    {a.flowScore === null ? '—' : (
+                      <>
+                        <span>{a.flowScore}</span>
+                        {a.flowScoreGrade && <Badge tone={gradeTone(a.flowScoreGrade)} style={{ padding: '1px 6px', fontSize: 10 }}>{a.flowScoreGrade}</Badge>}
+                      </>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

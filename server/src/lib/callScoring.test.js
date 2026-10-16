@@ -163,3 +163,55 @@ test('computeCoachingBreakdown returns an honest empty shape (never fabricated n
   assert.deepEqual(result.categoryBreakdown, []);
   assert.deepEqual(result.coachingOpportunities, []);
 });
+
+// Agency-wide mode (userId omitted) — added for Flow Score's new
+// per-agency call-quality components, which need a real aggregate across
+// every producer's calls, not just one. Every existing caller (Call
+// Scoring's own routes) always passes a real userId, so this is purely an
+// additive new calling mode — this test confirms it aggregates correctly
+// across multiple producers rather than silently scoping to just one.
+// Fixtures are created and torn down entirely within the test itself
+// (rather than a second before/after pair) so cleanup ordering can never
+// race against the outer fixture's own after() hook, which deletes this
+// same agencyId.
+test('computeCoachingBreakdown with no userId runs agency-wide, aggregating every producer\'s calls, not just one', async () => {
+  const secondProducer = await prisma.user.create({
+    data: { email: `producer-cs2-${suffix}@test.local`, firstName: 'Test', lastName: 'ProducerTwo', role: 'PRODUCER', status: 'ACTIVE', agencyId },
+  });
+  const secondCall = await prisma.call.create({
+    data: {
+      agencyId, uploadedById: secondProducer.id, filename: 'test2.wav', storageKey: `test2/${suffix}`,
+      status: 'COMPLETE', transcript: 'test transcript 2',
+      analysis: {
+        create: {
+          summary: 'test', productsDiscussed: [], objections: [], buyingSignals: [],
+          missedOpportunities: [], crossSellOpportunities: [], followUpCommitments: [],
+          nextSteps: [], strengths: [], coachingOpportunities: [],
+          overallScore: 90,
+          dimensionScores: { Opening: 90, Rapport: 90, Discovery: 90, 'Needs Analysis': 90, 'Question Quality': 90, 'Objection Handling': 90, Closing: 90, 'Next-Step Clarity': 90, 'Cross-Sell Awareness': 90, Professionalism: 90 },
+          reviewRecommended: false, aiModel: 'test',
+        },
+      },
+    },
+  });
+
+  try {
+    const from = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const to = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    const perProducer = await computeCoachingBreakdown({ prisma, agencyId, userId: producerId, from, to });
+    assert.equal(perProducer.analyzedCallCount, 2, 'per-producer mode must still only see that producer\'s 2 calls');
+
+    const agencyWide = await computeCoachingBreakdown({ prisma, agencyId, userId: undefined, from, to });
+    assert.equal(agencyWide.analyzedCallCount, 3, 'agency-wide mode must see all 3 calls across both producers');
+    const objection = agencyWide.categoryBreakdown.find((c) => c.category === 'Objection Handling');
+    assert.ok(objection);
+    // (30 + 40 + 90) / 3 = 53.33 -> rounds to 53
+    assert.equal(objection.averageScore, 53);
+    assert.equal(objection.sampleSize, 3);
+  } finally {
+    await prisma.callAnalysis.deleteMany({ where: { callId: secondCall.id } });
+    await prisma.call.deleteMany({ where: { id: secondCall.id } });
+    await prisma.user.delete({ where: { id: secondProducer.id } });
+  }
+});

@@ -9,6 +9,7 @@ const { PERIODS: BILLBOARD_PERIODS } = require('../lib/billboardPeriods');
 const { countSales, salesByAgent, salesByVendor } = require('../lib/manualSaleAggregates');
 const { eligibleProducersWhere } = require('../lib/eligibleProducersQuery');
 const { QUOTED_OR_BEYOND_STATUSES } = require('../lib/leadStatusGroups');
+const { scoreToGrade } = require('../lib/flowScore');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -210,6 +211,7 @@ router.get('/by-agent', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER'
           revenue: revenueCents / 100,
           conversionRate: leadCount > 0 ? Math.round((soldCount / leadCount) * 1000) / 10 : null,
           flowScore: scoreSnapshot ? scoreSnapshot.score : null,
+          flowScoreGrade: scoreSnapshot ? scoreToGrade(scoreSnapshot.score) : null,
         };
       })
     );
@@ -224,7 +226,7 @@ router.get('/by-agent', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER'
       rows.push({
         userId: null, firstName: 'Manual Sales', lastName: '(unattributed)',
         leadsAssigned: null, salesCount: unattributedSalesCount, revenue: unattributedSalesPremium / 100,
-        conversionRate: null, flowScore: null,
+        conversionRate: null, flowScore: null, flowScoreGrade: null,
       });
     }
 
