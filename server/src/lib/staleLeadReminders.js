@@ -7,15 +7,17 @@
 
 const { prisma } = require('./db');
 const { notifyUser } = require('./notifications');
+const { TERMINAL_LEAD_STATUSES } = require('./leadStatusGroups');
 
 // DEFAULT_STALE_HOURS is the env-var/global fallback used when an agency
 // has never set its own Agency.staleLeadHours — every agency's real,
 // configured value (set via Agency Settings) takes precedence.
 const DEFAULT_STALE_HOURS = Number(process.env.STALE_LEAD_HOURS) || 4;
 
-// Terminal statuses mean the lead is closed out one way or another —
-// nothing to remind anyone about.
-const TERMINAL_STATUSES = ['SOLD', 'LOST', 'BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT', 'ARCHIVED'];
+// Closed-out statuses mean the lead is done one way or another — nothing
+// to remind anyone about. DEFAULT_CLOSED_STATUSES is the fallback used
+// when an agency has never set its own Agency.closedLeadStatuses.
+const DEFAULT_CLOSED_STATUSES = TERMINAL_LEAD_STATUSES;
 
 function hoursAgo(hours) {
   return new Date(Date.now() - hours * 60 * 60 * 1000);
@@ -44,11 +46,10 @@ async function checkStaleLeads() {
     where: {
       assignedToId: { not: null },
       assignedAt: { not: null },
-      status: { notIn: TERMINAL_STATUSES },
     },
     include: {
       customer: { select: { firstName: true, lastName: true } },
-      agency: { select: { staleLeadHours: true } },
+      agency: { select: { staleLeadHours: true, closedLeadStatuses: true } },
       notes: { select: { createdAt: true }, orderBy: { createdAt: 'desc' }, take: 1 },
       activities: { select: { occurredAt: true }, orderBy: { occurredAt: 'desc' }, take: 1 },
       events: { where: { type: 'lead.disposition' }, select: { createdAt: true, type: true }, orderBy: { createdAt: 'desc' }, take: 1 },
@@ -58,6 +59,7 @@ async function checkStaleLeads() {
   let checkedCount = 0;
   let remindedCount = 0;
   for (const lead of candidates) {
+    if ((lead.agency?.closedLeadStatuses || DEFAULT_CLOSED_STATUSES).includes(lead.status)) continue;
     const staleHours = lead.agency?.staleLeadHours || DEFAULT_STALE_HOURS;
     const cutoff = hoursAgo(staleHours);
     if (lead.assignedAt >= cutoff) continue;
@@ -85,4 +87,4 @@ async function checkStaleLeads() {
   return { checked: checkedCount, reminded: remindedCount };
 }
 
-module.exports = { checkStaleLeads, DEFAULT_STALE_HOURS };
+module.exports = { checkStaleLeads, DEFAULT_STALE_HOURS, DEFAULT_CLOSED_STATUSES };

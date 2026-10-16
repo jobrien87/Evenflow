@@ -389,6 +389,10 @@ const updateAgencySchema = z.object({
   staleLeadHours: z.number().int().positive().nullable().optional(),
   saleDuplicateWindowDays: z.number().int().min(0).max(90).optional(),
   requireDispositionNoteStatuses: z.array(z.enum(LEAD_STATUSES)).optional(),
+  // Which statuses stop a lead from generating speed-to-lead SLA alerts,
+  // stale-lead reminders, and active priority-queue recompute — see
+  // lib/leadStatusGroups.js's TERMINAL_LEAD_STATUSES for the default.
+  closedLeadStatuses: z.array(z.enum(LEAD_STATUSES)).optional(),
   coachingThreshold: z.number().int().min(0).max(100).optional(),
   // Company contact info — collected during Record Store setup when
   // missing (master spec §6) and reused for any future Boberdoo action.

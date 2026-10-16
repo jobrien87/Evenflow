@@ -1,5 +1,6 @@
 const { prisma } = require('./db');
 const { notifyUser } = require('./notifications');
+const { TERMINAL_LEAD_STATUSES } = require('./leadStatusGroups');
 
 // Speed-to-lead is the single most important response-time SLA a producer
 // has: a lead worked within minutes converts far better than the same lead
@@ -17,11 +18,11 @@ const DEFAULT_SLA_MINUTES = Number(process.env.FIRST_ATTEMPT_SLA_MINUTES) || 30;
 
 // A lead already past the point of needing a first-attempt SLA (sold, or
 // dispositioned as unworkable) is exempt — this alert is only ever about a
-// lead that's genuinely still sitting there unworked.
-const TERMINAL_STATUSES = [
-  'SOLD', 'LOST', 'BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT', 'ARCHIVED',
-  'NOT_INTERESTED', 'INELIGIBLE',
-];
+// lead that's genuinely still sitting there unworked. DEFAULT_CLOSED_STATUSES
+// is the fallback used when an agency has never set its own
+// Agency.closedLeadStatuses — every agency's real, configured value (set
+// via Agency Settings' Lead Flow section) takes precedence.
+const DEFAULT_CLOSED_STATUSES = TERMINAL_LEAD_STATUSES;
 
 // Checked on a short interval (see index.js) — fires once per lead the
 // moment it first breaches the SLA, guarded by its own dedicated
@@ -34,8 +35,9 @@ async function checkFirstAttemptSla() {
   // reach a lead's assignedAt is unbounded in principle, so this upper
   // candidate set is bounded only by the already-selective filters below
   // (vendor-sourced, unassigned-no-attempt, not yet alerted) — the real
-  // per-agency SLA minutes are applied in JS per lead, since each lead's
-  // agency can configure a different threshold.
+  // per-agency SLA minutes AND per-agency closed-status list are both
+  // applied in JS per lead, since each lead's agency can configure a
+  // different value for each.
   const candidates = await prisma.lead.findMany({
     where: {
       // Speed-to-lead is a real-time-vendor-intake SLA, not a general
@@ -48,17 +50,17 @@ async function checkFirstAttemptSla() {
       assignedToId: { not: null },
       assignedAt: { not: null },
       firstAttemptAt: null,
-      status: { notIn: TERMINAL_STATUSES },
       firstAttemptSlaAlertSentAt: null,
     },
     include: {
       customer: { select: { firstName: true, lastName: true } },
-      agency: { select: { firstAttemptSlaMinutes: true } },
+      agency: { select: { firstAttemptSlaMinutes: true, closedLeadStatuses: true } },
     },
   });
 
   let alerted = 0;
   for (const lead of candidates) {
+    if ((lead.agency?.closedLeadStatuses || DEFAULT_CLOSED_STATUSES).includes(lead.status)) continue;
     const slaMinutes = lead.agency?.firstAttemptSlaMinutes || DEFAULT_SLA_MINUTES;
     const breached = now - lead.assignedAt.getTime() >= slaMinutes * 60 * 1000;
     if (!breached) continue;
@@ -81,4 +83,4 @@ async function checkFirstAttemptSla() {
   return alerted;
 }
 
-module.exports = { checkFirstAttemptSla, DEFAULT_SLA_MINUTES };
+module.exports = { checkFirstAttemptSla, DEFAULT_SLA_MINUTES, DEFAULT_CLOSED_STATUSES };

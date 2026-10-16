@@ -188,7 +188,7 @@ test('stale-lead sweep keeps its in-app reminder and repeat-reminder timestamp',
     }],
     update: async (args) => { updates.push(args); },
   };
-  const stale = loadModule('staleLeadReminders', { './db': { prisma: h.prisma }, './notifications': h });
+  const stale = loadModule('staleLeadReminders', { './db': { prisma: h.prisma }, './notifications': h, './leadStatusGroups': { TERMINAL_LEAD_STATUSES: ['SOLD', 'LOST', 'NOT_INTERESTED', 'BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT', 'INELIGIBLE', 'ARCHIVED'] } });
   const result = await stale.checkStaleLeads();
   assert.equal(result.checked, 1);
   assert.equal(result.reminded, 1);
@@ -210,7 +210,7 @@ test('speed-to-lead sweep keeps its critical in-app alert and one-time alert tim
     }],
     update: async (args) => { updates.push(args); },
   };
-  const sla = loadModule('firstAttemptSlaAlerts', { './db': { prisma: h.prisma }, './notifications': h });
+  const sla = loadModule('firstAttemptSlaAlerts', { './db': { prisma: h.prisma }, './notifications': h, './leadStatusGroups': { TERMINAL_LEAD_STATUSES: ['SOLD', 'LOST', 'NOT_INTERESTED', 'BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT', 'INELIGIBLE', 'ARCHIVED'] } });
   assert.equal(await sla.checkFirstAttemptSla(), 1);
   assert.equal(h.notifications.length, 1);
   assert.equal(h.notifications[0].type, 'lead.first_attempt_overdue');

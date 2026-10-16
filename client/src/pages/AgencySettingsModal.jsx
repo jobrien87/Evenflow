@@ -18,6 +18,9 @@ const STATUS_OPTIONS = [
   'DUPLICATE', 'DO_NOT_CONTACT', 'INELIGIBLE', 'ARCHIVED',
 ];
 const ACTION_LABELS = { BUMP_UP: 'Bump up', BUMP_DOWN: 'Bump down', DROP_OFF: 'Drop off' };
+// Mirrors lib/leadStatusGroups.js's TERMINAL_LEAD_STATUSES exactly — what
+// an agency that's never touched this section is already getting.
+const DEFAULT_CLOSED_STATUSES = ['SOLD', 'LOST', 'NOT_INTERESTED', 'BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT', 'INELIGIBLE', 'ARCHIVED'];
 
 // Shared by AgencyDetailPage.jsx (Platform Owner editing any agency) and
 // AgencyOwnerDashboard.jsx (an Agency Owner editing their own agency) —
@@ -46,6 +49,10 @@ export default function AgencySettingsModal({ agency, onClose, onSaved }) {
   const [duplicateWindowDays, setDuplicateWindowDays] = useState(String(agency.saleDuplicateWindowDays ?? 3));
   const [coachingThreshold, setCoachingThreshold] = useState(String(agency.coachingThreshold ?? 75));
   const [requireNoteStatuses, setRequireNoteStatuses] = useState(agency.requireDispositionNoteStatuses || []);
+  // Which statuses stop a lead from generating speed-to-lead SLA alerts,
+  // stale-lead reminders, and active priority-queue recompute — see
+  // lib/leadStatusGroups.js's TERMINAL_LEAD_STATUSES for the real default.
+  const [closedStatuses, setClosedStatuses] = useState(agency.closedLeadStatuses || DEFAULT_CLOSED_STATUSES);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -122,6 +129,10 @@ export default function AgencySettingsModal({ agency, onClose, onSaved }) {
     setRequireNoteStatuses((prev) => (prev.includes(status) ? prev.filter((s) => s !== status) : [...prev, status]));
   }
 
+  function toggleClosedStatus(status) {
+    setClosedStatuses((prev) => (prev.includes(status) ? prev.filter((s) => s !== status) : [...prev, status]));
+  }
+
   async function submit(e) {
     e.preventDefault();
     setBusy(true);
@@ -144,6 +155,7 @@ export default function AgencySettingsModal({ agency, onClose, onSaved }) {
         saleDuplicateWindowDays: Math.round(Number(duplicateWindowDays)) || 0,
         coachingThreshold: Math.round(Number(coachingThreshold)) || 0,
         requireDispositionNoteStatuses: requireNoteStatuses,
+        closedLeadStatuses: closedStatuses,
       });
       onSaved();
     } catch (error) {
@@ -161,7 +173,12 @@ export default function AgencySettingsModal({ agency, onClose, onSaved }) {
         <label style={s.fieldLabel}>Products (comma-separated)<input style={s.input} value={form.products} onChange={(e) => setForm({ ...form, products: e.target.value })} /></label>
 
         <div style={s.divider} />
-        <SectionHeader>Lead Priority</SectionHeader>
+        <SectionHeader>Lead Flow</SectionHeader>
+        <div style={s.helpText}>
+          How leads move through your pipeline and what happens automatically based on how they're dispositioned — working order, follow-up timing, note requirements, when a lead counts as "done," and the speed-to-lead/stale-lead nudges.
+        </div>
+
+        <div style={s.subHeading}>Working Order</div>
         <div style={s.helpText}>Which kind of lead your team should work first — reorder from highest (top) to lowest priority.</div>
         <div style={s.typeList}>
           {typeRank.map((type, i) => (
@@ -196,8 +213,7 @@ export default function AgencySettingsModal({ agency, onClose, onSaved }) {
           <button type="button" style={s.addRuleButton} onClick={addRule}>+ ADD RULE</button>
         </div>
 
-        <div style={s.divider} />
-        <SectionHeader>Follow-Up Rules</SectionHeader>
+        <div style={s.subHeading}>Follow-Up Scheduling</div>
         <div style={s.helpText}>
           When a lead is dispositioned to one of these statuses, automatically put a real Follow-Up Task on the assigned producer's queue after N days — e.g. "Left VM" followed up again in 2 days. A new disposition always replaces any still-pending follow-up.
         </div>
@@ -216,26 +232,7 @@ export default function AgencySettingsModal({ agency, onClose, onSaved }) {
           <button type="button" style={s.addRuleButton} onClick={addFollowUpRule}>+ ADD FOLLOW-UP RULE</button>
         </div>
 
-        <div style={s.divider} />
-        <SectionHeader>Thresholds &amp; Automation</SectionHeader>
-        <div style={s.helpText}>Leave a field blank to use this app's own built-in default.</div>
-        <label style={s.fieldLabel}>
-          First-Attempt SLA (minutes) — alert if a new lead sits unattempted this long
-          <input style={s.input} type="number" min={1} placeholder="Default: 30" value={slaMinutes} onChange={(e) => setSlaMinutes(e.target.value)} />
-        </label>
-        <label style={s.fieldLabel}>
-          Stale-Lead Reminder (hours) — nudge the assigned producer after no activity this long
-          <input style={s.input} type="number" min={1} placeholder="Default: 4" value={staleHours} onChange={(e) => setStaleHours(e.target.value)} />
-        </label>
-        <label style={s.fieldLabel}>
-          Sale Duplicate-Detection Window (days) — how far back/forward to cross-check historical records
-          <input style={s.input} type="number" min={0} max={90} value={duplicateWindowDays} onChange={(e) => setDuplicateWindowDays(e.target.value)} />
-        </label>
-        <label style={s.fieldLabel}>
-          Coaching Score Threshold — a drill category below this average is flagged as a coaching opportunity
-          <input style={s.input} type="number" min={0} max={100} value={coachingThreshold} onChange={(e) => setCoachingThreshold(e.target.value)} />
-        </label>
-
+        <div style={s.subHeading}>Note Requirements</div>
         <div style={s.helpText}>Require a note when dispositioning a lead to any of these statuses:</div>
         <div style={s.chipRow}>
           {STATUS_OPTIONS.map((st) => (
@@ -249,6 +246,45 @@ export default function AgencySettingsModal({ agency, onClose, onSaved }) {
             </button>
           ))}
         </div>
+
+        <div style={s.subHeading}>Closed / Done Statuses</div>
+        <div style={s.helpText}>
+          A lead in one of these statuses is treated as closed out — it stops generating speed-to-lead alerts, stale-lead reminders, and active priority-queue recompute. It isn't hidden from any list; it just stops nagging anyone.
+        </div>
+        <div style={s.chipRow}>
+          {STATUS_OPTIONS.map((st) => (
+            <button
+              type="button"
+              key={st}
+              style={closedStatuses.includes(st) ? s.chipActive : s.chip}
+              onClick={() => toggleClosedStatus(st)}
+            >
+              {st.replace(/_/g, ' ')}
+            </button>
+          ))}
+        </div>
+
+        <div style={s.subHeading}>Speed-to-Lead &amp; Reminders</div>
+        <div style={s.helpText}>Leave a field blank to use this app's own built-in default.</div>
+        <label style={s.fieldLabel}>
+          First-Attempt SLA (minutes) — alert if a new lead sits unattempted this long
+          <input style={s.input} type="number" min={1} placeholder="Default: 30" value={slaMinutes} onChange={(e) => setSlaMinutes(e.target.value)} />
+        </label>
+        <label style={s.fieldLabel}>
+          Stale-Lead Reminder (hours) — nudge the assigned producer after no activity this long
+          <input style={s.input} type="number" min={1} placeholder="Default: 4" value={staleHours} onChange={(e) => setStaleHours(e.target.value)} />
+        </label>
+
+        <div style={s.divider} />
+        <SectionHeader>Other Settings</SectionHeader>
+        <label style={s.fieldLabel}>
+          Sale Duplicate-Detection Window (days) — how far back/forward to cross-check historical records
+          <input style={s.input} type="number" min={0} max={90} value={duplicateWindowDays} onChange={(e) => setDuplicateWindowDays(e.target.value)} />
+        </label>
+        <label style={s.fieldLabel}>
+          Coaching Score Threshold — a drill category below this average is flagged as a coaching opportunity
+          <input style={s.input} type="number" min={0} max={100} value={coachingThreshold} onChange={(e) => setCoachingThreshold(e.target.value)} />
+        </label>
 
         {err && <div style={s.error}>{err}</div>}
         <Button variant="primary" type="submit" disabled={busy}>{busy ? 'SAVING…' : 'SAVE'}</Button>
@@ -313,6 +349,7 @@ const s = {
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },
   error: { color: 'var(--danger)', fontSize: 13 },
   divider: { borderTop: '1px solid var(--border-hairline)', margin: '20px 0 16px' },
+  subHeading: { color: 'var(--text-primary)', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, marginTop: 18, marginBottom: 2 },
   helpText: { color: 'var(--text-muted)', fontSize: 11, marginBottom: 8, lineHeight: 1.5 },
   identityWarning: { color: 'var(--danger)', fontSize: 13, lineHeight: 1.5, background: 'rgba(255, 77, 94, 0.1)', border: '1px solid rgba(255, 77, 94, 0.4)', borderRadius: 6, padding: 10, marginBottom: 8 },
   typeList: { display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 16 },

@@ -108,3 +108,28 @@ test('a configured Agency.firstAttemptSlaMinutes is honored over the default —
   await prisma.user.deleteMany({ where: { agencyId: agency.id } });
   await prisma.agency.delete({ where: { id: agency.id } });
 });
+
+test('a configured Agency.closedLeadStatuses is honored — a status the agency added to its own closed list is exempt even though it would never be exempt by default', async () => {
+  // FOLLOW_UP is not in the default closed-status list, so this proves
+  // real configurability, not just the pre-existing default behavior.
+  const agency = await prisma.agency.create({ data: { name: `SLA Closed-Status Agency ${suffix}`, closedLeadStatuses: ['FOLLOW_UP'] } });
+  const producer = await prisma.user.create({
+    data: { agencyId: agency.id, email: `sla-closed-${suffix}@test.local`, passwordHash: 'x', firstName: 'Sla', lastName: 'Closed', role: 'PRODUCER', status: 'ACTIVE' },
+  });
+  const vendor = await prisma.vendor.create({ data: { agencyId: agency.id, name: `SLA Closed Vendor ${suffix}`, email: `sla-cv2-${suffix}@test.local`, product: 'AUTO' } });
+  const customer = await prisma.customer.create({ data: { firstName: 'Closed', lastName: 'Lead' } });
+
+  const longAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  const lead = await prisma.lead.create({
+    data: { agencyId: agency.id, customerId: customer.id, assignedToId: producer.id, status: 'FOLLOW_UP', vendorId: vendor.id, assignedAt: longAgo, firstAttemptAt: null, firstAttemptSlaAlertSentAt: null },
+  });
+
+  await checkFirstAttemptSla();
+  const leadAfter = await prisma.lead.findUnique({ where: { id: lead.id } });
+  assert.equal(leadAfter.firstAttemptSlaAlertSentAt, null, 'a status this agency configured as closed must never be alerted, even though it is well past the SLA cutoff');
+
+  await prisma.lead.deleteMany({ where: { agencyId: agency.id } });
+  await prisma.vendor.deleteMany({ where: { agencyId: agency.id } });
+  await prisma.user.deleteMany({ where: { agencyId: agency.id } });
+  await prisma.agency.delete({ where: { id: agency.id } });
+});

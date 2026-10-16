@@ -10,17 +10,17 @@
 
 const { prisma } = require('./db');
 const { scoreLead, typeRankBonus, DEFAULT_TYPE_RANK } = require('./priority');
+const { TERMINAL_LEAD_STATUSES: DEFAULT_CLOSED_STATUSES } = require('./leadStatusGroups');
 
-const TERMINAL_LEAD_STATUSES = ['SOLD', 'LOST', 'NOT_INTERESTED', 'BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT', 'INELIGIBLE', 'ARCHIVED'];
 const TERMINAL_OPPORTUNITY_STATUSES = ['WON', 'DECLINED'];
 // The same flat base every Opportunity gets at creation
 // (lib/opportunityEvents.js) — this layers the configured type-rank bonus
 // on top, never replaces that base signal.
 const OPPORTUNITY_BASE_SCORE = 40;
 
-async function recomputeAgencyLeadPriority(agencyId, priorityRules, now = new Date()) {
+async function recomputeAgencyLeadPriority(agencyId, priorityRules, closedStatuses, now = new Date()) {
   const leads = await prisma.lead.findMany({
-    where: { agencyId, archivedAt: null, status: { notIn: TERMINAL_LEAD_STATUSES } },
+    where: { agencyId, archivedAt: null, status: { notIn: closedStatuses || DEFAULT_CLOSED_STATUSES } },
   });
   for (const lead of leads) {
     const { priorityScore, priorityReason } = scoreLead(lead, priorityRules, now);
@@ -48,15 +48,15 @@ async function recomputeAgencyOpportunityPriority(agencyId, priorityRules) {
 }
 
 async function recomputeAllLeadPriorities() {
-  const agencies = await prisma.agency.findMany({ where: { archivedAt: null }, select: { id: true, priorityRules: true } });
+  const agencies = await prisma.agency.findMany({ where: { archivedAt: null }, select: { id: true, priorityRules: true, closedLeadStatuses: true } });
   const now = new Date();
   let leadsChecked = 0;
   let opportunitiesChecked = 0;
   for (const agency of agencies) {
-    leadsChecked += await recomputeAgencyLeadPriority(agency.id, agency.priorityRules, now);
+    leadsChecked += await recomputeAgencyLeadPriority(agency.id, agency.priorityRules, agency.closedLeadStatuses, now);
     opportunitiesChecked += await recomputeAgencyOpportunityPriority(agency.id, agency.priorityRules);
   }
   return { agencies: agencies.length, leadsChecked, opportunitiesChecked };
 }
 
-module.exports = { recomputeAllLeadPriorities, recomputeAgencyLeadPriority, recomputeAgencyOpportunityPriority };
+module.exports = { recomputeAllLeadPriorities, recomputeAgencyLeadPriority, recomputeAgencyOpportunityPriority, DEFAULT_CLOSED_STATUSES };

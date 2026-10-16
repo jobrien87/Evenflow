@@ -573,6 +573,17 @@ model Agency {
   // is accepted (POST /:leadId/disposition). Empty = never required —
   // today's exact behavior.
   requireDispositionNoteStatuses String[] @default([])
+  // Which LeadStatus values count as "closed out" for automation purposes
+  // — a lead in one of these statuses is exempt from speed-to-lead SLA
+  // alerts (lib/firstAttemptSlaAlerts.js), stale-lead reminders
+  // (lib/staleLeadReminders.js), and active priority-queue recompute
+  // (lib/leadPriorityRecompute.js). Defaults to the exact same 8-status
+  // set lib/leadStatusGroups.js's TERMINAL_LEAD_STATUSES already uses app-
+  // wide, so no agency's behavior changes until it reconfigures this list.
+  // Deliberately distinct from the Work Queue/funnel "active stage"
+  // groupings in leadStatusGroups.js, which stay fixed app-wide — this
+  // field only controls which statuses stop generating nag automations.
+  closedLeadStatuses String[] @default(["SOLD","LOST","NOT_INTERESTED","BAD_CONTACT","DUPLICATE","DO_NOT_CONTACT","INELIGIBLE","ARCHIVED"])
   // The score (0-100) below which a call-scoring category becomes a
   // flagged "coaching opportunity" in lib/callScoring.js's
   // computeCoachingBreakdown. Only meaningful when coachingEnabled.

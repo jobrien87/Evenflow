@@ -109,6 +109,43 @@ test('a configured Agency.staleLeadHours is honored over the default — a lead 
   await prisma.agency.delete({ where: { id: agency.id } });
 });
 
+test('a lead dispositioned NOT_INTERESTED is exempt by default — this file\'s old local terminal-status list was missing NOT_INTERESTED/INELIGIBLE, a real inconsistency now fixed by sharing Agency.closedLeadStatuses\' default with every other consumer', async () => {
+  const customer = await prisma.customer.create({ data: { firstName: 'NotInterested', lastName: 'Closed' } });
+  const lead = await prisma.lead.create({
+    data: { agencyId, customerId: customer.id, status: 'NOT_INTERESTED', assignedToId: producerId, assignedAt: past, receivedAt: past },
+  });
+
+  await checkStaleLeads();
+  const notification = await prisma.notification.findFirst({ where: { relatedEntityId: lead.id, type: 'lead.stale' } });
+  assert.equal(notification, null, 'NOT_INTERESTED is in the default closed-status set and must never be reminded');
+
+  await prisma.lead.delete({ where: { id: lead.id } });
+  await prisma.customer.delete({ where: { id: customer.id } });
+});
+
+test('a configured Agency.closedLeadStatuses is honored — a status the agency added to its own closed list is exempt even though it would never be exempt by default', async () => {
+  // FOLLOW_UP is not in the default closed-status list, so this proves
+  // real configurability, not just the pre-existing default behavior.
+  const agency = await prisma.agency.create({ data: { name: `Stale Closed-Status Agency ${suffix}`, closedLeadStatuses: ['FOLLOW_UP'] } });
+  const producer = await prisma.user.create({
+    data: { email: `producer-stale-closed-${suffix}@test.local`, firstName: 'Test', lastName: 'Closed', role: 'PRODUCER', status: 'ACTIVE', agencyId: agency.id },
+  });
+  const customer = await prisma.customer.create({ data: { firstName: 'Closed', lastName: 'Config' } });
+  const lead = await prisma.lead.create({
+    data: { agencyId: agency.id, customerId: customer.id, status: 'FOLLOW_UP', assignedToId: producer.id, assignedAt: past, receivedAt: past },
+  });
+
+  await checkStaleLeads();
+  const notification = await prisma.notification.findFirst({ where: { relatedEntityId: lead.id, type: 'lead.stale' } });
+  assert.equal(notification, null, 'a status this agency configured as closed must never be reminded, even though it is well past the staleness cutoff');
+
+  await prisma.notification.deleteMany({ where: { userId: producer.id } });
+  await prisma.lead.deleteMany({ where: { id: lead.id } });
+  await prisma.customer.delete({ where: { id: customer.id } });
+  await prisma.user.delete({ where: { id: producer.id } });
+  await prisma.agency.delete({ where: { id: agency.id } });
+});
+
 test('checkStaleLeads does not re-notify the same lead again within the staleness window', async () => {
   const before = await prisma.notification.count({ where: { relatedEntityId: staleLeadId, type: 'lead.stale' } });
   await checkStaleLeads();
