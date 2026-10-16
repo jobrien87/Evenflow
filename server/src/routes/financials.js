@@ -6,8 +6,7 @@ const { recordAudit } = require('../lib/audit');
 const { computeProfitability, computeROI } = require('../lib/financialCalc');
 const { computeBillboard, computeBillboardPeriod, GRANULARITIES } = require('../lib/billboard');
 const { PERIODS: BILLBOARD_PERIODS } = require('../lib/billboardPeriods');
-const { sumHistoricalPremium, countHistoricalSold, historicalByVendor, historicalByAgent } = require('../lib/historicalAggregates');
-const { countSales, salesByAgent } = require('../lib/manualSaleAggregates');
+const { countSales, salesByAgent, salesByVendor } = require('../lib/manualSaleAggregates');
 const { eligibleProducersWhere } = require('../lib/eligibleProducersQuery');
 const { QUOTED_OR_BEYOND_STATUSES } = require('../lib/leadStatusGroups');
 
@@ -37,28 +36,23 @@ router.get('/summary', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req
 
     // Lead reaching SOLD (whole-lead or per-product) is a queue/pipeline
     // disposition only and is never counted here — the real production
-    // entry is Add Closed Sale (Sale), same production-counting rule as
-    // Billboard.
-    const [revenueAgg, costAgg, historicalPremiumCents, historicalSoldCount, manualSalesCount] = await Promise.all([
+    // entry is Add Closed Sale (Sale), the single source of production
+    // truth app-wide (Historical Data is deliberately excluded from every
+    // reporting surface, per the agency owner's own instruction).
+    const [revenueAgg, costAgg, manualSalesCount] = await Promise.all([
       prisma.revenueEvent.aggregate({ where: whereBase, _sum: { amountCents: true } }),
       prisma.costEvent.aggregate({ where: whereBase, _sum: { amountCents: true } }),
-      // Historical Data (Back Catalog) rows aren't Leads and have no
-      // RevenueEvent of their own — this is the actual integration point
-      // that makes their premium count toward the SAME revenue total
-      // shown here, per the agency owner's own requirement.
-      sumHistoricalPremium({ agencyId, from, to }),
-      countHistoricalSold({ agencyId, from, to }),
-      // Add Closed Sale (standalone) rows DO post a real RevenueEvent,
-      // kept in sync on every create/correct/void (see financialEvents.js's
+      // Add Closed Sale rows DO post a real RevenueEvent, kept in sync on
+      // every create/correct/void (see financialEvents.js's
       // syncSaleRevenueEvent), so their premium is already inside
       // revenueAgg above — only the COUNT needs adding here, not the
       // premium a second time.
       countSales({ agencyId, from, to }),
     ]);
 
-    const revenueCents = (revenueAgg._sum.amountCents || 0) + historicalPremiumCents;
+    const revenueCents = revenueAgg._sum.amountCents || 0;
     const costCents = costAgg._sum.amountCents || 0;
-    const totalSalesCount = historicalSoldCount + manualSalesCount;
+    const totalSalesCount = manualSalesCount;
 
     const profitability = computeProfitability({
       revenueCents, costCents, denominatorCount: totalSalesCount, denominatorLabel: 'sale',
@@ -77,7 +71,6 @@ router.get('/summary', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req
       roiPercent: roi.roiPercent,
       roiReason: roi.reason,
       salesRecorded: totalSalesCount,
-      historicalRecordsIncluded: historicalSoldCount,
       revenueByCategory: revenueByCategory.map((r) => ({ category: r.category, amount: (r._sum.amountCents || 0) / 100 })),
       costByCategory: costByCategory.map((c) => ({ category: c.category, amount: (c._sum.amountCents || 0) / 100 })),
     });
@@ -101,11 +94,11 @@ router.get('/by-vendor', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (r
       return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
     }
     const { from, to } = parseDateRange(req);
-    const [vendors, historicalRows] = await Promise.all([
+    const [vendors, saleRows] = await Promise.all([
       prisma.vendor.findMany({ where: { agencyId } }),
-      historicalByVendor({ agencyId, from, to }),
+      salesByVendor({ agencyId, from, to }),
     ]);
-    const historicalById = new Map(historicalRows.filter((h) => h.vendorId).map((h) => [h.vendorId, h]));
+    const salesById = new Map(saleRows.filter((s) => s.vendorId).map((s) => [s.vendorId, s]));
 
     const rows = await Promise.all(
       vendors.map(async (v) => {
@@ -118,14 +111,15 @@ router.get('/by-vendor', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (r
         const quotedCount = leads.filter((l) => QUOTED_OR_BEYOND_STATUSES.includes(l.status)).length;
         // A Lead reaching SOLD is a pipeline disposition only, never a
         // production/revenue count here — the real sale unit is a Sale row
-        // (Add Closed Sale), same as Billboard. Historical Data rows for
-        // this vendor count toward sold/revenue — never toward
-        // leadsReceived/quotesReceived, since historical backfill never had
-        // a real intake/quote pipeline to measure rates against (that would
-        // artificially distort cost-per-lead/-quote).
-        const historical = historicalById.get(v.id);
-        const soldCount = historical?.count || 0;
-        const revenueCents = historical?.premiumCents || 0;
+        // (Add Closed Sale), same as Billboard. A standalone sale has no
+        // vendor by definition; a Lead-linked sale is attributed to that
+        // Lead's real vendor (salesByVendor's own join) — never toward
+        // leadsReceived/quotesReceived, since a Closed Sale has no real
+        // intake/quote pipeline of its own to measure rates against (that
+        // would artificially distort cost-per-lead/-quote).
+        const sale = salesById.get(v.id);
+        const soldCount = sale?.count || 0;
+        const revenueCents = sale?.premiumCents || 0;
 
         return {
           vendorId: v.id,
@@ -145,15 +139,16 @@ router.get('/by-vendor', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (r
       })
     );
 
-    // Historical rows whose vendor name never matched a real Vendor — kept
+    // A standalone sale, or one linked to a lead with no vendor — kept
     // visible rather than silently dropped, so the agency-wide total still
-    // reconciles even when old data can't be attributed to a specific vendor.
-    const unmatched = historicalRows.find((h) => !h.vendorId);
-    if (unmatched && unmatched.count > 0) {
+    // reconciles, same "Direct / No Vendor" convention Billboard already
+    // uses for the identical case.
+    const direct = saleRows.find((s) => !s.vendorId);
+    if (direct && direct.count > 0) {
       rows.push({
-        vendorId: null, vendorName: 'Historical (unmatched vendor)', product: null, status: null,
+        vendorId: null, vendorName: 'Direct / No Vendor', product: null, status: null,
         leadsReceived: null, totalCost: 0, costPerLead: null, quotesReceived: null, costPerQuote: null,
-        salesCount: unmatched.count, costPerSale: null, conversionRate: null, revenue: unmatched.premiumCents / 100,
+        salesCount: direct.count, costPerSale: null, conversionRate: null, revenue: direct.premiumCents / 100,
       });
     }
 
@@ -176,7 +171,7 @@ router.get('/by-agent', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER'
       return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
     }
     const { from, to } = parseDateRange(req);
-    const [producers, historicalRows, manualSaleRows] = await Promise.all([
+    const [producers, manualSaleRows] = await Promise.all([
       // Active PRODUCER or selling AGENCY_MANAGER — an eligible manager
       // (e.g. one who carries her own book of business) must retain her
       // own production credit, not fall into the unattributed bucket.
@@ -184,10 +179,8 @@ router.get('/by-agent', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER'
         where: eligibleProducersWhere(agencyId),
         select: { id: true, firstName: true, lastName: true },
       }),
-      historicalByAgent({ agencyId, from, to }),
       salesByAgent({ agencyId, from, to }),
     ]);
-    const historicalById = new Map(historicalRows.filter((h) => h.userId).map((h) => [h.userId, h]));
     const salesById = new Map(manualSaleRows.map((s) => [s.userId, s]));
     const matchedIds = new Set(producers.map((p) => p.id));
 
@@ -200,15 +193,13 @@ router.get('/by-agent', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER'
         const leadCount = leads.length;
         // A Lead reaching SOLD is a pipeline disposition only, never a
         // production/revenue count here — the real sale unit is a Sale row
-        // (Add Closed Sale). Historical Data and Add Closed Sale rows
-        // attributed to this producer count toward their sold/revenue
-        // totals — never leadsAssigned, for the same reason /by-vendor
-        // excludes it from leadsReceived (no real intake rate to measure
-        // for a bulk-imported or standalone-sale row).
-        const historical = historicalById.get(p.id);
+        // (Add Closed Sale). Sale rows attributed to this producer count
+        // toward their sold/revenue totals — never leadsAssigned, for the
+        // same reason /by-vendor excludes it from leadsReceived (no real
+        // intake rate to measure for a standalone-sale row).
         const manual = salesById.get(p.id);
-        const soldCount = (historical?.count || 0) + (manual?.count || 0);
-        const revenueCents = (historical?.premiumCents || 0) + (manual?.premiumCents || 0);
+        const soldCount = manual?.count || 0;
+        const revenueCents = manual?.premiumCents || 0;
 
         return {
           userId: p.id,
@@ -223,26 +214,9 @@ router.get('/by-agent', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER'
       })
     );
 
-    // Historical rows attributed to no one currently ACTIVE (unmatched name,
-    // or matched to a producer who's since left) — kept visible so the
-    // agency-wide total still reconciles, same treatment as /by-vendor.
-    const unattributedPremium = historicalRows
-      .filter((h) => !h.userId || !matchedIds.has(h.userId))
-      .reduce((sum, h) => sum + h.premiumCents, 0);
-    const unattributedCount = historicalRows
-      .filter((h) => !h.userId || !matchedIds.has(h.userId))
-      .reduce((sum, h) => sum + h.count, 0);
-    if (unattributedCount > 0) {
-      rows.push({
-        userId: null, firstName: 'Historical', lastName: '(unattributed)',
-        leadsAssigned: null, salesCount: unattributedCount, revenue: unattributedPremium / 100,
-        conversionRate: null, flowScore: null,
-      });
-    }
-
     // A Sale assigned to a producer who's since left/been deactivated —
-    // kept visible so the agency-wide total still reconciles, same
-    // treatment as the historical-unattributed bucket above.
+    // kept visible so the agency-wide total still reconciles rather than
+    // silently vanishing.
     const unmatchedSales = manualSaleRows.filter((s) => !matchedIds.has(s.userId));
     const unattributedSalesCount = unmatchedSales.reduce((sum, s) => sum + s.count, 0);
     const unattributedSalesPremium = unmatchedSales.reduce((sum, s) => sum + s.premiumCents, 0);

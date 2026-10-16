@@ -15,7 +15,6 @@
 const { prisma } = require('./db');
 const { pct } = require('./funnelMetrics');
 const { QUOTED_OR_BEYOND_STATUSES } = require('./leadStatusGroups');
-const { historicalLeadLikeRows } = require('./historicalAggregates');
 const { saleLeadLikeRows } = require('./manualSaleAggregates');
 
 function costPer(costCents, count) {
@@ -26,26 +25,25 @@ function costPer(costCents, count) {
 // received in the period, sorted by lead volume descending (so "top N
 // zips" is just array.slice(0, N)).
 async function computeZipBreakdown({ agencyId, from, to }) {
-  const [leads, vendors, historicalRows, saleRows] = await Promise.all([
+  const [leads, vendors, saleRows] = await Promise.all([
     prisma.lead.findMany({
       where: { agencyId, receivedAt: { gte: from, lte: to }, archivedAt: null },
       select: { zip: true, vendorId: true, status: true },
     }),
     prisma.vendor.findMany({ where: { agencyId }, select: { id: true } }),
-    historicalLeadLikeRows({ agencyId, from, to }),
     saleLeadLikeRows({ agencyId, from, to }),
   ]);
 
-  // Real sold count/revenue per zip comes from actual Closed Sale records
-  // (Historical Data + Add Closed Sale) — never a live Lead's own
-  // salePremiumCents snapshot, which is written at disposition time and
-  // may not correspond to any real recorded sale at all (see
-  // schema.prisma's Sale model comment / routes/leads.js's disposition
-  // handler: "Lead SOLD only removes the lead from the queue," it never
-  // posts revenue). This keeps revenue and the CPA below consistent with
-  // the same definition of "a sale" used everywhere else in this app.
+  // Real sold count/revenue per zip comes from actual Add Closed Sale
+  // records — never a live Lead's own salePremiumCents snapshot, which is
+  // written at disposition time and may not correspond to any real
+  // recorded sale at all (see schema.prisma's Sale model comment /
+  // routes/leads.js's disposition handler: "Lead SOLD only removes the
+  // lead from the queue," it never posts revenue). This keeps revenue and
+  // the CPA below consistent with the same definition of "a sale" used
+  // everywhere else in this app.
   const realSalesByZip = new Map();
-  for (const row of [...historicalRows, ...saleRows]) {
+  for (const row of saleRows) {
     const key = row.zip || 'Unspecified';
     const existing = realSalesByZip.get(key) || { revenueCents: 0, realSoldCount: 0 };
     existing.revenueCents += row.salePremiumCents || 0;

@@ -5,7 +5,6 @@
 // same month is never awarded twice, even if this runs more than once.
 
 const { prisma } = require('./db');
-const { historicalLeadLikeRows } = require('./historicalAggregates');
 const { saleLeadLikeRows } = require('./manualSaleAggregates');
 
 function monthLabel(date) {
@@ -21,9 +20,9 @@ function previousMonthRange(now = new Date()) {
 
 // Pure — picks the winner from an already-fetched list of real sale-like
 // rows ({assignedToId, salePremiumCents}, the same shape
-// historicalLeadLikeRows/saleLeadLikeRows return) for one agency/month:
-// highest sold count, ties broken by higher total premium. Returns null
-// if nobody sold anything that month (never fabricates a winner).
+// saleLeadLikeRows returns) for one agency/month: highest sold count,
+// ties broken by higher total premium. Returns null if nobody sold
+// anything that month (never fabricates a winner).
 function pickWinner(soldRows) {
   const byProducer = new Map();
   for (const row of soldRows) {
@@ -55,13 +54,10 @@ async function checkAgentOfMonth(now = new Date()) {
     if (existing) continue;
 
     // Real production only — a Lead reaching SOLD is a queue disposition,
-    // not a sale. The winner is decided from real Closed Sale/Historical
-    // Data records, same as Billboard/financials, never from Lead.status.
-    const [historicalRows, saleRows] = await Promise.all([
-      historicalLeadLikeRows({ agencyId: agency.id, from: start, to: end }),
-      saleLeadLikeRows({ agencyId: agency.id, from: start, to: end }),
-    ]);
-    const winner = pickWinner([...historicalRows, ...saleRows]);
+    // not a sale. The winner is decided from real Closed Sale records,
+    // same as Billboard/financials, never from Lead.status.
+    const saleRows = await saleLeadLikeRows({ agencyId: agency.id, from: start, to: end });
+    const winner = pickWinner(saleRows);
     if (!winner) continue;
 
     await prisma.userBadge.create({

@@ -94,33 +94,20 @@ function yearMonthBuckets(year, timeZone) {
 }
 
 // The inclusive range of Eastern calendar years actually present in the
-// agency's real sold data (real Lead + HistoricalRecord + Sale), via
-// three cheap parallel min/max aggregates — never a raw DISTINCT-year
-// scan. Returns null when the agency has no sold data anywhere yet.
+// agency's real sold data. A Lead reaching SOLD is a queue/pipeline
+// disposition only, and Historical Data (Back Catalog bulk imports) is
+// deliberately excluded from every reporting surface — Closed Sale (Sale)
+// is the single source of production truth, so this span (which drives
+// the All Years/Month selector's real range) is built from Sale rows
+// alone. Returns null when the agency has no real sold data yet.
 async function agencyDataYearSpan({ agencyId, timeZone }) {
-  const [leadSpan, historicalSpan, saleSpan] = await Promise.all([
-    prisma.lead.aggregate({
-      where: { agencyId, status: 'SOLD', salePremiumCents: { gt: 0 } },
-      _min: { updatedAt: true },
-      _max: { updatedAt: true },
-    }),
-    prisma.historicalRecord.aggregate({
-      where: { agencyId, isSold: true, premiumCents: { gt: 0 } },
-      _min: { recordDate: true },
-      _max: { recordDate: true },
-    }),
-    prisma.sale.aggregate({
-      where: { agencyId, voidedAt: null },
-      _min: { saleDate: true },
-      _max: { saleDate: true },
-    }),
-  ]);
+  const saleSpan = await prisma.sale.aggregate({
+    where: { agencyId, voidedAt: null, premiumCents: { gt: 0 } },
+    _min: { saleDate: true },
+    _max: { saleDate: true },
+  });
 
-  const dates = [
-    leadSpan._min.updatedAt, leadSpan._max.updatedAt,
-    historicalSpan._min.recordDate, historicalSpan._max.recordDate,
-    saleSpan._min.saleDate, saleSpan._max.saleDate,
-  ].filter(Boolean);
+  const dates = [saleSpan._min.saleDate, saleSpan._max.saleDate].filter(Boolean);
   if (dates.length === 0) return null;
 
   let minYear = Infinity;

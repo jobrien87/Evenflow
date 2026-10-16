@@ -12,8 +12,8 @@ const suffix = Date.now();
 let agencyId;
 let userId;
 let leadIds = [];
-let importBatchId;
-let historicalRecordIds = [];
+let saleIds = [];
+let saleCustomerIds = [];
 const periodStart = new Date(Date.now() - 60 * 60 * 1000);
 const periodEnd = new Date(Date.now() + 60 * 60 * 1000);
 
@@ -48,22 +48,32 @@ before(async () => {
   }
 
   // The real production source for the 'sales'/'premium_cents' goal
-  // metrics now: 2 HistoricalRecord rows attributed to this producer.
-  const batch = await prisma.leadImportBatch.create({
-    data: { agencyId, uploadedById: userId, isHistorical: true, totalRows: 2, created: 2, skipped: 0 },
-  });
-  importBatchId = batch.id;
+  // metrics now: 2 real Sale rows (Add Closed Sale) attributed to this
+  // producer. Historical Data no longer counts toward any report. Each
+  // is linked to its own undispositioned Lead (not standalone) so these
+  // fixture rows contribute to 'sales'/'premium_cents' without also
+  // silently inflating the separate 'quotes' metric's standalone-sale
+  // credit (countStandaloneSales only counts a Sale with no leadId).
   for (let i = 0; i < 2; i++) {
-    const record = await prisma.historicalRecord.create({
-      data: { agencyId, importBatchId, assignedToId: userId, premiumCents: 10000, recordDate: new Date(), isSold: true, sourceSystem: 'OTHER' },
+    const fixtureLead = await prisma.lead.create({ data: { agencyId, assignedToId: userId } });
+    leadIds.push(fixtureLead.id);
+    const customer = await prisma.customer.create({ data: { firstName: 'Goal', lastName: `Fixture${suffix}${i}` } });
+    saleCustomerIds.push(customer.id);
+    const sale = await prisma.sale.create({
+      data: {
+        agencyId, customerId: customer.id, leadId: fixtureLead.id, firstName: 'Goal', lastName: `Fixture${suffix}${i}`,
+        saleDate: new Date(), carrier: 'Test Carrier', policyType: 'Standard', productFamily: 'AUTO',
+        premiumCents: 10000, assignedToId: userId, createdById: userId,
+      },
     });
-    historicalRecordIds.push(record.id);
+    saleIds.push(sale.id);
   }
 });
 
 after(async () => {
-  await prisma.historicalRecord.deleteMany({ where: { id: { in: historicalRecordIds } } });
-  await prisma.leadImportBatch.delete({ where: { id: importBatchId } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: { in: saleIds } } });
+  await prisma.sale.deleteMany({ where: { id: { in: saleIds } } });
+  await prisma.customer.deleteMany({ where: { id: { in: saleCustomerIds } } });
   await prisma.leadEvent.deleteMany({ where: { leadId: { in: leadIds } } });
   await prisma.goal.deleteMany({ where: { agencyId } });
   await prisma.lead.deleteMany({ where: { id: { in: leadIds } } });
@@ -72,9 +82,9 @@ after(async () => {
   await prisma.$disconnect();
 });
 
-test('computeGoalActual counts real production (Historical Data/Add Closed Sale) for the sales metric, never a live Lead-SOLD disposition', async () => {
+test('computeGoalActual counts real production (Add Closed Sale) for the sales metric, never a live Lead-SOLD disposition', async () => {
   const actual = await computeGoalActual({ metric: 'sales', userId, agencyId, periodStart, periodEnd });
-  assert.equal(actual, 2, 'the 2 HistoricalRecord rows count; the live SOLD disposition does not');
+  assert.equal(actual, 2, 'the 2 real Sale rows count; the live SOLD disposition does not');
 });
 
 test('computeGoalActual counts real QUOTED dispositions for the quotes metric', async () => {

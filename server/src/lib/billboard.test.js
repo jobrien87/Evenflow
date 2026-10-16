@@ -2,10 +2,13 @@
 // philosophy: no mocked Prisma for logic that IS a database query), plus
 // pure unit tests for the date-bucketing helpers.
 //
-// A Lead reaching SOLD status is a queue/pipeline disposition only now —
-// it is never read here for production. The one real sale unit is a Sale
-// row (Add Closed Sale) or a HistoricalRecord row, so every fixture below
-// uses those instead of a live Lead with status:'SOLD'.
+// A Lead reaching SOLD status is a queue/pipeline disposition only — it
+// is never read here for production. Historical Data (Back Catalog bulk
+// imports) is also deliberately excluded from Billboard, per the agency
+// owner's own instruction that Closed Sale entries are the single source
+// of production truth app-wide. The one real sale unit is a Sale row
+// (Add Closed Sale), standalone or linked back to a Lead (for vendor
+// attribution) — every fixture below uses that.
 //   DATABASE_URL=postgresql://... node --test src/lib/billboard.test.js
 
 const { test, before } = require('node:test');
@@ -45,7 +48,6 @@ let producerAId;
 let producerBId;
 let producerCId;
 let vendorId;
-let importBatchId;
 
 before(async () => {
   const agency = await prisma.agency.create({ data: { name: `Billboard Test Agency ${suffix}` } });
@@ -80,48 +82,41 @@ before(async () => {
   });
   vendorId = vendor.id;
 
-  const batch = await prisma.leadImportBatch.create({
-    data: { agencyId, uploadedById: ownerId, isHistorical: true, totalRows: 0, created: 0, skipped: 0 },
-  });
-  importBatchId = batch.id;
-
-  // Vendor-sourced + zip-attributed sold row — HistoricalRecord is the only
-  // source that carries a vendor/zip dimension (a standalone Sale never
-  // has a vendor, by definition).
-  async function makeHistoricalRecord(assignedToId, product, premiumCents, recordDate, extra = {}) {
-    return prisma.historicalRecord.create({
-      data: {
-        agencyId, importBatchId, assignedToId, product, premiumCents, recordDate,
-        isSold: true, sourceSystem: 'OTHER', ...extra,
-      },
-    });
-  }
-
   // Direct/no-vendor sold row — Add Closed Sale (standalone).
-  async function makeSale(assignedToId, productFamily, premiumCents, saleDate, items = 1) {
+  async function makeSale(assignedToId, productFamily, premiumCents, saleDate, items = 1, extra = {}) {
     const customer = await prisma.customer.create({ data: { firstName: 'Billboard', lastName: 'Cust' } });
     return prisma.sale.create({
       data: {
         agencyId, customerId: customer.id, firstName: 'Billboard', lastName: 'Cust',
         saleDate, carrier: 'Test Carrier', policyType: 'Standard', productFamily, premiumCents, items,
-        assignedToId, createdById: ownerId,
+        assignedToId, createdById: ownerId, ...extra,
       },
     });
   }
 
+  // Vendor-sourced + zip-attributed sold row — a Sale only carries a
+  // vendor dimension when it's linked back to a Lead whose own vendorId
+  // is set (a standalone sale never has a vendor, by definition).
+  async function makeLeadLinkedSale(assignedToId, productFamily, premiumCents, saleDate, items, zip) {
+    const leadCustomer = await prisma.customer.create({ data: { firstName: 'Linked', lastName: 'Lead' } });
+    const lead = await prisma.lead.create({
+      data: { agencyId, customerId: leadCustomer.id, vendorId, status: 'SOLD', assignedToId },
+    });
+    return makeSale(assignedToId, productFamily, premiumCents, saleDate, items, { leadId: lead.id, zip });
+  }
+
   const recordDate = new Date('2026-06-15');
   // Producer A: 2 Auto sales ($100 + $200, 3 + 1 items), one vendor-sourced
-  // w/ zip (HistoricalRecord), one direct/no-vendor w/ no zip (Sale).
-  // Producer B: 1 Home sale ($300, 2 items), direct (Sale).
-  await makeHistoricalRecord(producerAId, 'AUTO', 10000, recordDate, { vendorId, zip: '90210', items: 3 });
+  // w/ zip (Lead-linked Sale), one direct/no-vendor w/ no zip (standalone
+  // Sale). Producer B: 1 Home sale ($300, 2 items), direct (standalone Sale).
+  await makeLeadLinkedSale(producerAId, 'AUTO', 10000, recordDate, 3, '90210');
   await makeSale(producerAId, 'AUTO', 20000, recordDate, 1);
   await makeSale(producerBId, 'HOME', 30000, recordDate, 2);
 
-  // A zero-premium and a null-premium "sold" row from each source — must
-  // never count toward soldCount/premiumCents/itemCount anywhere.
-  await makeHistoricalRecord(producerBId, 'HOME', 0, recordDate);
-  await makeHistoricalRecord(producerBId, 'HOME', null, recordDate);
+  // A zero-premium and a null-premium "sold" row — must never count
+  // toward soldCount/premiumCents/itemCount anywhere.
   await makeSale(producerBId, 'HOME', 0, recordDate);
+  await makeSale(producerBId, 'HOME', null, recordDate);
 });
 
 test('computeBillboard: aggregates real sold leads by producer and by product', async () => {
@@ -207,7 +202,6 @@ test('computeBillboard: an agency with no sales in range returns real zeros, not
 let periodAgencyId;
 let periodOwnerId;
 let periodProducerId;
-let periodBatchId;
 
 before(async () => {
   const agency = await prisma.agency.create({ data: { name: `Billboard Period Test Agency ${suffix}`, timezone: 'America/New_York' } });
@@ -220,19 +214,18 @@ before(async () => {
     data: { agencyId: periodAgencyId, email: `billboard-period-${suffix}@test.local`, passwordHash: 'x', firstName: 'Per', lastName: 'Iod', role: 'PRODUCER', status: 'ACTIVE' },
   });
   periodProducerId = producer.id;
-  const batch = await prisma.leadImportBatch.create({
-    data: { agencyId: periodAgencyId, uploadedById: periodOwnerId, isHistorical: true, totalRows: 0, created: 0, skipped: 0 },
-  });
-  periodBatchId = batch.id;
 
-  // recordDate is a UTC-midnight-of-calendar-date value (see
-  // historicalDataImport.js) — the real encoding this test's Eastern-
-  // boundary fix (item 6a) protects against misreading.
-  async function makeHistoricalRecordOn(premiumCents, recordDate) {
-    return prisma.historicalRecord.create({
+  // saleDate is a UTC-midnight-of-calendar-date value (see
+  // routes/sales.js's `new Date(data.saleDate)` on a plain "YYYY-MM-DD"
+  // input) — the real encoding this test's Eastern-boundary fix (item 6a)
+  // protects against misreading.
+  async function makeSaleOn(premiumCents, saleDate) {
+    const customer = await prisma.customer.create({ data: { firstName: 'Period', lastName: 'Cust' } });
+    return prisma.sale.create({
       data: {
-        agencyId: periodAgencyId, importBatchId: periodBatchId, assignedToId: periodProducerId,
-        product: 'AUTO', premiumCents, recordDate, isSold: true, sourceSystem: 'OTHER',
+        agencyId: periodAgencyId, customerId: customer.id, firstName: 'Period', lastName: 'Cust',
+        saleDate, carrier: 'Test Carrier', policyType: 'Standard', productFamily: 'AUTO', premiumCents,
+        assignedToId: periodProducerId, createdById: periodOwnerId,
       },
     });
   }
@@ -241,11 +234,11 @@ before(async () => {
   // the Saturday right after it (must NOT count toward the week view),
   // one earlier in the same month (Sep 10), one in a different month of
   // the same year (Aug 5), and one in a prior year (2025).
-  await makeHistoricalRecordOn(5000, new Date('2026-09-30'));
-  await makeHistoricalRecordOn(7000, new Date('2026-10-03'));
-  await makeHistoricalRecordOn(3000, new Date('2026-09-10'));
-  await makeHistoricalRecordOn(4000, new Date('2026-08-05'));
-  await makeHistoricalRecordOn(2000, new Date('2025-11-20'));
+  await makeSaleOn(5000, new Date('2026-09-30'));
+  await makeSaleOn(7000, new Date('2026-10-03'));
+  await makeSaleOn(3000, new Date('2026-09-10'));
+  await makeSaleOn(4000, new Date('2026-08-05'));
+  await makeSaleOn(2000, new Date('2025-11-20'));
 });
 
 const PERIOD_NOW = new Date('2026-10-08T15:00:00Z'); // Thursday Oct 8 2026, matching the user's own worked example
@@ -311,10 +304,12 @@ test('computeBillboardPeriod: all_years shows a separate zero-filled total for e
 });
 
 test('computeBillboardPeriod: zero-premium SOLD rows never count toward any period\'s totals', async () => {
-  await prisma.historicalRecord.create({
+  const customer = await prisma.customer.create({ data: { firstName: 'Zero', lastName: 'Premium' } });
+  await prisma.sale.create({
     data: {
-      agencyId: periodAgencyId, importBatchId: periodBatchId, assignedToId: periodProducerId,
-      product: 'AUTO', premiumCents: 0, recordDate: new Date('2026-09-30'), isSold: true, sourceSystem: 'OTHER',
+      agencyId: periodAgencyId, customerId: customer.id, firstName: 'Zero', lastName: 'Premium',
+      saleDate: new Date('2026-09-30'), carrier: 'Test', policyType: 'Standard', productFamily: 'AUTO',
+      premiumCents: 0, assignedToId: periodProducerId, createdById: periodOwnerId,
     },
   });
   const result = await computeBillboardPeriod({ agencyId: periodAgencyId, period: 'week', now: PERIOD_NOW });
@@ -324,7 +319,7 @@ test('computeBillboardPeriod: zero-premium SOLD rows never count toward any peri
 
 test('computeBillboardPeriod: the Oct 8 15:17:58 UTC snapshot discrepancy is fixed — a UTC-midnight-encoded business date lands in the correct Eastern period, not the prior day', async () => {
   // Reproduces the user's own reported bug: a record whose business date
-  // is Oct 1 (stored as 2026-10-01T00:00:00Z, per historicalDataImport.js's
+  // is Oct 1 (stored as 2026-10-01T00:00:00Z, per routes/sales.js's
   // UTC-midnight-of-calendar-date convention) must land inside October's
   // period, not be misread as belonging to September because Eastern Oct 1
   // 00:00 is actually 04:00Z.
@@ -337,6 +332,6 @@ test('computeBillboardPeriod: the Oct 8 15:17:58 UTC snapshot discrepancy is fix
     },
   });
   const result = await computeBillboardPeriod({ agencyId: periodAgencyId, period: 'month', month: '2026-10', now: PERIOD_NOW });
-  assert.equal(result.totals.soldCount, 2, 'the Oct 1 sale plus the existing Oct 3 historical row');
+  assert.equal(result.totals.soldCount, 2, 'the Oct 1 sale plus the existing Oct 3 sale');
   assert.equal(result.totals.premiumCents, 7000 + 123456, 'the Oct 1 sale premium must land inside October, not leak into September');
 });

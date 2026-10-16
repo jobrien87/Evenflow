@@ -174,96 +174,82 @@ test('GET /leads/import-batches?kind=historical_data lists the batch; the defaul
   assert.equal(defaultBody.batches.find((b) => b.id === batchId), undefined, 'a historical batch must never appear in the ordinary lead-upload history');
 });
 
-test('financials /summary includes historical premium/sold-count for the range; a live Lead reaching SOLD contributes nothing', async () => {
+test('financials /summary: Historical Data contributes nothing; a live Lead reaching SOLD also contributes nothing', async () => {
   const qs = `from=${rangeFrom.toISOString()}&to=${rangeTo.toISOString()}&agencyId=${agencyId}`;
   const res = await fetch(`${baseUrl}/api/financials/summary?${qs}`, { headers: { Cookie: ownerCookie } });
   const body = await res.json();
   assert.equal(res.status, 200);
-  // A Lead reaching SOLD is a queue disposition only now, never a revenue/
-  // production source — the seed lead (created directly with status:
-  // 'SOLD', never via the disposition route) correctly produced no
-  // RevenueEvent and must not count toward salesRecorded either.
-  // historical $500 + $300 (row 3 unsold, row 4 out of range excluded)
-  assert.equal(body.revenue, (50000 + 30000) / 100);
-  assert.equal(body.salesRecorded, 2, 'historical sold count only — the live SOLD lead is a pipeline disposition, not a production record');
-  assert.equal(body.historicalRecordsIncluded, 2);
+  // Closed Sale is the single source of production truth app-wide now —
+  // Historical Data (Back Catalog bulk imports) is deliberately excluded
+  // from every reporting surface, and a Lead reaching SOLD is a queue
+  // disposition only (the seed lead, created directly with status:
+  // 'SOLD', never via the disposition route, correctly produced no
+  // RevenueEvent). With zero Sale rows created in this test, both must
+  // be zero.
+  assert.equal(body.revenue, 0, 'the imported historical rows must not contribute any revenue');
+  assert.equal(body.salesRecorded, 0, 'the imported historical rows must not contribute any sold count');
+  assert.ok(!('historicalRecordsIncluded' in body), 'the field itself no longer exists on this response');
 });
 
-test('financials /by-vendor merges matched historical premium into Vendor A, and buckets the unmatched row separately', async () => {
+test('financials /by-vendor: Historical Data contributes nothing to any vendor row', async () => {
   const qs = `from=${rangeFrom.toISOString()}&to=${rangeTo.toISOString()}&agencyId=${agencyId}`;
   const res = await fetch(`${baseUrl}/api/financials/by-vendor?${qs}`, { headers: { Cookie: ownerCookie } });
   const body = await res.json();
   const vendorARow = body.vendors.find((v) => v.vendorId === vendorAId);
   assert.ok(vendorARow);
-  // Only the matched historical row counts now — the live SOLD lead
-  // assigned to this vendor is a pipeline disposition, not production.
-  assert.equal(vendorARow.salesCount, 1);
-  assert.equal(vendorARow.revenue, 500);
+  assert.equal(vendorARow.salesCount, 0, 'the historical row matched to Vendor A must not count — only a real Sale would');
+  assert.equal(vendorARow.revenue, 0);
 
+  // No "Direct / No Vendor" row at all — that bucket only ever appears
+  // when a real (voided-excluded) Sale row with no vendor exists, and
+  // none was created here.
   const unmatchedRow = body.vendors.find((v) => v.vendorId === null);
-  assert.ok(unmatchedRow, 'an unmatched-vendor historical bucket must be visible, not silently dropped');
-  assert.equal(unmatchedRow.salesCount, 1);
-  assert.equal(unmatchedRow.revenue, 300);
+  assert.equal(unmatchedRow, undefined, 'no unmatched-vendor bucket without a real Sale row');
 });
 
-test('financials /by-agent merges matched historical premium into Prod X, and buckets the unattributed row separately', async () => {
+test('financials /by-agent: Historical Data contributes nothing to any agent row', async () => {
   const qs = `from=${rangeFrom.toISOString()}&to=${rangeTo.toISOString()}&agencyId=${agencyId}`;
   const res = await fetch(`${baseUrl}/api/financials/by-agent?${qs}`, { headers: { Cookie: ownerCookie } });
   const body = await res.json();
   const prodXRow = body.agents.find((a) => a.userId === producerXId);
   assert.ok(prodXRow);
-  // Only the matched historical row counts — the live SOLD lead assigned
-  // to this producer is a pipeline disposition, not production.
-  assert.equal(prodXRow.salesCount, 1);
-  assert.equal(prodXRow.revenue, 500);
+  assert.equal(prodXRow.salesCount, 0, 'the historical row matched to Prod X must not count — only a real Sale would');
+  assert.equal(prodXRow.revenue, 0);
 
   const unattributedRow = body.agents.find((a) => a.userId === null);
-  assert.ok(unattributedRow);
-  assert.equal(unattributedRow.salesCount, 1);
-  assert.equal(unattributedRow.revenue, 300);
+  assert.equal(unattributedRow, undefined, 'no unattributed-sales bucket without a real Sale row');
 });
 
-test('computeBillboard merges historical sold rows into totals/byVendor; a live Lead reaching SOLD contributes nothing', async () => {
+test('computeBillboard: Historical Data contributes nothing to totals/byVendor; a live Lead reaching SOLD also contributes nothing', async () => {
   const result = await computeBillboard({ agencyId, granularity: 'month', from: rangeFrom, to: rangeTo });
-  assert.equal(result.totals.soldCount, 2);
-  assert.equal(result.totals.premiumCents, 50000 + 30000);
-
-  const vendorARow = result.byVendor.find((v) => v.vendorId === vendorAId);
-  assert.equal(vendorARow.soldCount, 1);
-  // The unmatched-vendor historical row buckets under Billboard's own
-  // existing "Direct / No Vendor" convention — no new bucket type needed.
-  const directRow = result.byVendor.find((v) => v.vendorId === null);
-  assert.equal(directRow.vendorName, 'Direct / No Vendor');
-  assert.equal(directRow.soldCount, 1);
-  assert.equal(directRow.premiumCents, 30000);
+  assert.equal(result.totals.soldCount, 0);
+  assert.equal(result.totals.premiumCents, 0);
+  assert.deepEqual(result.byVendor, [], 'no Sale rows exist, so no vendor breakdown rows at all — not even a "Direct / No Vendor" bucket');
 });
 
-test('computeGoalActual: historical data adds to the sales and premium_cents goal metrics', async () => {
+test('computeGoalActual: Historical Data adds nothing to the sales or premium_cents goal metrics', async () => {
   const salesActual = await computeGoalActual({ metric: 'sales', userId: null, agencyId, periodStart: rangeFrom, periodEnd: rangeTo });
-  // Only the real disposition event counts for "live" sales here (the
-  // historical rows were never dispositioned) — so this is 1 (real) + 2 (historical).
-  assert.equal(salesActual, 0 + 2, 'no real lead.disposition SOLD event was created in this test, only the lead was created pre-SOLD — confirms historical count flows through even with zero live dispositions');
+  assert.equal(salesActual, 0, 'countSales only counts real Sale rows now — none exist in this test');
 
   const premiumActual = await computeGoalActual({ metric: 'premium_cents', userId: null, agencyId, periodStart: rangeFrom, periodEnd: rangeTo });
-  assert.equal(premiumActual, 0 + 50000 + 30000, 'same reasoning — no live SOLD leadEvent exists, only historical contributes here');
+  assert.equal(premiumActual, 0, 'sumSalePremium only sums real Sale rows now — none exist in this test');
 });
 
-test('computeProductBreakdown: historical sold-count is added to salesCount, never to totalLeads/rates', async () => {
+test('computeProductBreakdown: Historical Data never contributes to salesCount, totalLeads, or rates', async () => {
   const rows = await computeProductBreakdown({ agencyId, userId: undefined, from: rangeFrom, to: rangeTo });
   const autoRow = rows.find((r) => r.product === 'Auto');
   assert.ok(autoRow);
   // totalLeads only counts the one real live Lead (receivedAt in range) —
   // the historical row never touches this pipeline-count field.
   assert.equal(autoRow.totalLeads, 1);
-  // salesCount is historical + manual only now — the live Lead reaching
-  // SOLD is a pipeline disposition, not a production record.
-  assert.equal(autoRow.salesCount, 1, 'only the matched historical Auto row — the live SOLD lead is a pipeline disposition');
+  // salesCount only comes from real Sale rows now — the live Lead
+  // reaching SOLD is a pipeline disposition, and no Sale row exists.
+  assert.equal(autoRow.salesCount, 0, 'no real Sale row exists for Auto in this test');
 
-  // Home has zero live leads but one historical sale — must still appear.
+  // The historical-only "Home" row must not exist at all — Historical
+  // Data no longer feeds this report, so there's no data to create one.
   const homeRow = rows.find((r) => r.product === 'Home');
-  assert.ok(homeRow, 'a product with only historical sales must still get a row');
-  assert.equal(homeRow.totalLeads, 0);
-  assert.equal(homeRow.salesCount, 1);
+  assert.equal(homeRow, undefined, 'a product with only historical (no real Sale) activity must not get a row');
 });
 
 test('computeFunnel (pipeline totalLeads/rates) is completely unaffected by historical data', async () => {
@@ -273,7 +259,7 @@ test('computeFunnel (pipeline totalLeads/rates) is completely unaffected by hist
   assert.equal(funnel.totalLeads, 1);
 });
 
-test('undo deletes every HistoricalRecord for the batch unconditionally, and the contribution disappears from financials again', async () => {
+test('undo deletes every HistoricalRecord for the batch unconditionally (financials already showed zero contribution, before and after)', async () => {
   const undoRes = await fetch(`${baseUrl}/api/leads/import-batches/${batchId}/undo`, { method: 'POST', headers: { Cookie: ownerCookie } });
   assert.equal(undoRes.status, 200);
   const undoBody = await undoRes.json();
@@ -285,10 +271,9 @@ test('undo deletes every HistoricalRecord for the batch unconditionally, and the
   const qs = `from=${rangeFrom.toISOString()}&to=${rangeTo.toISOString()}&agencyId=${agencyId}`;
   const res = await fetch(`${baseUrl}/api/financials/summary?${qs}`, { headers: { Cookie: ownerCookie } });
   const body = await res.json();
-  // The live seed lead never produced a RevenueEvent (created pre-SOLD,
-  // not via disposition) — so with historical data gone, revenue is $0.
-  assert.equal(body.revenue, 0, 'back to zero once historical data is undone (live seed lead has no RevenueEvent)');
-  assert.equal(body.historicalRecordsIncluded, 0);
+  // Historical Data never contributed to financials in the first place
+  // (per the tests above) — undoing it changes nothing about this total.
+  assert.equal(body.revenue, 0);
 });
 
 // Real Performology-shaped header set (Part 7 hardening): "Issue Date" as

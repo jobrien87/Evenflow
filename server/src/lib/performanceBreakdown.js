@@ -7,7 +7,6 @@
 
 const { prisma } = require('./db');
 const { computeFunnel, pct } = require('./funnelMetrics');
-const { historicalByProduct } = require('./historicalAggregates');
 const { reportingProductKey } = require('./products');
 const { salesByProduct } = require('./manualSaleAggregates');
 const { QUOTED_OR_BEYOND_STATUSES } = require('./leadStatusGroups');
@@ -56,7 +55,7 @@ async function computeVendorBreakdown({ agencyId, userId, from, to }) {
 // { agencyId, userId?, from, to } -> one row per distinct Lead.product
 // this scope received in the period.
 async function computeProductBreakdown({ agencyId, userId, from, to }) {
-  const [leads, historicalProducts, manualProducts] = await Promise.all([
+  const [leads, manualProducts] = await Promise.all([
     prisma.lead.findMany({
       where: {
         agencyId,
@@ -66,7 +65,6 @@ async function computeProductBreakdown({ agencyId, userId, from, to }) {
       },
       select: { product: true, status: true, firstContactAt: true },
     }),
-    historicalByProduct({ agencyId, from, to, assignedToId: userId || undefined }),
     salesByProduct({ agencyId, from, to, assignedToId: userId || undefined }),
   ]);
 
@@ -80,15 +78,14 @@ async function computeProductBreakdown({ agencyId, userId, from, to }) {
   // closeRate is a pipeline-conversion rate (a Lead reaching SOLD is a
   // real, countable pipeline event for this purpose, same as funnelMetrics
   // .js's own closeRate) — distinct from salesCount, which is a real
-  // production/revenue count and only ever comes from Historical Data and
-  // Add Closed Sale rows now; a live Lead reaching SOLD is a queue
-  // disposition only and is never counted toward salesCount.
+  // production/revenue count and only ever comes from Add Closed Sale rows
+  // now; a live Lead reaching SOLD is a queue disposition only and is
+  // never counted toward salesCount.
   const rows = [...byProduct.entries()].map(([product, productLeads]) => {
     const total = productLeads.length;
     const contacted = productLeads.filter((l) => l.firstContactAt).length;
     const quotedOrBeyond = productLeads.filter((l) => QUOTED_OR_BEYOND_STATUSES.includes(l.status)).length;
     const sold = productLeads.filter((l) => l.status === 'SOLD').length;
-    const historicalSold = historicalProducts[product]?.count || 0;
     const manualSold = manualProducts[product]?.count || 0;
     return {
       product,
@@ -96,16 +93,15 @@ async function computeProductBreakdown({ agencyId, userId, from, to }) {
       contactRate: pct(contacted, total),
       quoteRate: pct(quotedOrBeyond, total),
       closeRate: pct(sold, total),
-      salesCount: historicalSold + manualSold,
+      salesCount: manualSold,
     };
   });
 
-  // A product with historical or manual sales but zero live leads in this
-  // period still needs a row, so its contribution isn't silently lost.
-  const extraProducts = new Set([...Object.keys(historicalProducts), ...Object.keys(manualProducts)]);
-  for (const product of extraProducts) {
+  // A product with Closed Sale rows but zero live leads in this period
+  // still needs a row, so its contribution isn't silently lost.
+  for (const product of Object.keys(manualProducts)) {
     if (!byProduct.has(product)) {
-      const count = (historicalProducts[product]?.count || 0) + (manualProducts[product]?.count || 0);
+      const count = manualProducts[product]?.count || 0;
       rows.push({ product, totalLeads: 0, contactRate: null, quoteRate: null, closeRate: null, salesCount: count });
     }
   }

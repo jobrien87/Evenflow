@@ -115,12 +115,35 @@ async function salesByProduct({ agencyId, from, to, assignedToId, timeZone }) {
   return byProduct;
 }
 
+// {vendorId|null, premiumCents, count}[] — a standalone sale (no
+// originating Lead) has no vendor by definition, so it's grouped under the
+// null bucket; a Lead-linked sale is attributed to that Lead's real
+// vendorId (the one place a Closed Sale CAN carry a vendor dimension,
+// since Sale itself has no vendorId column). financials.js's /by-vendor
+// route turns the null bucket into a visible "Direct / No Vendor" row,
+// same convention saleLeadLikeRows below already uses for Billboard.
+async function salesByVendor({ agencyId, from, to, timeZone }) {
+  const rows = await prisma.sale.findMany({
+    where: dateRangeWhere(agencyId, from, to, {}, timeZone),
+    select: { premiumCents: true, lead: { select: { vendorId: true } } },
+  });
+  const byVendor = new Map();
+  for (const r of rows) {
+    const key = r.lead?.vendorId || null;
+    const existing = byVendor.get(key) || { vendorId: key, premiumCents: 0, count: 0 };
+    existing.premiumCents += r.premiumCents || 0;
+    existing.count += 1;
+    byVendor.set(key, existing);
+  }
+  return [...byVendor.values()];
+}
+
 // Rows shaped exactly like lib/billboard.js's own `soldLeads` select —
 // concatenate straight into that array (see that file's merge point in
-// computeBillboard()). vendorId/vendor are always null: a standalone sale
-// was never bought from a lead vendor by definition, so it naturally lands
-// in Billboard's existing "Direct / No Vendor" fallback bucket, which is
-// exactly right.
+// computeBillboard()). A standalone sale has no vendor by definition
+// (vendorId/vendor stay null, landing in Billboard's "Direct / No Vendor"
+// bucket); a Lead-linked sale is attributed to that Lead's real vendor,
+// the same join salesByVendor above uses.
 async function saleLeadLikeRows({ agencyId, from, to, timeZone }) {
   const rows = await prisma.sale.findMany({
     where: dateRangeWhere(agencyId, from, to, {}, timeZone),
@@ -132,6 +155,7 @@ async function saleLeadLikeRows({ agencyId, from, to, timeZone }) {
       assignedTo: { select: { id: true, firstName: true, lastName: true } },
       zip: true,
       items: true,
+      lead: { select: { vendorId: true, vendor: { select: { id: true, name: true } } } },
     },
   });
   return rows.map((r) => ({
@@ -140,8 +164,8 @@ async function saleLeadLikeRows({ agencyId, from, to, timeZone }) {
     saleProduct: r.productFamily,
     assignedToId: r.assignedToId,
     assignedTo: r.assignedTo,
-    vendorId: null,
-    vendor: null,
+    vendorId: r.lead?.vendorId || null,
+    vendor: r.lead?.vendor || null,
     zip: r.zip,
     items: r.items,
   }));
@@ -153,5 +177,6 @@ module.exports = {
   countStandaloneSales,
   salesByAgent,
   salesByProduct,
+  salesByVendor,
   saleLeadLikeRows,
 };

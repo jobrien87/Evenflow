@@ -7,7 +7,6 @@
 const { prisma } = require('./db');
 const { explainScore } = require('./flowScore');
 const { computeFunnel } = require('./funnelMetrics');
-const { sumHistoricalPremium, countHistoricalSold } = require('./historicalAggregates');
 const { sumSalePremium, countSales, countStandaloneSales } = require('./manualSaleAggregates');
 
 function startOfMonth(d) {
@@ -57,12 +56,10 @@ async function computeGoalActual(goal) {
   switch (metric) {
     case 'sales': {
       // A Lead reaching SOLD is a queue/pipeline disposition only and is
-      // never counted toward a sales goal — the real production entry is
-      // Historical Data (Back Catalog) or Add Closed Sale (standalone),
-      // same production-counting rule as Billboard/financials.js.
-      const historical = await countHistoricalSold({ agencyId, from: periodStart, to: periodEnd, assignedToId: userId || undefined });
-      const manual = await countSales({ agencyId, from: periodStart, to: periodEnd, assignedToId: userId || undefined });
-      return historical + manual;
+      // never counted toward a sales goal — the real, and now only,
+      // production entry is Add Closed Sale, same rule as Billboard/
+      // financials.js.
+      return countSales({ agencyId, from: periodStart, to: periodEnd, assignedToId: userId || undefined });
     }
     case 'quotes': {
       const dispositionQuotes = await prisma.leadEvent.count({
@@ -87,11 +84,9 @@ async function computeGoalActual(goal) {
       });
     case 'premium_cents': {
       // Same rule as 'sales' above — a Lead reaching SOLD posts no revenue
-      // and contributes nothing here; the real premium total is Historical
-      // Data + Add Closed Sale.
-      const historicalPremium = await sumHistoricalPremium({ agencyId, from: periodStart, to: periodEnd, assignedToId: userId || undefined });
-      const manualPremium = await sumSalePremium({ agencyId, from: periodStart, to: periodEnd, assignedToId: userId || undefined });
-      return historicalPremium + manualPremium;
+      // and contributes nothing here; the real, and now only, premium
+      // total is Add Closed Sale.
+      return sumSalePremium({ agencyId, from: periodStart, to: periodEnd, assignedToId: userId || undefined });
     }
     case 'cross_sells':
     case 'winbacks':

@@ -191,15 +191,11 @@ export default function BillboardPanel() {
       )}
 
       <div style={s.statsRow}>
-        <StatTile
-          label="Sold"
-          value={data.totals.soldCount}
-          sub={data.historicalRecordsIncluded > 0 ? `includes ${data.historicalRecordsIncluded} historical` : undefined}
-        />
-        {/* Items (sum of Sale.items/HistoricalRecord.items) is a distinct
-            count from the policy/row count above — a single policy can
-            carry several items (e.g. a multi-car or multi-line sale),
-            so this is never assumed to equal soldCount. */}
+        <StatTile label="Sold" value={data.totals.soldCount} />
+        {/* Items (sum of Sale.items) is a distinct count from the
+            policy/row count above — a single policy can carry several
+            items (e.g. a multi-car or multi-line sale), so this is never
+            assumed to equal soldCount. */}
         <StatTile
           label="Items"
           value={data.totals.itemCount}
