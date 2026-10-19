@@ -94,20 +94,32 @@ function yearMonthBuckets(year, timeZone) {
 }
 
 // The inclusive range of Eastern calendar years actually present in the
-// agency's real sold data. A Lead reaching SOLD is a queue/pipeline
-// disposition only, and Historical Data (Back Catalog bulk imports) is
-// deliberately excluded from every reporting surface — Closed Sale (Sale)
-// is the single source of production truth, so this span (which drives
-// the All Years/Month selector's real range) is built from Sale rows
-// alone. Returns null when the agency has no real sold data yet.
+// agency's real sold data (Sale + HistoricalRecord), via two cheap
+// parallel min/max aggregates — never a raw DISTINCT-year scan. A Lead
+// reaching SOLD is still a queue/pipeline disposition only and stays out
+// of this span (billboard.js never reads live Lead rows for production).
+// Historical Data (Back Catalog's "Historical Data" import mode — e.g. a
+// Performology/AgencyZoom/Ricochet port-in) IS included here, so a month
+// with only historical data is still selectable in the Billboard's Month
+// view. Returns null when the agency has no real sold data anywhere yet.
 async function agencyDataYearSpan({ agencyId, timeZone }) {
-  const saleSpan = await prisma.sale.aggregate({
-    where: { agencyId, voidedAt: null, premiumCents: { gt: 0 } },
-    _min: { saleDate: true },
-    _max: { saleDate: true },
-  });
+  const [historicalSpan, saleSpan] = await Promise.all([
+    prisma.historicalRecord.aggregate({
+      where: { agencyId, isSold: true, premiumCents: { gt: 0 } },
+      _min: { recordDate: true },
+      _max: { recordDate: true },
+    }),
+    prisma.sale.aggregate({
+      where: { agencyId, voidedAt: null, premiumCents: { gt: 0 } },
+      _min: { saleDate: true },
+      _max: { saleDate: true },
+    }),
+  ]);
 
-  const dates = [saleSpan._min.saleDate, saleSpan._max.saleDate].filter(Boolean);
+  const dates = [
+    historicalSpan._min.recordDate, historicalSpan._max.recordDate,
+    saleSpan._min.saleDate, saleSpan._max.saleDate,
+  ].filter(Boolean);
   if (dates.length === 0) return null;
 
   let minYear = Infinity;

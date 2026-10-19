@@ -2,14 +2,15 @@
 // product line, plus a real time-series trend line, for an arbitrary
 // granularity (day/week/month/year). A Lead reaching SOLD status is a
 // queue/pipeline disposition only and is never read here for production —
-// the one real production source is a Sale row (Add Closed Sale), reshaped
-// via manualSaleAggregates.js's saleLeadLikeRows. Historical Data (Back
-// Catalog bulk imports) is deliberately excluded from this and every other
-// reporting surface — Closed Sale entries are the single source of
-// production truth app-wide, per the agency owner's own instruction.
+// the one real sale unit is a Sale row (Add Closed Sale) or a historical
+// import record (Back Catalog's "Historical Data" mode — e.g. a
+// Performology/AgencyZoom/Ricochet port-in), reshaped identically via
+// manualSaleAggregates.js/historicalAggregates.js and merged into the one
+// aggregation pass below.
 
 const { prisma } = require('./db');
 const { PRODUCT_LABELS, reportingProductKey } = require('./products');
+const { historicalLeadLikeRows } = require('./historicalAggregates');
 const { saleLeadLikeRows } = require('./manualSaleAggregates');
 const { eligibleProducersWhere } = require('./eligibleProducersQuery');
 const {
@@ -96,11 +97,11 @@ function buildSeries(soldLeads, granularity, from, to) {
 // already-fetched soldLeads array and a producer roster to zero-fill.
 // Shared by both computeBillboard and computeBillboardPeriod so this
 // logic (and its zero-premium protection, applied upstream in
-// manualSaleAggregates.js) is written exactly once. soldCount is a
-// policy/row count; itemCount (sum of Sale.items) and unknownItemsCount
-// (rows with no recoverable items figure) are tracked as distinct
-// numbers — a policy with 3 items shows 3 items and its premium once,
-// never conflated with row count.
+// historicalAggregates.js/manualSaleAggregates.js) is written exactly
+// once. soldCount is a policy/row count; itemCount (sum of Sale.items/
+// HistoricalRecord.items) and unknownItemsCount (rows with no recoverable
+// items figure) are tracked as distinct numbers — a policy with 3 items
+// shows 3 items and its premium once, never conflated with row count.
 function aggregateSoldRows(soldLeads, producers) {
   const byProducerMap = new Map();
   for (const p of producers) {
@@ -208,13 +209,17 @@ async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
   const g = GRANULARITIES.includes(granularity) ? granularity : 'month';
   const range = from && to ? { from: new Date(from), to: new Date(to) } : defaultRange(g);
 
-  const [manualSaleRows, producers] = await Promise.all([
-    // Add Closed Sale rows — the one real production entry (standalone or
-    // linked back to a Lead via Sale.leadId).
+  const [historicalRows, manualSaleRows, producers] = await Promise.all([
+    // Historical Data (Back Catalog) rows — concatenated in so every
+    // grouping/series below reuses this one aggregation pass rather than
+    // a second copy of it.
+    historicalLeadLikeRows({ agencyId, from: range.from, to: range.to }),
+    // Add Closed Sale rows — the other real production entry (standalone
+    // or linked back to a Lead via Sale.leadId) — same reshape pattern.
     saleLeadLikeRows({ agencyId, from: range.from, to: range.to }),
     activeProducersQuery(agencyId),
   ]);
-  const soldLeads = manualSaleRows;
+  const soldLeads = [...historicalRows, ...manualSaleRows];
   const aggregated = aggregateSoldRows(soldLeads, producers);
   const series = buildSeries(soldLeads, g, range.from, range.to);
 
@@ -223,6 +228,10 @@ async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
     period: { from: range.from.toISOString(), to: range.to.toISOString() },
     ...aggregated,
     series,
+    // Historical Data (Back Catalog) rows folded into the totals above —
+    // surfaced so the client can show a small "(includes N historical
+    // records)" caption without a second, parallel report surface.
+    historicalRecordsIncluded: historicalRows.length,
   };
 }
 
@@ -230,9 +239,9 @@ async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
 // {key, label, from, to} windows (the Week view's 5 daily buckets, the
 // Year view's 12 month buckets, or All Years' N year buckets) — distinct
 // from buildSeries, which only ever walks fixed-size granularity steps.
-// Every row bucketBySpans receives (saleLeadLikeRows — computeBillboardPeriod
-// never reads live Lead rows) has `updatedAt` stored as UTC-midnight-of-
-// calendar-date, not a real instant. Comparing
+// Every row bucketBySpans receives (historicalLeadLikeRows/saleLeadLikeRows
+// — computeBillboardPeriod never reads live Lead rows) has `updatedAt`
+// stored as UTC-midnight-of-calendar-date, not a real instant. Comparing
 // that raw value directly against span.from/to (real Eastern-zoned
 // instants, e.g. Eastern Wed 00:00 = 04:00Z) misreads which day a row
 // belongs to — the same root cause the aggregate WHERE clauses already
@@ -321,11 +330,12 @@ async function computeBillboardPeriod({ agencyId, period, month, year, now = new
     extra.yearBuckets = yearBounds;
   }
 
-  const [manualSaleRows, producers] = await Promise.all([
+  const [historicalRows, manualSaleRows, producers] = await Promise.all([
+    historicalLeadLikeRows({ agencyId, from: range.from, to: range.to, timeZone }),
     saleLeadLikeRows({ agencyId, from: range.from, to: range.to, timeZone }),
     activeProducersQuery(agencyId),
   ]);
-  const soldLeads = manualSaleRows;
+  const soldLeads = [...historicalRows, ...manualSaleRows];
   const aggregated = aggregateSoldRows(soldLeads, producers);
 
   if (p === 'week') {
@@ -347,6 +357,7 @@ async function computeBillboardPeriod({ agencyId, period, month, year, now = new
     ...(p === 'year' ? { selectedYear: extra.selectedYear } : {}),
     ...aggregated,
     series,
+    historicalRecordsIncluded: historicalRows.length,
   };
 }
 

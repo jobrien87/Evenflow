@@ -3,12 +3,10 @@
 // pure unit tests for the date-bucketing helpers.
 //
 // A Lead reaching SOLD status is a queue/pipeline disposition only — it
-// is never read here for production. Historical Data (Back Catalog bulk
-// imports) is also deliberately excluded from Billboard, per the agency
-// owner's own instruction that Closed Sale entries are the single source
-// of production truth app-wide. The one real sale unit is a Sale row
-// (Add Closed Sale), standalone or linked back to a Lead (for vendor
-// attribution) — every fixture below uses that.
+// is never read here for production. The two real sale units are a Sale
+// row (Add Closed Sale, standalone or linked back to a Lead for vendor
+// attribution) and a HistoricalRecord row (Back Catalog's "Historical
+// Data" import mode — e.g. a Performology/AgencyZoom/Ricochet port-in).
 //   DATABASE_URL=postgresql://... node --test src/lib/billboard.test.js
 
 const { test, before } = require('node:test');
@@ -334,4 +332,36 @@ test('computeBillboardPeriod: the Oct 8 15:17:58 UTC snapshot discrepancy is fix
   const result = await computeBillboardPeriod({ agencyId: periodAgencyId, period: 'month', month: '2026-10', now: PERIOD_NOW });
   assert.equal(result.totals.soldCount, 2, 'the Oct 1 sale plus the existing Oct 3 sale');
   assert.equal(result.totals.premiumCents, 7000 + 123456, 'the Oct 1 sale premium must land inside October, not leak into September');
+});
+
+test('computeBillboardPeriod: a past month with only Historical Data (Back Catalog port-in) still shows up, and the selector still offers it', async () => {
+  const agency = await prisma.agency.create({ data: { name: `Billboard Historical Test Agency ${suffix}`, timezone: 'America/New_York' } });
+  const owner = await prisma.user.create({
+    data: { agencyId: agency.id, email: `billboard-hist-owner-${suffix}@test.local`, passwordHash: 'x', firstName: 'Hist', lastName: 'Owner', role: 'AGENCY_OWNER', status: 'ACTIVE' },
+  });
+  const producer = await prisma.user.create({
+    data: { agencyId: agency.id, email: `billboard-hist-${suffix}@test.local`, passwordHash: 'x', firstName: 'Hist', lastName: 'Orical', role: 'PRODUCER', status: 'ACTIVE' },
+  });
+  const batch = await prisma.leadImportBatch.create({
+    data: { agencyId: agency.id, uploadedById: owner.id, totalRows: 1, created: 1, skipped: 0, sourceSystem: 'PERFORMOLOGY', isHistorical: true },
+  });
+  // A month (Jan 2026) with NO Sale rows at all — the whole point of this
+  // test is that a Performology port-in alone makes the month real.
+  await prisma.historicalRecord.create({
+    data: {
+      agencyId: agency.id, importBatchId: batch.id, recordDate: new Date('2026-01-15'),
+      product: 'AUTO', assignedToId: producer.id, isSold: true, premiumCents: 15000, items: 1,
+      sourceSystem: 'PERFORMOLOGY',
+    },
+  });
+
+  const result = await computeBillboardPeriod({ agencyId: agency.id, period: 'month', month: '2026-01', now: PERIOD_NOW });
+  assert.equal(result.totals.soldCount, 1, 'the Performology historical row counts toward the month total');
+  assert.equal(result.totals.premiumCents, 15000);
+  assert.equal(result.historicalRecordsIncluded, 1);
+  assert.ok(result.availableMonths.some((m) => m.year === 2026 && m.month === 1), 'January 2026 must be selectable even though it has no Sale rows, only historical data');
+
+  const current = await computeBillboardPeriod({ agencyId: agency.id, period: 'month', now: PERIOD_NOW });
+  assert.equal(current.totals.soldCount, 0, 'the current month has no data of its own');
+  assert.ok(current.availableMonths.some((m) => m.year === 2026 && m.month === 1), 'the selector still reaches back to the historical-only month from the current month view');
 });

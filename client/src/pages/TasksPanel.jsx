@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { Card, Badge, Button, SectionHeader, EmptyState } from '../ui';
+import LeadDetailModal from './LeadDetailModal';
 
 const TASK_TYPES = ['FOLLOW_UP', 'CALLBACK', 'APPOINTMENT', 'MANAGER', 'TRAINING', 'WINBACK', 'CROSS_SELL'];
 
@@ -28,6 +29,7 @@ export default function TasksPanel() {
   const [form, setForm] = useState({ type: 'FOLLOW_UP', title: '', dueAt: '' });
   const [formError, setFormError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [openLeadId, setOpenLeadId] = useState(null);
 
   useEffect(() => {
     load();
@@ -134,18 +136,22 @@ export default function TasksPanel() {
         )}
       </section>
 
-      <TaskGroup title="Overdue" tasks={overdue} tone="danger" onDone={markDone} />
-      <TaskGroup title="Due Today" tasks={dueToday} tone="warning" onDone={markDone} />
-      <TaskGroup title="Upcoming / No Due Date" tasks={upcoming} tone="neutral" onDone={markDone} />
+      <TaskGroup title="Overdue" tasks={overdue} tone="danger" onDone={markDone} onOpenLead={setOpenLeadId} />
+      <TaskGroup title="Due Today" tasks={dueToday} tone="warning" onDone={markDone} onOpenLead={setOpenLeadId} />
+      <TaskGroup title="Upcoming / No Due Date" tasks={upcoming} tone="neutral" onDone={markDone} onOpenLead={setOpenLeadId} />
 
       {open.length === 0 && !error && (
         <EmptyState title="Nothing on your plate" description="No open tasks right now." />
+      )}
+
+      {openLeadId && (
+        <LeadDetailModal leadId={openLeadId} onClose={() => setOpenLeadId(null)} onChanged={load} />
       )}
     </div>
   );
 }
 
-function TaskGroup({ title, tasks, tone, onDone }) {
+function TaskGroup({ title, tasks, tone, onDone, onOpenLead }) {
   if (tasks.length === 0) return null;
   return (
     <section style={s.section}>
@@ -164,6 +170,7 @@ function TaskGroup({ title, tasks, tone, onDone }) {
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <Badge tone={tone}>{t.status.replace(/_/g, ' ')}</Badge>
+              {t.lead && <Button variant="secondary" size="sm" onClick={() => onOpenLead(t.lead.id)}>OPEN</Button>}
               <Button variant="secondary" size="sm" onClick={() => onDone(t.id)}>MARK DONE</Button>
             </div>
           </div>
