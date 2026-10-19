@@ -218,6 +218,80 @@ test('computeAgencyScore no longer computes or includes a transferPerformance co
   assert.ok(funnelHealth);
 });
 
+// ---- Bulk/Back Catalog imports must never pollute Flow Score ----
+// A 15,000-row historical or Winback/Cross-Sell-tagged upload, even one
+// that got round-robin-assigned to real producers, is backfill/batch
+// data — not real-time CRM work — and must never dilute conversion/
+// funnelHealth the way an unfiltered "every Lead row" query would.
+
+let bulkAgencyId, bulkProducerId, bulkUploaderId, bulkBatchId, bulkLeadIds = [];
+
+before(async () => {
+  const agency = await prisma.agency.create({ data: { name: `FS Bulk Pollution Agency ${suffix}` } });
+  bulkAgencyId = agency.id;
+
+  const [producer, uploader] = await Promise.all([
+    prisma.user.create({ data: { email: `fs-bulk-p-${suffix}@test.local`, firstName: 'Bulk', lastName: 'Producer', role: 'PRODUCER', status: 'ACTIVE', agencyId: bulkAgencyId } }),
+    prisma.user.create({ data: { email: `fs-bulk-owner-${suffix}@test.local`, firstName: 'Bulk', lastName: 'Owner', role: 'AGENCY_OWNER', status: 'ACTIVE', agencyId: bulkAgencyId } }),
+  ]);
+  bulkProducerId = producer.id;
+  bulkUploaderId = uploader.id;
+
+  // One real, organically-worked lead: assigned, not from any import batch.
+  const realCustomer = await prisma.customer.create({ data: { firstName: 'Real', lastName: 'Lead' } });
+  const realLead = await prisma.lead.create({
+    data: { agencyId: bulkAgencyId, customerId: realCustomer.id, assignedToId: bulkProducerId, status: 'NEW' },
+  });
+  bulkLeadIds.push(realLead.id);
+
+  // A bulk-import batch of 3 leads, round-robin-assigned to the SAME
+  // producer (assignedToId set, just like resolveManualAssignment would
+  // do for a real upload) — these must be invisible to conversion/
+  // funnelHealth despite being assigned and even SOLD.
+  const batch = await prisma.leadImportBatch.create({
+    data: { agencyId: bulkAgencyId, uploadedById: bulkUploaderId, totalRows: 3, created: 3, skipped: 0 },
+  });
+  bulkBatchId = batch.id;
+  for (let i = 0; i < 3; i++) {
+    const customer = await prisma.customer.create({ data: { firstName: 'Bulk', lastName: `Lead${i}` } });
+    const lead = await prisma.lead.create({
+      data: {
+        agencyId: bulkAgencyId, customerId: customer.id, assignedToId: bulkProducerId,
+        importBatchId: bulkBatchId, source: 'bulk_upload', status: i === 0 ? 'SOLD' : 'NEW',
+      },
+    });
+    bulkLeadIds.push(lead.id);
+  }
+});
+
+after(async () => {
+  await prisma.flowScoreSnapshot.deleteMany({ where: { subjectType: 'USER', subjectId: bulkProducerId } });
+  await prisma.flowScoreSnapshot.deleteMany({ where: { subjectType: 'AGENCY', subjectId: bulkAgencyId } });
+  await prisma.lead.deleteMany({ where: { id: { in: bulkLeadIds } } });
+  await prisma.leadImportBatch.deleteMany({ where: { id: bulkBatchId } });
+  await prisma.user.deleteMany({ where: { id: { in: [bulkProducerId, bulkUploaderId] } } });
+  await prisma.agency.delete({ where: { id: bulkAgencyId } });
+});
+
+test('computeProducerScore: conversion ignores every bulk-imported lead, even one that was round-robin-assigned and marked SOLD', async () => {
+  const snapshot = await computeProducerScore(bulkProducerId);
+  assert.ok(snapshot);
+  const conversion = snapshot.components.find((c) => c.key === 'conversion');
+  assert.ok(conversion);
+  // 1, not 4 — the 3 bulk-imported leads (one of them SOLD) must be
+  // completely invisible to this component.
+  assert.equal(conversion.sampleSize, 1, 'only the real, non-imported lead counts toward conversion');
+  assert.equal(conversion.value, 0, 'the real lead is still NEW, not SOLD, so conversion is 0% — the bulk SOLD lead must not inflate it');
+});
+
+test('computeAgencyScore: funnelHealth ignores every bulk-imported lead agency-wide', async () => {
+  const snapshot = await computeAgencyScore(bulkAgencyId);
+  assert.ok(snapshot);
+  const funnelHealth = snapshot.components.find((c) => c.key === 'funnelHealth');
+  assert.ok(funnelHealth);
+  assert.equal(funnelHealth.sampleSize, 1, 'only the real, non-imported lead counts toward funnelHealth agency-wide');
+});
+
 // ---- "Flow Settings" — per-agency weight customization ----
 // TELEMARKETER stays platform-wide (no single owning agency); AGENCY and
 // PRODUCER become real per-agency rows once an agency customizes them —

@@ -974,8 +974,11 @@ model Lead {
   // entered/vendor-named value this would otherwise risk colliding with,
   // e.g. a column literally named "Current Carrier").
   rawImportFields      Json?
-  // Set only for a row created by POST /leads/bulk-import — lets the
-  // whole batch be found again for the undo action below. Null for every
+  // Set for a row created by POST /leads/bulk-import OR
+  // /leads/back-catalog-import — lets the whole batch be found again for
+  // the undo action below, and is also the one clean signal Flow Score/
+  // funnelMetrics.js use to exclude bulk/backfill rows from real-time
+  // performance metrics (see computeFunnel's own comment). Null for every
   // other creation path (manual, vendor API, telemarketer intake).
   importBatchId        String?
   importBatch          LeadImportBatch? @relation(fields: [importBatchId], references: [id])

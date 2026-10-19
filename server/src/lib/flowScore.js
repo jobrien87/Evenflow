@@ -374,17 +374,28 @@ async function computeProducerScore(userId) {
   const agencyId = user?.agencyId || null;
 
   const leads = await prisma.lead.findMany({
-    where: { assignedToId: userId },
+    // importBatchId: null excludes every bulk/Back Catalog import row
+    // (POST /bulk-import, /back-catalog-import) — backfill/batch data,
+    // not real-time-worked leads. A round-robin-distributed bulk upload
+    // DOES get a real assignedToId (see leadDistribution.js), so filtering
+    // on assignment alone isn't enough; without this, a 15,000-row
+    // historical or Winback/Cross-Sell-tagged upload landing on one
+    // producer would crater their conversion rate and Moshpit claim speed
+    // below with leads they never organically worked. Manual/vendor-API/
+    // telemarketer leads never carry an importBatchId, so they're
+    // unaffected.
+    where: { assignedToId: userId, importBatchId: null },
     select: {
       status: true, assignedAt: true, firstAttemptAt: true, vendorId: true,
       moshpitEligible: true, isLiveTransfer: true, receivedAt: true,
     },
   });
-  // Speed-to-first-attempt is a real-time-vendor-intake SLA — only leads
-  // that actually came through the authenticated vendor API carry a
-  // reliable, non-user-editable receipt timestamp worth measuring
+  // Speed-to-first-attempt is additionally a real-time-vendor-intake SLA —
+  // only leads that actually came through the authenticated vendor API
+  // carry a reliable, non-user-editable receipt timestamp worth measuring
   // response speed against. Conversion/other components below stay
-  // unfiltered (ordinary CRM activity, from any intake source).
+  // unfiltered beyond the importBatchId exclusion above (ordinary CRM
+  // activity, from any real-time intake source).
   const attemptedLeads = leads.filter((l) => l.vendorId && l.assignedAt && l.firstAttemptAt);
   const fastAttempts = attemptedLeads.filter(
     (l) => l.firstAttemptAt.getTime() - l.assignedAt.getTime() <= 60 * 60 * 1000
@@ -536,7 +547,12 @@ async function computeTelemarketerScore(userId) {
 
 async function computeAgencyScore(agencyId) {
   const leads = await prisma.lead.findMany({
-    where: { agencyId },
+    // Same importBatchId exclusion as computeProducerScore's leads query —
+    // a bulk/Back Catalog import is backfill/batch data, not real-time
+    // CRM work, and would otherwise dominate funnelHealth's unfiltered
+    // denominator for any agency that's ever uploaded a large historical
+    // or Winback/Cross-Sell list.
+    where: { agencyId, importBatchId: null },
     select: { status: true, assignedAt: true, firstAttemptAt: true, vendorId: true },
   });
   // Same vendor-API-only gate as computeProducerScore's responsiveness
