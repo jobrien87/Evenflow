@@ -358,7 +358,7 @@ router.get('/:agencyId/activity', async (req, res, next) => {
 // Priority settings UI's own default typeRank (which does include them)
 // could never be saved unmodified. Fixed as part of the agency-
 // customization round.
-const LEAD_TYPES = ['TRANSFER', 'REFERRAL', 'PAID_AD', 'META_AD', 'GOOGLE_AD', 'INTERNET', 'DIRECT_MAIL', 'MANUAL', 'WINBACK', 'CROSS_SELL', 'AI_APPOINTMENT'];
+const LEAD_TYPES = ['TRANSFER', 'REFERRAL', 'PAID_AD', 'META_AD', 'GOOGLE_AD', 'INTERNET', 'DIRECT_MAIL', 'MANUAL', 'WALK_IN', 'CALL_IN', 'DATA_LEAD', 'WINBACK', 'CROSS_SELL', 'AI_APPOINTMENT'];
 const LEAD_STATUSES = [
   'NEW', 'CONTACTED', 'LEFT_VM', 'APPOINTMENT', 'QUOTED', 'QUOTED_HOT', 'FOLLOW_UP',
   'SOLD', 'LOST', 'NOT_INTERESTED', 'BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT', 'INELIGIBLE', 'ARCHIVED',

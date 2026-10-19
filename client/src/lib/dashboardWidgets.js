@@ -42,7 +42,6 @@ export const DASHBOARD_WIDGETS = [
 
   // --- Communication ---
   { key: 'edSuggestion', label: 'Ed Suggests', group: 'Communication', component: 'EdSuggestionBox', defaultVisible: true },
-  { key: 'teamChatInline', label: 'Team Chat', group: 'Communication', component: 'ChatThread', defaultVisible: true },
   { key: 'activityFeed', label: 'Agency Activity Feed', group: 'Communication', component: 'AgencyActivityFeedBox', defaultVisible: true },
 ];
 

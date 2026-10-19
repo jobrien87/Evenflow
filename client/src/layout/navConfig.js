@@ -47,7 +47,7 @@ export const NAV_BY_ROLE = {
     { label: 'Billboard', to: '/agency/billboard', icon: 'megaphone', dataTour: 'nav-billboard' },
     { label: 'Closed Sales', to: '/agency/closed-sales', icon: 'dollar', dataTour: 'nav-closed-sales' },
     { label: 'Sales Studio', to: '/agency/sales-studio', icon: 'trophy', primary: true, dataTour: 'nav-sales-studio' },
-    { label: 'Record Store', to: '/agency/record-store', icon: 'vinyl', dataTour: 'nav-record-store', stub: true },
+    { label: 'Record Store', to: '/agency/record-store', icon: 'vinyl', dataTour: 'nav-record-store' },
     { label: 'Vendors', to: '/agency/vendors', icon: 'vendor', dataTour: 'nav-vendors' },
     { label: 'Financials', to: '/agency/financials', icon: 'dollar', dataTour: 'nav-financials', excludeRoles: ['AGENCY_MANAGER'] },
     { label: 'Back Catalog', to: '/agency/back-catalog', icon: 'archive', secondary: true, dataTour: 'nav-back-catalog' },

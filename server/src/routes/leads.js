@@ -7,7 +7,7 @@ const { requireAuth, requireRole, scopeAgencyId } = require('../middleware/auth'
 const { recordAudit } = require('../lib/audit');
 const { scoreLead } = require('../lib/priority');
 const { computeFollowUpAt } = require('../lib/leadFollowUp');
-const { deriveLeadType, BULK_UPLOAD_CATEGORIES, applyBulkUploadCategory } = require('../lib/leadType');
+const { deriveLeadType, BULK_UPLOAD_CATEGORIES, applyBulkUploadCategory, LEAD_TYPE_VALUES } = require('../lib/leadType');
 const { normalizePhone, normalizeEmail } = require('../lib/normalize');
 const { PRODUCTS, PRODUCT_LABELS } = require('../lib/products');
 const { autoAdvanceLeadStatus } = require('../lib/leadStatusAuto');
@@ -163,6 +163,12 @@ const createLeadSchema = z.object({
   // Only ever honored when the caller is a real TELEMARKETER (see POST /
   // below) — never trusted as-is from any other role.
   isLiveTransfer: z.boolean().optional(),
+  // Manual Lead Source picker (Add a Lead) — takes priority over
+  // deriveLeadType's automatic guess when set. '' means "not picked."
+  leadTypeOverride: z.preprocess((v) => (v === '' ? undefined : v), z.enum(LEAD_TYPE_VALUES).optional()),
+  // '' means "no vendor picked" — a plain z.string().uuid().optional()
+  // rejects '' outright (mirrors routes/calls.js's leadId handling).
+  vendorId: z.preprocess((v) => (v === '' ? undefined : v), z.string().uuid().optional()),
 });
 
 const INTAKE_FIELD_KEYS = [
@@ -245,7 +251,12 @@ async function createLeadRecord({ agencyId, source, createdById, data, importBat
         // framing below, not eligibility) — except a suppressed Customer,
         // who must never be offered up for anyone to claim/contact.
         moshpitEligible: isSuppressed ? false : source === 'telemarketer' ? true : !!data.moshpitEligible,
-        leadType: data.leadTypeOverride || deriveLeadType({ isLiveTransfer: !!data.isLiveTransfer }),
+        vendorId: data.vendorId || null,
+        leadType: data.leadTypeOverride || deriveLeadType({
+          isLiveTransfer: !!data.isLiveTransfer,
+          vendorCategory: data.vendorCategory,
+          vendorIntegrationType: data.vendorIntegrationType,
+        }),
         importBatchId: importBatchId || null,
         ...intakeFields,
       },
@@ -322,6 +333,17 @@ router.post('/', async (req, res, next) => {
     }
     if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
 
+    // Never trust a client-supplied vendorId as belonging to the caller's
+    // own agency — confirm it before attributing a manually-entered lead
+    // to it (mirrors routes/calls.js's leadId ownership check).
+    let vendor = null;
+    if (parsed.data.vendorId) {
+      vendor = await prisma.vendor.findUnique({ where: { id: parsed.data.vendorId } });
+      if (!vendor || vendor.agencyId !== agencyId) {
+        return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'vendorId does not belong to your agency.' });
+      }
+    }
+
     // Source drives the Yield Transfers filter downstream — authoritative
     // server-side, never client-trusted, for a Telemarketer's submission.
     const source = req.user.role === 'TELEMARKETER' ? 'telemarketer' : parsed.data.source;
@@ -329,7 +351,17 @@ router.post('/', async (req, res, next) => {
     // regardless of what any other caller's request body claims.
     const isLiveTransfer = req.user.role === 'TELEMARKETER' && !!parsed.data.isLiveTransfer;
 
-    const result = await createLeadRecord({ agencyId, source, createdById: req.user.id, data: { ...parsed.data, isLiveTransfer } });
+    const result = await createLeadRecord({
+      agencyId,
+      source,
+      createdById: req.user.id,
+      data: {
+        ...parsed.data,
+        isLiveTransfer,
+        vendorCategory: vendor?.category,
+        vendorIntegrationType: vendor?.integrationType,
+      },
+    });
 
     await recordAudit({
       actorId: req.user.id,

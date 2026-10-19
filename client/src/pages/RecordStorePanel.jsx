@@ -4,6 +4,7 @@ import { useAuth } from '../lib/AuthContext';
 import { useIsMobile } from '../lib/useViewport';
 import { Card, Badge, Button, StatTile, Icon, EmptyState } from '../ui';
 import RecordStoreWizard from './RecordStoreWizard';
+import { RECORD_STORE_PREVIEW_MODE } from '../lib/recordStorePreview';
 
 function centsToDollars(cents) {
   if (cents === null || cents === undefined) return '—';
@@ -161,6 +162,10 @@ export default function RecordStorePanel() {
 
   return (
     <div style={s.wrap}>
+      {RECORD_STORE_PREVIEW_MODE && (
+        <div style={s.previewBanner}>COMING SOON — THIS IS A PREVIEW. NOTHING BELOW IS LIVE YET.</div>
+      )}
+
       <div style={s.hero}>
         <div>
           <h1 style={s.title}>THE RECORD STORE</h1>
@@ -196,7 +201,7 @@ export default function RecordStorePanel() {
             <div style={s.confirmBox}>
               This pauses all lead products connected to your Record Store account. You can resume them at any time.
               <div style={s.confirmActions}>
-                <Button variant="danger" size="sm" onClick={pauseAll}>CONFIRM PAUSE</Button>
+                <Button variant="danger" size="sm" disabled={RECORD_STORE_PREVIEW_MODE} onClick={pauseAll}>CONFIRM PAUSE</Button>
                 <Button variant="secondary" size="sm" onClick={() => setConfirmingPauseAll(false)}>CANCEL</Button>
               </div>
             </div>
@@ -205,7 +210,7 @@ export default function RecordStorePanel() {
             <div style={s.confirmBox}>
               This resumes your Record Store account. Programs you paused individually before will stay paused.
               <div style={s.confirmActions}>
-                <Button variant="primary" size="sm" onClick={resumeAll}>CONFIRM RESUME</Button>
+                <Button variant="primary" size="sm" disabled={RECORD_STORE_PREVIEW_MODE} onClick={resumeAll}>CONFIRM RESUME</Button>
                 <Button variant="secondary" size="sm" onClick={() => setConfirmingResumeAll(false)}>CANCEL</Button>
               </div>
             </div>
@@ -228,7 +233,7 @@ export default function RecordStorePanel() {
                   {sub.errorMessage && sub.status === 'ERROR' && <div style={s.syncError}>Setup is still in progress — our team has been notified and will retry shortly.</div>}
                   <div style={s.programActions}>
                     {sub.status === 'ACTIVE' || sub.status === 'PAUSED' ? (
-                      <Button variant="secondary" size="sm" disabled={busyId === sub.id || accountPaused} onClick={() => togglePause(sub)}>
+                      <Button variant="secondary" size="sm" disabled={busyId === sub.id || accountPaused || RECORD_STORE_PREVIEW_MODE} onClick={() => togglePause(sub)}>
                         {busyId === sub.id ? 'Working…' : sub.status === 'ACTIVE' ? 'PAUSE' : 'RESUME'}
                       </Button>
                     ) : null}
@@ -303,7 +308,7 @@ export default function RecordStorePanel() {
             />
             {fundingModal.error && <div style={s.syncError}>{fundingModal.error}</div>}
             <div style={s.confirmActions}>
-              <Button variant="primary" size="sm" disabled={fundingModal.busy} onClick={startAccountFundingCheckout}>
+              <Button variant="primary" size="sm" disabled={fundingModal.busy || RECORD_STORE_PREVIEW_MODE} onClick={startAccountFundingCheckout}>
                 {fundingModal.busy ? 'Starting checkout…' : 'CONTINUE TO PAYMENT'}
               </Button>
               <Button variant="secondary" size="sm" disabled={fundingModal.busy} onClick={() => setFundingModal(null)}>CANCEL</Button>
@@ -327,7 +332,7 @@ export default function RecordStorePanel() {
               Estimated daily spend: ${(((volumeEdit.subscription.priceSnapshotCents || 0) * volumeEdit.value) / 100).toFixed(2)}
             </div>
             <div style={s.confirmActions}>
-              <Button variant="primary" size="sm" disabled={busyId === volumeEdit.subscription.id} onClick={submitVolumeChange}>
+              <Button variant="primary" size="sm" disabled={busyId === volumeEdit.subscription.id || RECORD_STORE_PREVIEW_MODE} onClick={submitVolumeChange}>
                 {busyId === volumeEdit.subscription.id ? 'Saving…' : 'CONFIRM'}
               </Button>
               <Button variant="secondary" size="sm" onClick={() => setVolumeEdit(null)}>CANCEL</Button>
@@ -341,6 +346,10 @@ export default function RecordStorePanel() {
 
 const s = {
   wrap: {},
+  previewBanner: {
+    background: 'var(--danger)', color: 'var(--text-primary)', padding: '10px 20px', borderRadius: 8,
+    fontSize: 13, fontWeight: 700, letterSpacing: 0.5, textAlign: 'center', marginBottom: 'var(--space-6)',
+  },
   loadErrorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 16, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   hero: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 24, marginBottom: 'var(--space-6)', flexWrap: 'wrap' },
   title: { fontFamily: 'var(--font-display)', fontSize: 'var(--text-display-lg)', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 6px', letterSpacing: 1 },

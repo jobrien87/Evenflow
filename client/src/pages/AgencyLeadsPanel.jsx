@@ -7,6 +7,7 @@ import LeadDetailModal from './LeadDetailModal';
 import BulkLeadUploadBox from './BulkLeadUploadBox';
 import AddClosedSaleModal from './AddClosedSaleModal';
 import LeadSearchBox from './LeadSearchBox';
+import { LEAD_TYPE_LABELS } from '../lib/leadTypeMeta';
 
 // Extracted out of AgencyOwnerDashboard (Main Stage) into its own "Leads"
 // tab — same real data/actions (bulk upload, manual add, the leads list,
@@ -18,11 +19,12 @@ export default function AgencyLeadsPanel() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [leads, setLeads] = useState([]);
   const [producers, setProducers] = useState([]);
+  const [vendors, setVendors] = useState([]);
   const [openLeadId, setOpenLeadId] = useState(null);
   const [showAddLead, setShowAddLead] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [showAddSale, setShowAddSale] = useState(false);
-  const [leadForm, setLeadForm] = useState({ firstName: '', lastName: '', phone: '', email: '', product: 'Auto', assignedToId: '' });
+  const [leadForm, setLeadForm] = useState({ firstName: '', lastName: '', phone: '', email: '', product: 'Auto', assignedToId: '', leadTypeOverride: '', vendorId: '' });
   const [leadStatus, setLeadStatus] = useState('');
   const [loadError, setLoadError] = useState('');
   // Real server-side scope for a Manager, not a client-side filter of the
@@ -63,13 +65,14 @@ export default function AgencyLeadsPanel() {
     }
     const qs = params.toString();
     try {
-      const [leadData, userData] = await Promise.all([api.leads(qs ? `?${qs}` : ''), api.users('')]);
+      const [leadData, userData, vendorData] = await Promise.all([api.leads(qs ? `?${qs}` : ''), api.users(''), api.vendors()]);
       setLeads(leadData.leads);
       // A selling AGENCY_MANAGER (e.g. Julie) must be a selectable credit
       // target here too, not just a plain PRODUCER — same
       // eligible-production-roles rule as Closed Sale's own producer
       // picker and eligibleProducersQuery.js.
       setProducers(userData.users.filter((u) => ['PRODUCER', 'AGENCY_MANAGER'].includes(u.role) && u.status === 'ACTIVE'));
+      setVendors(vendorData.vendors || []);
     } catch (err) {
       setLoadError(err.data?.message || 'Could not load your leads. Try refreshing.');
     }
@@ -85,7 +88,7 @@ export default function AgencyLeadsPanel() {
     try {
       await api.createLead(leadForm);
       setLeadStatus('Lead created.');
-      setLeadForm({ firstName: '', lastName: '', phone: '', email: '', product: 'Auto', assignedToId: '' });
+      setLeadForm({ firstName: '', lastName: '', phone: '', email: '', product: 'Auto', assignedToId: '', leadTypeOverride: '', vendorId: '' });
       setShowAddLead(false);
       await load();
     } catch (err) {
@@ -141,6 +144,14 @@ export default function AgencyLeadsPanel() {
           <input style={s.input} type="email" placeholder="Email (optional)" value={leadForm.email} onChange={(e) => setLeadForm({ ...leadForm, email: e.target.value })} />
           <select style={s.input} value={leadForm.product} onChange={(e) => setLeadForm({ ...leadForm, product: e.target.value })}>
             <option>Auto</option><option>Home</option><option>Home and Auto Bundle</option><option>Life</option><option>Health</option><option>Boat</option><option>Motorcycle</option>
+          </select>
+          <select style={s.input} value={leadForm.leadTypeOverride} onChange={(e) => setLeadForm({ ...leadForm, leadTypeOverride: e.target.value })}>
+            <option value="">Lead Source — auto-detect</option>
+            {Object.entries(LEAD_TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+          <select style={s.input} value={leadForm.vendorId} onChange={(e) => setLeadForm({ ...leadForm, vendorId: e.target.value })}>
+            <option value="">No vendor</option>
+            {vendors.map((v) => <option key={v.id} value={v.id}>{v.vendorBrand || v.name}</option>)}
           </select>
           <select style={s.input} value={leadForm.assignedToId} onChange={(e) => setLeadForm({ ...leadForm, assignedToId: e.target.value })}>
             <option value="">Unassigned</option>

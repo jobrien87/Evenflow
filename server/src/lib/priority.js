@@ -8,7 +8,7 @@
 // below when unset, so an agency that's never touched Settings still gets
 // sensible ordering.
 
-const DEFAULT_TYPE_RANK = ['TRANSFER', 'REFERRAL', 'PAID_AD', 'META_AD', 'GOOGLE_AD', 'INTERNET', 'DIRECT_MAIL', 'MANUAL', 'WINBACK', 'CROSS_SELL'];
+const DEFAULT_TYPE_RANK = ['TRANSFER', 'REFERRAL', 'PAID_AD', 'META_AD', 'GOOGLE_AD', 'INTERNET', 'DIRECT_MAIL', 'MANUAL', 'WALK_IN', 'CALL_IN', 'DATA_LEAD', 'WINBACK', 'CROSS_SELL'];
 
 const DEFAULT_STATUS_RULES = {
   SOLD: { afterDays: 0, action: 'DROP_OFF' },

@@ -12,6 +12,9 @@ export const LEAD_TYPE_META = {
   INTERNET: { label: 'Internet', icon: 'globe', tone: 'neutral' },
   DIRECT_MAIL: { label: 'Direct Mail', icon: 'mail', tone: 'neutral' },
   MANUAL: { label: 'Manual / Organic', icon: 'pencil', tone: 'neutral' },
+  WALK_IN: { label: 'Walk In', icon: 'briefcase', tone: 'neutral' },
+  CALL_IN: { label: 'Call In', icon: 'phone', tone: 'neutral' },
+  DATA_LEAD: { label: 'Data Lead', icon: 'globe', tone: 'neutral' },
   WINBACK: { label: 'Winback', icon: 'refresh', tone: 'accent' },
   CROSS_SELL: { label: 'Cross-Sell', icon: 'tag', tone: 'accent' },
   // AI-booked phone appointment synced in from an external calendar

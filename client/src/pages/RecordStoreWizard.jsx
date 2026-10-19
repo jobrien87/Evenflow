@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api } from '../lib/api';
 import { Modal, Button, Badge, Icon } from '../ui';
+import { RECORD_STORE_PREVIEW_MODE } from '../lib/recordStorePreview';
 
 const US_STATE_RE = /^[A-Za-z]{2}$/;
 
@@ -41,7 +42,7 @@ export default function RecordStoreWizard({ template, agency, user, onClose, onD
       }
       const changed = agencyForm.address !== (agency.address || '') || agencyForm.city !== (agency.city || '')
         || agencyForm.state !== (agency.state || '') || agencyForm.zip !== (agency.zip || '');
-      if (changed) {
+      if (changed && !RECORD_STORE_PREVIEW_MODE) {
         setBusy(true);
         try {
           await api.updateAgency(agency.id, { ...agencyForm, state: agencyForm.state.toUpperCase() });
@@ -68,6 +69,10 @@ export default function RecordStoreWizard({ template, agency, user, onClose, onD
       return;
     }
     if (stepName === 'Review') {
+      if (RECORD_STORE_PREVIEW_MODE) {
+        setStepIndex((i) => i + 1);
+        return;
+      }
       setBusy(true);
       try {
         const orderRes = await api.createRecordStoreOrder({
@@ -194,11 +199,11 @@ export default function RecordStoreWizard({ template, agency, user, onClose, onD
                 <div style={s.fundTitle}>FUND YOUR LEAD ACCOUNT</div>
                 <div style={s.fundAmount}>${centsToDollars(template.minimumDepositCents)}</div>
                 <div style={s.helpText}>Your deposit becomes your lead purchasing balance.</div>
-                <Button variant="primary" style={{ width: '100%', marginTop: 12 }} disabled={startingCheckout} onClick={startFundingCheckout}>
+                <Button variant="primary" style={{ width: '100%', marginTop: 12 }} disabled={startingCheckout || RECORD_STORE_PREVIEW_MODE} onClick={startFundingCheckout}>
                   {startingCheckout ? 'Starting checkout…' : `FUND ACCOUNT — $${centsToDollars(template.minimumDepositCents)}`}
                 </Button>
               </div>
-              <Button variant="secondary" disabled={busy} onClick={confirmPayment}>{busy ? 'Checking…' : "I'VE COMPLETED PAYMENT"}</Button>
+              <Button variant="secondary" disabled={busy || RECORD_STORE_PREVIEW_MODE} onClick={confirmPayment}>{busy ? 'Checking…' : "I'VE COMPLETED PAYMENT"}</Button>
             </>
           ) : (
             <div style={s.successBox}>
@@ -216,7 +221,12 @@ export default function RecordStoreWizard({ template, agency, user, onClose, onD
         {stepIndex > 0 && stepName !== 'Fund Account' && <Button variant="secondary" onClick={goBack} disabled={busy}>BACK</Button>}
         <div style={{ flex: 1 }} />
         {stepName !== 'Fund Account' ? (
-          <Button variant="primary" onClick={goNext} disabled={busy}>
+          <Button
+            variant="primary"
+            onClick={goNext}
+            disabled={busy}
+            style={stepName === 'Review' && RECORD_STORE_PREVIEW_MODE ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+          >
             {busy ? 'Working…' : stepName === 'Review' ? 'START MY LEAD PROGRAM' : 'CONTINUE'}
           </Button>
         ) : fundingSatisfied ? (

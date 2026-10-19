@@ -23,7 +23,6 @@ import MoshpitPanel from './MoshpitPanel';
 import ClosedSalesPanel from './ClosedSalesPanel';
 import GoalsPanel from './GoalsPanel';
 import FinancialsPanel from './FinancialsPanel';
-import ChatThread from './ChatThread';
 import AgencyActivityFeedBox from './AgencyActivityFeedBox';
 import AppointmentsBox from './AppointmentsBox';
 import AgencyCoachingBreakdownBox from './AgencyCoachingBreakdownBox';
@@ -512,12 +511,6 @@ export default function AgencyOwnerDashboard() {
       {isVisible('financialsSummary') && (
         <section style={s.section}>
           <FinancialsPanel />
-        </section>
-      )}
-
-      {isVisible('teamChatInline') && (
-        <section style={s.section}>
-          <ChatThread entityType="AGENCY" entityId={user?.agencyId} variant="inline" title="TEAM CHAT" />
         </section>
       )}
 

@@ -3,6 +3,14 @@
 // createLeadRecord and vendorApi.js's vendor-sourced creation) so the
 // mapping never drifts between the two.
 
+// Every LeadType the schema defines (schema.prisma's `enum LeadType`) —
+// used to validate a manually-picked Lead Source (createLeadSchema's
+// leadTypeOverride) against the real enum rather than trusting any string.
+const LEAD_TYPE_VALUES = [
+  'TRANSFER', 'REFERRAL', 'PAID_AD', 'META_AD', 'GOOGLE_AD', 'INTERNET', 'DIRECT_MAIL',
+  'MANUAL', 'WALK_IN', 'CALL_IN', 'DATA_LEAD', 'WINBACK', 'CROSS_SELL', 'AI_APPOINTMENT',
+];
+
 const VENDOR_CATEGORY_TO_LEAD_TYPE = {
   PAID_AD: 'PAID_AD',
   DIRECT_MAIL: 'DIRECT_MAIL',
@@ -60,4 +68,4 @@ function applyBulkUploadCategory(category) {
   return BULK_UPLOAD_CATEGORIES[category] || {};
 }
 
-module.exports = { deriveLeadType, BULK_UPLOAD_CATEGORIES, applyBulkUploadCategory };
+module.exports = { deriveLeadType, BULK_UPLOAD_CATEGORIES, applyBulkUploadCategory, LEAD_TYPE_VALUES };
