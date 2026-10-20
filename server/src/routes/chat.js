@@ -98,9 +98,24 @@ router.get('/conversations/entity/:entityType/:entityId', async (req, res, next)
   }
 });
 
+// A Platform Owner reads/posts in any agency's team room without being a
+// real ConversationParticipant row (unlike an agency's own members, whose
+// real membership is synced by agencyChatParticipantIds/
+// getOrSyncAgencyConversation above) — deliberately NOT extended to
+// LEAD/TRANSFER threads, which stay participant-gated like today; this is
+// scoped to exactly what the app owners' own Chats tab needs. postMessage/
+// markRead's own ConversationParticipant updates are already no-ops (both
+// wrapped in .catch) when no such row exists, so this needs no other
+// support elsewhere.
+async function platformOwnerAgencyBypass(req, conversationId) {
+  if (req.user.role !== 'PLATFORM_OWNER') return false;
+  const conversation = await prisma.conversation.findUnique({ where: { id: conversationId }, select: { relatedEntityType: true } });
+  return conversation?.relatedEntityType === 'AGENCY';
+}
+
 router.get('/conversations/:id/messages', async (req, res, next) => {
   try {
-    if (!(await isParticipant(req.params.id, req.user.id))) {
+    if (!(await platformOwnerAgencyBypass(req, req.params.id)) && !(await isParticipant(req.params.id, req.user.id))) {
       return res.status(403).json({ success: false, error: 'FORBIDDEN' });
     }
     const messages = await prisma.message.findMany({
@@ -120,7 +135,7 @@ const postSchema = z.object({ content: z.string().min(1).max(4000) });
 
 router.post('/conversations/:id/messages', async (req, res, next) => {
   try {
-    if (!(await isParticipant(req.params.id, req.user.id))) {
+    if (!(await platformOwnerAgencyBypass(req, req.params.id)) && !(await isParticipant(req.params.id, req.user.id))) {
       return res.status(403).json({ success: false, error: 'FORBIDDEN' });
     }
     const parsed = postSchema.safeParse(req.body);

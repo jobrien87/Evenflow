@@ -130,6 +130,7 @@ const STEPS_BY_ROLE = {
   PLATFORM_OWNER: [
     WELCOME,
     { icon: 'agencies', title: 'Agencies', body: 'Every agency, its MRR, roster counts, and entitlements — click into any one for the full detail page.', route: '/platform', selector: '[data-tour="nav-home"]' },
+    { icon: 'chat', title: 'Chats', body: 'Every agency’s team chat in one place — open any one and jump in when they need you.', route: '/platform/chats', selector: '[data-tour="nav-chats"]' },
     { icon: 'checklist', title: 'Tasks', body: 'Open tasks across the platform.', route: '/platform/tasks', selector: '[data-tour="nav-tasks"]' },
     { icon: 'megaphone', title: 'Telemarketers', body: 'Invite telemarketers, assign them to agencies, and watch assignment status roll in.', route: '/platform/telemarketers', selector: '[data-tour="nav-telemarketers"]' },
     { icon: 'dollar', title: 'Financials', body: 'Platform-wide revenue and cost, scoped per agency to keep every number real.', route: '/platform/financials', selector: '[data-tour="nav-financials"]' },

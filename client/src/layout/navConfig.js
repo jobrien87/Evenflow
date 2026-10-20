@@ -58,6 +58,7 @@ export const NAV_BY_ROLE = {
   ],
   PLATFORM_OWNER: [
     { label: 'Agencies', to: '/platform', icon: 'agencies', primary: true, dataTour: 'nav-home' },
+    { label: 'Chats', to: '/platform/chats', icon: 'chat', primary: true, dataTour: 'nav-chats' },
     { label: 'Tasks', to: '/platform/tasks', icon: 'checklist', dataTour: 'nav-tasks' },
     { label: 'Telemarketers', to: '/platform/telemarketers', icon: 'megaphone', primary: true, dataTour: 'nav-telemarketers' },
     { label: 'Financials', to: '/platform/financials', icon: 'dollar', primary: true, dataTour: 'nav-financials' },

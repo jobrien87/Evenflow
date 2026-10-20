@@ -13,6 +13,14 @@ const { getOrCreateEntityConversation } = require('./chat');
 // Telemarketer with an ACTIVE TelemarketerAssignment to this agency (TMs
 // never have User.agencyId set — same real membership rule the transfer
 // routing engine already used).
+//
+// Deliberately NOT extended to include PLATFORM_OWNER, even though a
+// Platform Owner can open/post in any agency's room from their own Chats
+// tab (routes/chat.js bypasses the isParticipant check for them directly
+// instead) — this function is also reused by routes/announcements.js to
+// resolve a "team" announcement's real recipient list, and adding every
+// platform owner here would silently CC them on every agency's internal
+// team announcements too, which nobody asked for.
 async function agencyChatParticipantIds(agencyId) {
   const [agencyUsers, tmAssignments] = await Promise.all([
     prisma.user.findMany({ where: { agencyId, status: 'ACTIVE' }, select: { id: true } }),

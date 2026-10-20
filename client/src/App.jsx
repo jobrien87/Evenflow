@@ -41,6 +41,7 @@ import AgenciesPanel from './pages/AgenciesPanel';
 import AgencyDetailPage from './pages/AgencyDetailPage';
 import TelemarketersPanel from './pages/TelemarketersPanel';
 import BillingPanel from './pages/BillingPanel';
+import PlatformChatsPanel from './pages/PlatformChatsPanel';
 
 import TelemarketerDashboard from './pages/TelemarketerDashboard';
 import PersonalizePage from './pages/PersonalizePage';
@@ -148,6 +149,7 @@ export default function App() {
 
         <Route element={<RoleGate allow={['PLATFORM_OWNER']} />}>
           <Route path="platform" element={<AgenciesPanel />} />
+          <Route path="platform/chats" element={<PlatformChatsPanel />} />
           <Route path="platform/sales-studio" element={<SalesStudioPanel />} />
           <Route path="platform/drills" element={<RedirectToSalesStudio tab="drills" />} />
           <Route path="platform/drills/:courseId/:lessonId" element={<DrillDetailPage />} />
