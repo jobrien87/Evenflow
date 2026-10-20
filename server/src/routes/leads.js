@@ -347,9 +347,15 @@ router.post('/', async (req, res, next) => {
     // Source drives the Yield Transfers filter downstream — authoritative
     // server-side, never client-trusted, for a Telemarketer's submission.
     const source = req.user.role === 'TELEMARKETER' ? 'telemarketer' : parsed.data.source;
-    // Same rule for isLiveTransfer — only a real Telemarketer can flag one,
-    // regardless of what any other caller's request body claims.
-    const isLiveTransfer = req.user.role === 'TELEMARKETER' && !!parsed.data.isLiveTransfer;
+    // Same rule for isLiveTransfer — only a real Telemarketer or an
+    // Agency Owner/Manager manually logging one from their own "Add a
+    // Lead" form can flag one (the only two intake paths that expose this
+    // checkbox at all), regardless of what any other caller's request
+    // body claims. isLiveTransfer alone already makes a lead Moshpit-
+    // claimable (see GET /leads/moshpit's own OR clause) — no other field
+    // needs to change for this to behave exactly like a Telemarketer's
+    // live transfer.
+    const isLiveTransfer = ['TELEMARKETER', 'AGENCY_OWNER', 'AGENCY_MANAGER'].includes(req.user.role) && !!parsed.data.isLiveTransfer;
 
     const result = await createLeadRecord({
       agencyId,

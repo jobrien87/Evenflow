@@ -24,7 +24,7 @@ export default function AgencyLeadsPanel() {
   const [showAddLead, setShowAddLead] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [showAddSale, setShowAddSale] = useState(false);
-  const [leadForm, setLeadForm] = useState({ firstName: '', lastName: '', phone: '', email: '', product: 'Auto', assignedToId: '', leadTypeOverride: '', vendorId: '' });
+  const [leadForm, setLeadForm] = useState({ firstName: '', lastName: '', phone: '', email: '', product: 'Auto', assignedToId: '', leadTypeOverride: '', vendorId: '', isLiveTransfer: false });
   const [leadStatus, setLeadStatus] = useState('');
   const [loadError, setLoadError] = useState('');
   // Real server-side scope for a Manager, not a client-side filter of the
@@ -88,7 +88,7 @@ export default function AgencyLeadsPanel() {
     try {
       await api.createLead(leadForm);
       setLeadStatus('Lead created.');
-      setLeadForm({ firstName: '', lastName: '', phone: '', email: '', product: 'Auto', assignedToId: '', leadTypeOverride: '', vendorId: '' });
+      setLeadForm({ firstName: '', lastName: '', phone: '', email: '', product: 'Auto', assignedToId: '', leadTypeOverride: '', vendorId: '', isLiveTransfer: false });
       setShowAddLead(false);
       await load();
     } catch (err) {
@@ -157,6 +157,14 @@ export default function AgencyLeadsPanel() {
             <option value="">Unassigned</option>
             {producers.map((p) => <option key={p.id} value={p.id}>{p.firstName} {p.lastName}</option>)}
           </select>
+          <label style={s.liveTransferRow}>
+            <input
+              type="checkbox"
+              checked={leadForm.isLiveTransfer}
+              onChange={(e) => setLeadForm({ ...leadForm, isLiveTransfer: e.target.checked })}
+            />
+            This is a live transfer — the caller is on the line right now
+          </label>
           <button style={s.submitButton} type="submit">Create Lead</button>
         </form>
       )}
@@ -201,6 +209,7 @@ const s = {
   smallButtonOutline: { padding: '8px 14px', background: 'transparent', border: '1px solid var(--border-strong)', color: 'var(--text-secondary)', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },
   form: { display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--bg-elevated)', padding: 16, borderRadius: 8, marginBottom: 12, border: '1px solid var(--border-hairline)' },
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },
+  liveTransferRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--warning)', background: 'var(--warning-soft)', border: '1px solid rgba(255, 184, 77, 0.4)', borderRadius: 8, padding: '8px 12px', margin: '4px 0 8px' },
   submitButton: { padding: '10px 16px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer' },
   status: { color: 'var(--accent)', marginBottom: 12, fontSize: 13 },
   row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 14, marginBottom: 8 },
