@@ -47,8 +47,24 @@ async function isParticipant(conversationId, userId) {
   return !!row;
 }
 
-async function postMessage({ conversationId, authorId, content }) {
-  const message = await prisma.message.create({ data: { conversationId, authorId, content } });
+// The one curated quick-react set (easy to extend later — emoji stays a
+// plain string column, no migration needed to add more). Validated here,
+// server-side, rather than trusting any client-supplied string.
+const REACTION_EMOJI = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+
+async function postMessage({ conversationId, authorId, content, replyToId }) {
+  // Never trust a client-supplied replyToId as belonging to this
+  // conversation — a reply quoting a message from a DIFFERENT conversation
+  // would be a real cross-thread data leak (the quoted snippet/author
+  // would render for people who were never participants of that other
+  // conversation).
+  let validReplyToId = null;
+  if (replyToId) {
+    const replyTo = await prisma.message.findUnique({ where: { id: replyToId }, select: { conversationId: true } });
+    if (replyTo && replyTo.conversationId === conversationId) validReplyToId = replyToId;
+  }
+
+  const message = await prisma.message.create({ data: { conversationId, authorId, content, replyToId: validReplyToId } });
 
   await prisma.conversationParticipant.update({
     where: { conversationId_userId: { conversationId, userId: authorId } },
@@ -61,6 +77,10 @@ async function postMessage({ conversationId, authorId, content }) {
     prisma.conversationParticipant.findMany({ where: { conversationId, userId: { not: authorId } } }),
   ]);
 
+  const title = validReplyToId
+    ? `${author.firstName} ${author.lastName} replied to your message`
+    : `New message from ${author.firstName} ${author.lastName}`;
+
   Promise.all(
     others.map((p) =>
       notifyUser({
@@ -68,7 +88,7 @@ async function postMessage({ conversationId, authorId, content }) {
         agencyId: conversation.agencyId,
         type: 'chat.message',
         severity: 'INFO',
-        title: `New message from ${author.firstName} ${author.lastName}`,
+        title,
         body: content.length > 140 ? `${content.slice(0, 140)}…` : content,
         relatedEntityType: conversation.relatedEntityType,
         relatedEntityId: conversation.relatedEntityId,
@@ -86,4 +106,20 @@ async function markRead(conversationId, userId) {
   });
 }
 
-module.exports = { getOrCreateEntityConversation, isParticipant, postMessage, markRead };
+// Toggle semantics: react if this (message, user, emoji) row doesn't
+// exist yet, un-react if it does — one endpoint, no separate add/remove
+// routes, and no local "did I already react" bookkeeping needed client-side
+// beyond what the response says. Returns { reacted: boolean }.
+async function toggleReaction({ messageId, userId, emoji }) {
+  const existing = await prisma.messageReaction.findUnique({
+    where: { messageId_userId_emoji: { messageId, userId, emoji } },
+  });
+  if (existing) {
+    await prisma.messageReaction.delete({ where: { id: existing.id } });
+    return { reacted: false };
+  }
+  await prisma.messageReaction.create({ data: { messageId, userId, emoji } });
+  return { reacted: true };
+}
+
+module.exports = { getOrCreateEntityConversation, isParticipant, postMessage, markRead, toggleReaction, REACTION_EMOJI };

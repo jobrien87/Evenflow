@@ -378,7 +378,8 @@ export const api = {
   chatConversations: () => request('/chat/conversations'),
   chatEntityConversation: (entityType, entityId) => request(`/chat/conversations/entity/${entityType}/${entityId}`),
   chatMessages: (conversationId) => request(`/chat/conversations/${conversationId}/messages`),
-  postChatMessage: (conversationId, content) => request(`/chat/conversations/${conversationId}/messages`, { method: 'POST', body: { content } }),
+  postChatMessage: (conversationId, content, replyToId) => request(`/chat/conversations/${conversationId}/messages`, { method: 'POST', body: { content, replyToId: replyToId || '' } }),
+  toggleMessageReaction: (messageId, emoji) => request(`/chat/messages/${messageId}/reactions`, { method: 'POST', body: { emoji } }),
 
   // Break Room Arcade — every route here is already gated server-side by
   // canAccessBreakRoom(); the client never decides eligibility itself, it

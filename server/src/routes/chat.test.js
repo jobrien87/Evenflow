@@ -50,6 +50,13 @@ before(async () => {
 after(async () => {
   const conversations = await prisma.conversation.findMany({ where: { agencyId } });
   const conversationIds = conversations.map((c) => c.id);
+  const messages = await prisma.message.findMany({ where: { conversationId: { in: conversationIds } }, select: { id: true } });
+  const messageIds = messages.map((m) => m.id);
+  await prisma.messageReaction.deleteMany({ where: { messageId: { in: messageIds } } });
+  // Clear replyToId self-references before deleting messages — Message has
+  // no onDelete: Cascade (no migration in this schema does), so a reply
+  // still pointing at a to-be-deleted original would violate the FK.
+  await prisma.message.updateMany({ where: { conversationId: { in: conversationIds } }, data: { replyToId: null } });
   await prisma.message.deleteMany({ where: { conversationId: { in: conversationIds } } });
   await prisma.conversationParticipant.deleteMany({ where: { conversationId: { in: conversationIds } } });
   await prisma.conversation.deleteMany({ where: { agencyId } });
@@ -106,4 +113,120 @@ test('the platform-owner bypass is scoped to AGENCY conversations only — a LEA
     body: JSON.stringify({ content: 'Should not be allowed.' }),
   });
   assert.equal(postRes.status, 403);
+});
+
+test('reacting to a message toggles a MessageReaction row, visible on the next read and reversible by reacting the same emoji again', async () => {
+  const entityRes = await fetch(`${baseUrl}/api/chat/conversations/entity/AGENCY/${agencyId}`, { headers: { Cookie: ownerCookie } });
+  const { conversation } = await entityRes.json();
+
+  const postRes = await fetch(`${baseUrl}/api/chat/conversations/${conversation.id}/messages`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ content: 'React to this.' }),
+  });
+  const { message } = await postRes.json();
+
+  const reactRes = await fetch(`${baseUrl}/api/chat/messages/${message.id}/reactions`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ emoji: '👍' }),
+  });
+  assert.equal(reactRes.status, 200);
+  const reactBody = await reactRes.json();
+  assert.equal(reactBody.reacted, true);
+
+  const getRes1 = await fetch(`${baseUrl}/api/chat/conversations/${conversation.id}/messages`, { headers: { Cookie: ownerCookie } });
+  const { messages: messages1 } = await getRes1.json();
+  const found1 = messages1.find((m) => m.id === message.id);
+  assert.ok(found1.reactions.some((r) => r.userId === ownerId && r.emoji === '👍'), 'the reaction must show up on the next read');
+
+  const unreactRes = await fetch(`${baseUrl}/api/chat/messages/${message.id}/reactions`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ emoji: '👍' }),
+  });
+  assert.equal(unreactRes.status, 200);
+  const unreactBody = await unreactRes.json();
+  assert.equal(unreactBody.reacted, false, 'reacting with the same emoji again must toggle it off');
+
+  const getRes2 = await fetch(`${baseUrl}/api/chat/conversations/${conversation.id}/messages`, { headers: { Cookie: ownerCookie } });
+  const { messages: messages2 } = await getRes2.json();
+  const found2 = messages2.find((m) => m.id === message.id);
+  assert.equal(found2.reactions.length, 0, 'un-reacting must remove the row');
+});
+
+test('an unknown emoji is rejected, and the reaction route honors the same access rules as reading/posting in the conversation', async () => {
+  const agencyEntityRes = await fetch(`${baseUrl}/api/chat/conversations/entity/AGENCY/${agencyId}`, { headers: { Cookie: ownerCookie } });
+  const { conversation: agencyConversation } = await agencyEntityRes.json();
+  const agencyPostRes = await fetch(`${baseUrl}/api/chat/conversations/${agencyConversation.id}/messages`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ content: 'For the bypass reaction test.' }),
+  });
+  const { message: agencyMessage } = await agencyPostRes.json();
+
+  const badEmojiRes = await fetch(`${baseUrl}/api/chat/messages/${agencyMessage.id}/reactions`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ emoji: '🚀' }),
+  });
+  assert.equal(badEmojiRes.status, 400, 'only the fixed quick-react palette is accepted');
+
+  // The platform owner's AGENCY-room bypass (platformOwnerAgencyBypass)
+  // must also cover reacting, not just reading/posting.
+  const bypassReactRes = await fetch(`${baseUrl}/api/chat/messages/${agencyMessage.id}/reactions`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: platformOwnerCookie },
+    body: JSON.stringify({ emoji: '❤️' }),
+  });
+  assert.equal(bypassReactRes.status, 200, 'the platform owner must be able to react in an agency team room without a participant row');
+
+  // Same platform owner, same emoji route, but against a LEAD thread they
+  // are not a participant of — the bypass must stay scoped to AGENCY only.
+  const leadEntityRes = await fetch(`${baseUrl}/api/chat/conversations/entity/LEAD/${leadId}`, { headers: { Cookie: ownerCookie } });
+  const { conversation: leadConversation } = await leadEntityRes.json();
+  const leadPostRes = await fetch(`${baseUrl}/api/chat/conversations/${leadConversation.id}/messages`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ content: 'For the forbidden reaction test.' }),
+  });
+  const { message: leadMessage } = await leadPostRes.json();
+
+  const forbiddenReactRes = await fetch(`${baseUrl}/api/chat/messages/${leadMessage.id}/reactions`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: platformOwnerCookie },
+    body: JSON.stringify({ emoji: '😂' }),
+  });
+  assert.equal(forbiddenReactRes.status, 403, 'a platform owner with no real stake in this lead thread must not be able to react either');
+});
+
+test('replyToId only links within the same conversation — a reply in the right conversation carries its quoted message, a cross-conversation id is silently dropped', async () => {
+  const agencyEntityRes = await fetch(`${baseUrl}/api/chat/conversations/entity/AGENCY/${agencyId}`, { headers: { Cookie: ownerCookie } });
+  const { conversation: agencyConversation } = await agencyEntityRes.json();
+  const leadEntityRes = await fetch(`${baseUrl}/api/chat/conversations/entity/LEAD/${leadId}`, { headers: { Cookie: ownerCookie } });
+  const { conversation: leadConversation } = await leadEntityRes.json();
+
+  const originalRes = await fetch(`${baseUrl}/api/chat/conversations/${agencyConversation.id}/messages`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ content: 'The original message.' }),
+  });
+  const { message: original } = await originalRes.json();
+
+  // Same-conversation reply: replyToId must stick and the GET's include
+  // must resolve the quoted message.
+  const replyRes = await fetch(`${baseUrl}/api/chat/conversations/${agencyConversation.id}/messages`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ content: 'A real reply.', replyToId: original.id }),
+  });
+  assert.equal(replyRes.status, 201);
+  const { message: reply } = await replyRes.json();
+  assert.equal(reply.replyToId, original.id);
+
+  const getRes = await fetch(`${baseUrl}/api/chat/conversations/${agencyConversation.id}/messages`, { headers: { Cookie: ownerCookie } });
+  const { messages } = await getRes.json();
+  const foundReply = messages.find((m) => m.id === reply.id);
+  assert.equal(foundReply.replyTo?.id, original.id);
+  assert.equal(foundReply.replyTo?.content, 'The original message.');
+
+  // Cross-conversation reply: a replyToId pointing at a message in a
+  // DIFFERENT conversation must be dropped, not trusted from the client.
+  const crossReplyRes = await fetch(`${baseUrl}/api/chat/conversations/${leadConversation.id}/messages`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ content: 'Pretending to reply across conversations.', replyToId: original.id }),
+  });
+  assert.equal(crossReplyRes.status, 201);
+  const { message: crossReply } = await crossReplyRes.json();
+  assert.equal(crossReply.replyToId, null, 'a replyToId from another conversation must never be trusted');
 });

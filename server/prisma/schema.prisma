@@ -391,6 +391,7 @@ model User {
   trainingAssignments       TrainingAssignment[]
   conversationParticipants  ConversationParticipant[]
   messagesAuthored          Message[]
+  messageReactions          MessageReaction[]
   passwordResetTokens       PasswordResetToken[]
   mfaChallenges             MfaChallenge[]
   timeClockEntries          TimeClockEntry[]
@@ -2499,7 +2500,34 @@ model Message {
   content        String
   createdAt      DateTime     @default(now())
 
+  // A lightweight "quote the original" reply, not a Slack-style threaded
+  // side panel — replyTo must always belong to the same Conversation as
+  // this message (enforced in lib/chat.js's postMessage, never trusted
+  // from the client). Null for an ordinary, non-reply message.
+  replyToId String?
+  replyTo   Message?  @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies   Message[] @relation("MessageReplies")
+
+  reactions MessageReaction[]
+
   @@index([conversationId, createdAt])
+}
+
+// One row per (message, user, emoji) — a user can react to the same
+// message with several different emoji, but never the same emoji twice
+// (the unique constraint below is also what makes "toggle" semantics safe
+// server-side: react if the row doesn't exist, un-react if it does).
+model MessageReaction {
+  id        String   @id @default(uuid())
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  emoji     String
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
 }
 
 // ======================================================================

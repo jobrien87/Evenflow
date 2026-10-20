@@ -2,7 +2,7 @@ const express = require('express');
 const { z } = require('zod');
 const { prisma } = require('../lib/db');
 const { requireAuth } = require('../middleware/auth');
-const { getOrCreateEntityConversation, isParticipant, postMessage, markRead } = require('../lib/chat');
+const { getOrCreateEntityConversation, isParticipant, postMessage, markRead, toggleReaction, REACTION_EMOJI } = require('../lib/chat');
 const { getOrSyncAgencyConversation } = require('../lib/agencyChat');
 
 const router = express.Router();
@@ -120,7 +120,11 @@ router.get('/conversations/:id/messages', async (req, res, next) => {
     }
     const messages = await prisma.message.findMany({
       where: { conversationId: req.params.id },
-      include: { author: { select: { id: true, firstName: true, lastName: true } } },
+      include: {
+        author: { select: { id: true, firstName: true, lastName: true } },
+        reactions: { select: { userId: true, emoji: true } },
+        replyTo: { select: { id: true, content: true, authorId: true, author: { select: { firstName: true, lastName: true } } } },
+      },
       orderBy: { createdAt: 'asc' },
       take: 200,
     });
@@ -131,7 +135,12 @@ router.get('/conversations/:id/messages', async (req, res, next) => {
   }
 });
 
-const postSchema = z.object({ content: z.string().min(1).max(4000) });
+const postSchema = z.object({
+  content: z.string().min(1).max(4000),
+  // '' means "not a reply" — a plain z.string().uuid().optional() rejects
+  // '' outright (same gotcha/fix already used elsewhere, e.g. routes/leads.js's vendorId).
+  replyToId: z.preprocess((v) => (v === '' ? undefined : v), z.string().uuid().optional()),
+});
 
 router.post('/conversations/:id/messages', async (req, res, next) => {
   try {
@@ -142,8 +151,32 @@ router.post('/conversations/:id/messages', async (req, res, next) => {
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
     }
-    const message = await postMessage({ conversationId: req.params.id, authorId: req.user.id, content: parsed.data.content });
+    const message = await postMessage({ conversationId: req.params.id, authorId: req.user.id, content: parsed.data.content, replyToId: parsed.data.replyToId });
     return res.status(201).json({ success: true, message });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const reactionSchema = z.object({ emoji: z.enum(REACTION_EMOJI) });
+
+// Toggle a reaction on a message — same access rule as reading/posting in
+// that message's own conversation (isParticipant, or the Platform Owner's
+// AGENCY-room bypass above), resolved via the message's conversationId
+// since the client only has the message id here, not the conversation id.
+router.post('/messages/:messageId/reactions', async (req, res, next) => {
+  try {
+    const parsed = reactionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+    const message = await prisma.message.findUnique({ where: { id: req.params.messageId }, select: { conversationId: true } });
+    if (!message) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (!(await platformOwnerAgencyBypass(req, message.conversationId)) && !(await isParticipant(message.conversationId, req.user.id))) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    const result = await toggleReaction({ messageId: req.params.messageId, userId: req.user.id, emoji: parsed.data.emoji });
+    return res.json({ success: true, ...result });
   } catch (err) {
     next(err);
   }
