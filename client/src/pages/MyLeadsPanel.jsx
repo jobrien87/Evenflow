@@ -5,6 +5,7 @@ import { Card, Badge, Button, SectionHeader, StatTile, DateRangeFilter, EmptySta
 import { resolveDateRange } from '../lib/dateRange';
 import LeadDetailModal from './LeadDetailModal';
 import AddClosedSaleModal from './AddClosedSaleModal';
+import AddLeadModal from './AddLeadModal';
 import LeadSearchBox from './LeadSearchBox';
 
 const PERIODS = [
@@ -35,6 +36,7 @@ export default function MyLeadsPanel() {
   const [openLeadId, setOpenLeadId] = useState(null);
   const [statusFilter, setStatusFilter] = useState('');
   const [showAddSale, setShowAddSale] = useState(false);
+  const [showAddLead, setShowAddLead] = useState(false);
 
   useEffect(() => {
     load();
@@ -83,6 +85,7 @@ export default function MyLeadsPanel() {
       <div style={s.headerRow}>
         <h3 style={s.h3}>MY LEADS ({total})</h3>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <Button size="sm" onClick={() => setShowAddLead(true)}>+ ADD LEAD</Button>
           <Button size="sm" onClick={() => setShowAddSale(true)}>+ ADD CLOSED SALE</Button>
           <DateRangeFilter
             presets={PERIODS.map((p) => ({ key: p.key, label: p.label.toUpperCase() }))}
@@ -98,6 +101,9 @@ export default function MyLeadsPanel() {
 
       {showAddSale && (
         <AddClosedSaleModal onClose={() => setShowAddSale(false)} onSaved={load} />
+      )}
+      {showAddLead && (
+        <AddLeadModal onClose={() => setShowAddLead(false)} onSaved={loadLeads} />
       )}
 
       <div style={{ marginBottom: 18 }}>
