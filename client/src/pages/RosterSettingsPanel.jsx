@@ -174,6 +174,17 @@ export default function RosterSettingsPanel() {
     await load();
   }
 
+  // Ends just this one TelemarketerAssignment (this agency's claim on a
+  // cross-agency TM) — never the TM's own account, which an Agency Owner
+  // doesn't own. Deactivating/deleting the TM's account globally is a
+  // Platform Owner action (Telemarketers panel), since TM invites
+  // themselves are Platform-Owner-only.
+  async function removeTmFromAgency(assignmentId) {
+    if (!confirm('Remove this telemarketer from your agency? Their account and any assignments to other agencies stay untouched.')) return;
+    await api.endAssignment(assignmentId);
+    await load();
+  }
+
   async function openPurge(u) {
     setPurgeTarget(u);
     setPurgePreview(null);
@@ -360,6 +371,11 @@ export default function RosterSettingsPanel() {
                   <div style={s.rowTitle}>{t.firstName} {t.lastName}</div>
                   <div style={s.rowSub}>{t.email}{t.assignedAt ? ` · assigned ${new Date(t.assignedAt).toLocaleDateString()}` : ''}</div>
                 </div>
+                {canManage && (
+                  <div style={s.userActions}>
+                    <button style={s.deactivateButton} onClick={() => removeTmFromAgency(t.assignmentId)}>REMOVE FROM AGENCY</button>
+                  </div>
+                )}
               </div>
             ))}
           </Card>

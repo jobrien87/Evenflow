@@ -241,10 +241,17 @@ router.post('/assign', requireRole('PLATFORM_OWNER'), async (req, res, next) => 
   }
 });
 
-router.post('/assignments/:assignmentId/end', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
+// AGENCY_OWNER/AGENCY_MANAGER may end an assignment too — removing a TM
+// from just their own agency, never another agency's assignment to the
+// same cross-agency TM (the ownership check below). PLATFORM_OWNER is
+// unrestricted, same pattern agencies.js's own GET /:agencyId uses.
+router.post('/assignments/:assignmentId/end', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
   try {
     const assignment = await prisma.telemarketerAssignment.findUnique({ where: { id: req.params.assignmentId } });
     if (!assignment) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (req.user.role !== 'PLATFORM_OWNER' && assignment.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
 
     const updated = await prisma.telemarketerAssignment.update({
       where: { id: assignment.id },

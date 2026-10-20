@@ -58,17 +58,28 @@ router.post('/clock-in', async (req, res, next) => {
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
     }
-    const existing = await prisma.timeClockEntry.findFirst({ where: openEntryWhere(req.user.id) });
-    if (existing) {
-      return res.status(409).json({ success: false, error: 'ALREADY_CLOCKED_IN' });
-    }
     const resolved = await resolveAgencyId(req, parsed.data.agencyId);
     if (resolved.error) return res.status(resolved.error === 'FORBIDDEN' ? 403 : 400).json({ success: false, error: resolved.error });
     if (!resolved.agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
 
-    const entry = await prisma.timeClockEntry.create({
-      data: { userId: req.user.id, agencyId: resolved.agencyId },
-    });
+    // The existence-check and create happen inside one transaction — a
+    // plain read-then-write here let a double-click/double-tab/retry win
+    // the race and create two open entries for the same user, which then
+    // left every other endpoint below (none of which agreed on an
+    // ordering) able to silently operate on the WRONG one.
+    let entry;
+    try {
+      entry = await prisma.$transaction(async (tx) => {
+        const existing = await tx.timeClockEntry.findFirst({ where: openEntryWhere(req.user.id) });
+        if (existing) throw new Error('ALREADY_CLOCKED_IN');
+        return tx.timeClockEntry.create({ data: { userId: req.user.id, agencyId: resolved.agencyId } });
+      });
+    } catch (err) {
+      if (err.message === 'ALREADY_CLOCKED_IN') {
+        return res.status(409).json({ success: false, error: 'ALREADY_CLOCKED_IN' });
+      }
+      throw err;
+    }
     await setPresence(req.user.id, 'GRINDING');
     return res.status(201).json({ success: true, entry, state: stateOf(entry), presenceStatus: 'GRINDING' });
   } catch (err) {
@@ -78,7 +89,11 @@ router.post('/clock-in', async (req, res, next) => {
 
 router.post('/clock-out', async (req, res, next) => {
   try {
-    const entry = await prisma.timeClockEntry.findFirst({ where: openEntryWhere(req.user.id) });
+    // orderBy must match GET /me (and lib/breakRoom.js's findOpenEntry)
+    // exactly — without it, this could silently pick a different stray
+    // open entry than the one the client/Break Room are actually looking
+    // at, if one ever exists (see the clock-in transaction above).
+    const entry = await prisma.timeClockEntry.findFirst({ where: openEntryWhere(req.user.id), orderBy: { clockInAt: 'desc' } });
     if (!entry) return res.status(409).json({ success: false, error: 'NOT_CLOCKED_IN' });
     if (entry.lunchStartAt && !entry.lunchEndAt) {
       return res.status(409).json({ success: false, error: 'ON_LUNCH', message: 'End your lunch before clocking out.' });
@@ -96,7 +111,8 @@ router.post('/clock-out', async (req, res, next) => {
 
 router.post('/lunch-start', async (req, res, next) => {
   try {
-    const entry = await prisma.timeClockEntry.findFirst({ where: openEntryWhere(req.user.id) });
+    // Same orderBy-consistency note as /clock-out above.
+    const entry = await prisma.timeClockEntry.findFirst({ where: openEntryWhere(req.user.id), orderBy: { clockInAt: 'desc' } });
     if (!entry) return res.status(409).json({ success: false, error: 'NOT_CLOCKED_IN' });
     if (entry.breakStartAt && !entry.breakEndAt) {
       return res.status(409).json({ success: false, error: 'ON_BREAK', message: 'End your break before starting lunch.' });
@@ -114,10 +130,11 @@ router.post('/lunch-start', async (req, res, next) => {
 
 router.post('/lunch-end', async (req, res, next) => {
   try {
-    const entry = await prisma.timeClockEntry.findFirst({ where: openEntryWhere(req.user.id) });
+    // Same orderBy-consistency note as /clock-out above.
+    const entry = await prisma.timeClockEntry.findFirst({ where: openEntryWhere(req.user.id), orderBy: { clockInAt: 'desc' } });
     if (!entry) return res.status(409).json({ success: false, error: 'NOT_CLOCKED_IN' });
     if (!entry.lunchStartAt || entry.lunchEndAt) {
-      return res.status(409).json({ success: false, error: 'NOT_ON_LUNCH' });
+      return res.status(409).json({ success: false, error: 'NOT_ON_LUNCH', message: 'You are not currently on lunch.' });
     }
     const updated = await prisma.timeClockEntry.update({ where: { id: entry.id }, data: { lunchEndAt: new Date() } });
     await setPresence(req.user.id, 'GRINDING');
@@ -129,7 +146,8 @@ router.post('/lunch-end', async (req, res, next) => {
 
 router.post('/break-start', async (req, res, next) => {
   try {
-    const entry = await prisma.timeClockEntry.findFirst({ where: openEntryWhere(req.user.id) });
+    // Same orderBy-consistency note as /clock-out above.
+    const entry = await prisma.timeClockEntry.findFirst({ where: openEntryWhere(req.user.id), orderBy: { clockInAt: 'desc' } });
     if (!entry) return res.status(409).json({ success: false, error: 'NOT_CLOCKED_IN' });
     if (entry.lunchStartAt && !entry.lunchEndAt) {
       return res.status(409).json({ success: false, error: 'ON_LUNCH', message: 'End your lunch before starting a break.' });
@@ -147,10 +165,17 @@ router.post('/break-start', async (req, res, next) => {
 
 router.post('/break-end', async (req, res, next) => {
   try {
-    const entry = await prisma.timeClockEntry.findFirst({ where: openEntryWhere(req.user.id) });
+    // orderBy must match GET /me and lib/breakRoom.js's findOpenEntry
+    // exactly — without it, this call could silently pick a different,
+    // stray open entry than the one the client/Break Room are actually
+    // looking at (if one ever exists — see the clock-in transaction
+    // above), which is exactly what made "End Break" look permanently
+    // stuck: every other signal correctly said ON_BREAK, but this one
+    // unordered lookup kept finding a different row that never started one.
+    const entry = await prisma.timeClockEntry.findFirst({ where: openEntryWhere(req.user.id), orderBy: { clockInAt: 'desc' } });
     if (!entry) return res.status(409).json({ success: false, error: 'NOT_CLOCKED_IN' });
     if (!entry.breakStartAt || entry.breakEndAt) {
-      return res.status(409).json({ success: false, error: 'NOT_ON_BREAK' });
+      return res.status(409).json({ success: false, error: 'NOT_ON_BREAK', message: 'You are not currently on break.' });
     }
     const updated = await prisma.timeClockEntry.update({ where: { id: entry.id }, data: { breakEndAt: new Date() } });
     await setPresence(req.user.id, 'GRINDING');

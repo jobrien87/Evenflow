@@ -27,6 +27,7 @@ export default function BreakRoomPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [startingBreak, setStartingBreak] = useState(false);
+  const [endingBreak, setEndingBreak] = useState(false);
   const [jokeOpen, setJokeOpen] = useState(false);
   const [leaderboardGame, setLeaderboardGame] = useState(null);
   const [achievementsOpen, setAchievementsOpen] = useState(false);
@@ -62,6 +63,24 @@ export default function BreakRoomPanel() {
     }
   }
 
+  // The tiny global TimeClockWidget bar (top of every page) is the only
+  // other place this action lives — easy to miss while absorbed in a
+  // full-screen arcade game, so the Break Room gets its own explicit exit
+  // button too, rather than relying on the player to notice it up there.
+  async function endBreak() {
+    setEndingBreak(true);
+    setError('');
+    try {
+      if (access?.state === 'ON_LUNCH') await api.lunchEnd();
+      else await api.breakEnd();
+      await load();
+    } catch (err) {
+      setError(err.data?.message || 'Could not end your break.');
+    } finally {
+      setEndingBreak(false);
+    }
+  }
+
   if (loading) return <div style={{ color: 'var(--text-muted)' }}>Loading…</div>;
 
   const unlocked = !!access?.allowed;
@@ -70,7 +89,14 @@ export default function BreakRoomPanel() {
 
   return (
     <div style={s.wrap}>
-      <SectionHeader>BREAK ROOM ARCADE</SectionHeader>
+      <div style={s.headerRow}>
+        <SectionHeader>BREAK ROOM ARCADE</SectionHeader>
+        {unlocked && (
+          <Button variant="secondary" size="sm" disabled={endingBreak} onClick={endBreak}>
+            {endingBreak ? 'ENDING…' : access?.state === 'ON_LUNCH' ? 'END LUNCH' : 'END BREAK'}
+          </Button>
+        )}
+      </div>
 
       {error && <div style={s.errorBox}>{error}<button style={s.retryButton} onClick={() => load()}>RETRY</button></div>}
 
@@ -293,6 +319,7 @@ function LeaderboardModal({ gameType, onChangeGame, onClose }) {
 
 const s = {
   wrap: {},
+  headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 10 },
   errorBox: { background: 'var(--danger-soft)', border: '1px solid rgba(255, 77, 94, 0.4)', color: 'var(--danger)', padding: 14, borderRadius: 8, fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16 },
   retryButton: { padding: '6px 12px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 11 },
   championCard: { marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 4 },

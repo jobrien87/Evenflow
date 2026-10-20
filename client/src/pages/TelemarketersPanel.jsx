@@ -1,10 +1,27 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import { Card, Badge, Button, StatTile, BarRow, SectionHeader, EmptyState, ExportButton } from '../ui';
+import { Card, Badge, Button, StatTile, BarRow, SectionHeader, EmptyState, ExportButton, Modal } from '../ui';
 import { downloadCsv } from '../lib/downloadCsv';
 import { emailStatusMessage, lastEmailStatusInfo, lastEmailDeliveryInfo } from '../lib/emailStatus';
 
 const TM_STATUS_ORDER = ['ACTIVE', 'INVITED', 'DEACTIVATED'];
+
+// Mirrors RosterSettingsPanel.jsx's own PURGE_BLOCKER_LABELS exactly —
+// same purge-preview response shape, same blockers a TM's account can
+// carry (telemarketerAssignments chief among them for this role).
+const PURGE_BLOCKER_LABELS = {
+  leadNotes: 'lead notes written',
+  leadActivities: 'logged call/email/text activities',
+  calls: 'uploaded call recordings',
+  messages: 'chat messages sent',
+  producerNotesAbout: 'coaching notes about them',
+  producerNotesBy: 'coaching notes they wrote',
+  telemarketerAssignments: 'telemarketer agency assignments',
+  transfersCreated: 'transfers they created',
+  importBatchesUploaded: 'bulk/historical imports they uploaded',
+  announcementsCreated: 'announcements they sent',
+  invitationsSent: 'invitations they sent to others',
+};
 
 function statusTone(status) {
   if (status === 'ACTIVE') return 'accent';
@@ -22,6 +39,11 @@ export default function TelemarketersPanel() {
   const [assignAgency, setAssignAgency] = useState({});
   const [assignRowStatus, setAssignRowStatus] = useState({});
   const [status, setStatus] = useState('');
+  const [purgeTarget, setPurgeTarget] = useState(null);
+  const [purgePreview, setPurgePreview] = useState(null);
+  const [purgeConfirmText, setPurgeConfirmText] = useState('');
+  const [purgeBusy, setPurgeBusy] = useState(false);
+  const [purgeError, setPurgeError] = useState('');
 
   useEffect(() => {
     load();
@@ -93,6 +115,51 @@ export default function TelemarketersPanel() {
   async function endAssignment(id) {
     await api.endAssignment(id);
     await load();
+  }
+
+  // Same generic, role-agnostic deactivate/purge endpoints
+  // RosterSettingsPanel.jsx already uses for Producers/Managers — they
+  // work identically on a Telemarketer's User row, just never had a
+  // button wired up to them here before.
+  async function deactivate(tmId) {
+    if (!confirm('Deactivate this telemarketer? Their history stays intact, but they will not be able to log in.')) return;
+    await api.deactivateUser(tmId);
+    await load();
+  }
+
+  async function openPurge(tm) {
+    setPurgeTarget(tm);
+    setPurgePreview(null);
+    setPurgeConfirmText('');
+    setPurgeError('');
+    try {
+      const data = await api.purgeUserPreview(tm.id);
+      setPurgePreview(data);
+    } catch (err) {
+      setPurgeError(err.data?.message || 'Could not load what would be deleted.');
+    }
+  }
+
+  function closePurge() {
+    setPurgeTarget(null);
+    setPurgePreview(null);
+    setPurgeConfirmText('');
+    setPurgeError('');
+  }
+
+  async function confirmPurge() {
+    if (!purgeTarget) return;
+    setPurgeBusy(true);
+    setPurgeError('');
+    try {
+      await api.purgeUser(purgeTarget.id, purgeConfirmText);
+      closePurge();
+      await load();
+    } catch (err) {
+      setPurgeError(err.data?.message || 'Could not delete this account.');
+    } finally {
+      setPurgeBusy(false);
+    }
   }
 
   if (loading) {
@@ -201,6 +268,12 @@ export default function TelemarketersPanel() {
                 {tm.status === 'ACTIVE' && (
                   <Button variant="secondary" size="sm" onClick={() => sendReset(tm.id)}>RESET PASSWORD</Button>
                 )}
+                {tm.status === 'ACTIVE' && (
+                  <Button variant="danger" size="sm" onClick={() => deactivate(tm.id)}>DEACTIVATE</Button>
+                )}
+                {tm.status === 'DEACTIVATED' && (
+                  <Button variant="danger" size="sm" onClick={() => openPurge(tm)}>DELETE PERMANENTLY</Button>
+                )}
               </div>
             </div>
             <div style={s.assignedList}>
@@ -223,6 +296,56 @@ export default function TelemarketersPanel() {
           </Card>
           );
         })
+      )}
+
+      {purgeTarget && (
+        <Modal title="Delete account permanently" onClose={closePurge}>
+          <p style={s.purgeIntro}>
+            This permanently deletes <b>{purgeTarget.firstName} {purgeTarget.lastName}</b> ({purgeTarget.email})
+            and cannot be undone.
+          </p>
+          {!purgePreview && !purgeError && <div style={s.status}>Checking what's attached to this account…</div>}
+          {purgeError && <div style={s.purgeError}>{purgeError}</div>}
+          {purgePreview && !purgePreview.canPurge && (
+            <div style={s.purgeBlocked}>
+              This account has real recorded history and can't be permanently deleted:
+              <ul style={s.purgeBlockList}>
+                {Object.entries(purgePreview.blockers)
+                  .filter(([, count]) => count > 0)
+                  .map(([key, count]) => (
+                    <li key={key}>{count} {PURGE_BLOCKER_LABELS[key] || key}</li>
+                  ))}
+              </ul>
+              It will stay deactivated (hidden, no login) but its history and everyone else's related records stay intact.
+            </div>
+          )}
+          {purgePreview && purgePreview.canPurge && (
+            <>
+              <p style={s.purgeIntro}>No recorded history is attached — safe to delete. Type their exact email to confirm.</p>
+              <input
+                style={s.input}
+                placeholder={purgeTarget.email}
+                value={purgeConfirmText}
+                onChange={(e) => setPurgeConfirmText(e.target.value)}
+              />
+              <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+                <Button
+                  variant="danger"
+                  disabled={purgeBusy || purgeConfirmText !== purgeTarget.email}
+                  onClick={confirmPurge}
+                >
+                  {purgeBusy ? 'DELETING…' : 'DELETE PERMANENTLY'}
+                </Button>
+                <Button variant="secondary" onClick={closePurge}>CANCEL</Button>
+              </div>
+            </>
+          )}
+          {purgePreview && !purgePreview.canPurge && (
+            <div style={{ marginTop: 12 }}>
+              <Button variant="secondary" onClick={closePurge}>CLOSE</Button>
+            </div>
+          )}
+        </Modal>
       )}
     </div>
   );
@@ -250,4 +373,11 @@ const s = {
   assignRowStatus: { color: 'var(--danger)', fontSize: 12, marginTop: 6 },
   miniInput: { flex: 1, padding: '8px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 12 },
   empty: { color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 13 },
+  purgeIntro: { fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 10 },
+  purgeError: { color: 'var(--danger)', fontSize: 13, marginBottom: 10 },
+  purgeBlocked: {
+    color: 'var(--danger)', fontSize: 13, lineHeight: 1.5, background: 'rgba(255, 77, 94, 0.1)',
+    border: '1px solid rgba(255, 77, 94, 0.4)', borderRadius: 6, padding: 10,
+  },
+  purgeBlockList: { margin: '8px 0', paddingLeft: 20 },
 };
