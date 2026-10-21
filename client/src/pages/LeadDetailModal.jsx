@@ -4,49 +4,7 @@ import { useAuth } from '../lib/AuthContext';
 import { Modal, Badge, Button, Icon, LeadTypeIcon, StatTile, MicButton } from '../ui';
 import { PRODUCTS, PRODUCT_META } from '../lib/productMeta';
 import { fireCelebration } from '../lib/celebrations';
-import AddClosedSaleModal from './AddClosedSaleModal';
-
-// Lead disposition-to-SOLD (whole-lead or per-product) is a queue/pipeline
-// status only now — it posts no revenue. Pre-fills what's actually real
-// and already on the Lead (customer contact info, premium/product only
-// when exactly one product was sold, so nothing is guessed), so logging
-// the real production entry is one click away instead of a silent gap.
-function buildSalePrefillFromLead(lead) {
-  const c = lead.customer || {};
-  const soldQuotes = (lead.productQuotes || []).filter((q) => q.status === 'SOLD');
-  const singleSoldProduct = soldQuotes.length === 1 ? soldQuotes[0].product : undefined;
-  return {
-    firstName: c.firstName || '',
-    lastName: c.lastName || '',
-    phone: c.phoneNormalized || '',
-    email: c.email || '',
-    zip: lead.zip || c.zip || '',
-    state: lead.state || c.state || '',
-    ...(singleSoldProduct && PRODUCTS.includes(singleSoldProduct) ? { productFamily: singleSoldProduct } : {}),
-    premiumCents: lead.salePremiumCents != null ? (lead.salePremiumCents / 100).toFixed(2) : '',
-    assignedToId: lead.assignedToId || '',
-  };
-}
-
-// Shown the moment a lead's status transitions into SOLD (whichever path
-// caused it — the whole-lead disposition dropdown or a per-product quote
-// reaching SOLD) — mandatory, not a dismissible nudge: a SOLD lead that
-// never gets a real Closed Sale logged is exactly how leads silently
-// vanish from Billboard/Financials with no visible trace. Cancelling
-// (the form's own Cancel button, or the Modal's backdrop/X — both already
-// route through this same onClose) reverts the status change instead of
-// leaving an orphaned SOLD lead behind.
-function SaleLogNudge({ lead, onCancelled, onLogged }) {
-  return (
-    <AddClosedSaleModal
-      leadId={lead.id}
-      prefill={buildSalePrefillFromLead(lead)}
-      blockingNote="Marking this lead SOLD requires logging the sale — cancel to leave its status unchanged instead."
-      onClose={onCancelled}
-      onSaved={onLogged}
-    />
-  );
-}
+import SaleLogNudge from './SaleLogNudge';
 
 // Matches the server's authorizeLeadAccess write rule exactly: a Producer
 // may reassign only a lead actually assigned to them; Owner/Manager/

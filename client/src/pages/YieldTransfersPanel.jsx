@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { Card, Badge, Button, SectionHeader, EmptyState, ExportButton, StatTile, BarRow, DateRangeFilter, LeadTypeIcon } from '../ui';
 import { resolveDateRange } from '../lib/dateRange';
 import { downloadCsv, fetchAllPages } from '../lib/downloadCsv';
 import ChatThread from './ChatThread';
 import TransferHistoryPanel from './TransferHistoryPanel';
+import SaleLogNudge from './SaleLogNudge';
 
 const LEAD_STATUSES = [
   'NEW', 'CONTACTED', 'APPOINTMENT',
@@ -440,6 +441,16 @@ function DispositionControl({ lead, onDone }) {
   const [premium, setPremium] = useState('');
   const [saleProduct, setSaleProduct] = useState(lead.product || '');
   const [busy, setBusy] = useState(false);
+  // Same mandatory gate LeadDetailModal.jsx's disposition flow already
+  // enforces — this inline control is a second, separate place a lead can
+  // reach SOLD, and must not be allowed to leave one with no Closed Sale
+  // behind just because it's a quicker control.
+  const [showSaleNudge, setShowSaleNudge] = useState(false);
+  const preSoldStatusRef = useRef(lead.status);
+  // The nudge's prefill reads lead.salePremiumCents — the premium just
+  // typed into this control hasn't round-tripped back onto `lead` yet (the
+  // parent list hasn't refetched), so it's merged in here rather than lost.
+  const nudgeLeadRef = useRef(lead);
 
   async function submit() {
     if (status === lead.status) return;
@@ -450,10 +461,33 @@ function DispositionControl({ lead, onDone }) {
         saleProduct: status === 'SOLD' ? saleProduct : undefined,
         salePremiumCents: status === 'SOLD' && premium ? Math.round(parseFloat(premium) * 100) : undefined,
       });
-      onDone();
+      if (status === 'SOLD') {
+        preSoldStatusRef.current = lead.status;
+        nudgeLeadRef.current = {
+          ...lead,
+          salePremiumCents: premium ? Math.round(parseFloat(premium) * 100) : lead.salePremiumCents,
+        };
+        setShowSaleNudge(true);
+      } else {
+        onDone();
+      }
     } finally {
       setBusy(false);
     }
+  }
+
+  async function cancelSaleNudge() {
+    setShowSaleNudge(false);
+    try {
+      await api.dispositionLead(lead.id, { status: preSoldStatusRef.current, note: 'SOLD cancelled — no Closed Sale was logged.' });
+    } finally {
+      onDone();
+    }
+  }
+
+  function loggedSaleNudge() {
+    setShowSaleNudge(false);
+    onDone();
   }
 
   return (
@@ -465,6 +499,7 @@ function DispositionControl({ lead, onDone }) {
         <input style={s.miniInput} placeholder="Premium $" value={premium} onChange={(e) => setPremium(e.target.value)} />
       )}
       <Button variant="primary" size="sm" disabled={busy || status === lead.status} onClick={submit}>SAVE</Button>
+      {showSaleNudge && <SaleLogNudge lead={nudgeLeadRef.current} onCancelled={cancelSaleNudge} onLogged={loggedSaleNudge} />}
     </div>
   );
 }

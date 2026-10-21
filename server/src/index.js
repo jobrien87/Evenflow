@@ -6,6 +6,7 @@ const { checkFirstAttemptSla } = require('./lib/firstAttemptSlaAlerts');
 const { checkAgentOfMonth } = require('./lib/agentOfMonth');
 const { startHrAttendanceDetectionJob } = require('./jobs/hrAttendanceDetection');
 const { startHrLeaveAccrualJob } = require('./lib/hrLeaveAccrual');
+const { backfillMissingSales } = require('./lib/missingSaleBackfill');
 
 const PORT = process.env.PORT || 4000;
 
@@ -56,3 +57,11 @@ startHrAttendanceDetectionJob();
 // hourly check just confirms "already posted" and no-ops, same pattern
 // as agentOfMonth.js above.
 startHrLeaveAccrualJob();
+
+// Closes the existing backlog of leads marked SOLD with no Closed Sale
+// ever logged — platform-wide, once per boot. Idempotent (its own
+// selection query only ever finds leads still missing a Sale), same
+// "redundant run just confirms already-done and no-ops" convention as
+// agentOfMonth above — this is what makes the backfill run automatically
+// on every deploy with no manual step. See lib/missingSaleBackfill.js.
+backfillMissingSales().catch((err) => console.error('[missingSaleBackfill] run failed', err.message));

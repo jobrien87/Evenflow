@@ -11,9 +11,9 @@ const { requireAuth, requireRole, scopeAgencyId, canActOnUser } = require('../mi
 const { recordAudit } = require('../lib/audit');
 const { normalizePhone, normalizeEmail } = require('../lib/normalize');
 const { syncSaleRevenueEvent } = require('../lib/financialEvents');
-const { updateCustomerProductsAndDetectCrossSells } = require('../lib/opportunityEvents');
 const { PRODUCTS } = require('../lib/products');
 const { toCalendarUtcMidnight } = require('../lib/manualSaleAggregates');
+const { createSaleRecord } = require('../lib/saleRecords');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -219,56 +219,39 @@ router.post('/', requireRole(...CREATE_ROLES), async (req, res, next) => {
       });
     }
 
-    const sale = await prisma.sale.create({
-      data: {
-        agencyId,
-        customerId: customer.id,
-        leadId: data.leadId || null,
-        firstName: data.firstName,
-        lastName: data.lastName,
-        businessName: data.businessName || null,
-        customerTitle: data.customerTitle || null,
-        customerSuffix: data.customerSuffix || null,
-        zip: data.zip || null,
-        state: data.state || null,
-        saleDate,
-        issuedDate: data.issuedDate ? new Date(data.issuedDate) : null,
-        effectiveDate: data.effectiveDate ? new Date(data.effectiveDate) : null,
-        expirationDate: data.expirationDate ? new Date(data.expirationDate) : null,
-        carrier: data.carrier,
-        policyType: data.policyType,
-        productFamily: data.productFamily,
-        policyNumber: data.policyNumber || null,
-        premiumCents: data.premiumCents !== undefined ? data.premiumCents : null,
-        revenueCents: data.revenueCents !== undefined ? data.revenueCents : null,
-        items: data.items !== undefined ? data.items : 1,
-        leadSource: data.leadSource || null,
-        priorCarrier: data.priorCarrier || null,
-        reason: data.reason || null,
-        notes: data.notes || null,
-        officeId: data.officeId || null,
-        assignedToId,
-        createdById: req.user.id,
-        clientRequestId: data.clientRequestId,
-      },
-    });
-
-    // Real, entered premium feeds the Financial Ledger — same convention
-    // as a Lead's own disposition-to-SOLD path. syncSaleRevenueEvent
-    // itself is a no-op when premiumCents is falsy.
-    await syncSaleRevenueEvent(prisma, sale);
-    // Real sold product updates the customer's product ledger and detects
-    // genuine cross-sell gaps — same hook the Lead/Transfer paths already use.
-    await updateCustomerProductsAndDetectCrossSells({
-      customerId: customer.id,
+    const sale = await createSaleRecord({
       agencyId,
-      soldProduct: sale.productFamily,
-    });
-
-    await recordAudit({
-      actorId: req.user.id, actorRole: req.user.role, agencyId,
-      action: 'sale.created', entityType: 'Sale', entityId: sale.id,
-      after: { carrier: sale.carrier, policyType: sale.policyType, premiumCents: sale.premiumCents, assignedToId },
+      customerId: customer.id,
+      leadId: data.leadId,
+      firstName: data.firstName,
+      lastName: data.lastName,
+      businessName: data.businessName,
+      customerTitle: data.customerTitle,
+      customerSuffix: data.customerSuffix,
+      zip: data.zip,
+      state: data.state,
+      saleDate,
+      issuedDate: data.issuedDate ? new Date(data.issuedDate) : null,
+      effectiveDate: data.effectiveDate ? new Date(data.effectiveDate) : null,
+      expirationDate: data.expirationDate ? new Date(data.expirationDate) : null,
+      carrier: data.carrier,
+      policyType: data.policyType,
+      productFamily: data.productFamily,
+      policyNumber: data.policyNumber,
+      premiumCents: data.premiumCents !== undefined ? data.premiumCents : null,
+      revenueCents: data.revenueCents !== undefined ? data.revenueCents : null,
+      items: data.items !== undefined ? data.items : 1,
+      leadSource: data.leadSource,
+      priorCarrier: data.priorCarrier,
+      reason: data.reason,
+      notes: data.notes,
+      officeId: data.officeId,
+      assignedToId,
+      createdById: req.user.id,
+      clientRequestId: data.clientRequestId,
+      actorId: req.user.id,
+      actorRole: req.user.role,
+      auditAction: 'sale.created',
       correlationId: req.correlationId,
     });
 

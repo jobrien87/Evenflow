@@ -6,6 +6,7 @@ import FlowScoreCard from './FlowScoreCard';
 import FunnelMetricsCard from './FunnelMetricsCard';
 import PerformanceLeaderboards from './PerformanceLeaderboards';
 import RunningReportPage from './RunningReportPage';
+import SaleLogNudge from './SaleLogNudge';
 
 const STARTED_DAY_KEY = 'evenflow.startedDay';
 
@@ -33,6 +34,13 @@ export default function ProducerDashboard() {
   const [busyId, setBusyId] = useState(null);
   const [showReport, setShowReport] = useState(false);
   const [loadError, setLoadError] = useState('');
+  // Same mandatory gate LeadDetailModal.jsx's disposition flow already
+  // enforces — the Work Queue's "Mark SOLD instead" is a second, separate
+  // place a lead can reach SOLD, and must not be allowed to leave one with
+  // no Closed Sale behind just because it's a quicker control. Holds the
+  // lead (augmented with whatever premium was just entered, since the
+  // Work Queue hasn't reloaded yet) and the status to revert to on cancel.
+  const [saleNudge, setSaleNudge] = useState(null);
 
   useEffect(() => {
     load();
@@ -54,6 +62,13 @@ export default function ProducerDashboard() {
     try {
       if (item.itemType === 'LEAD') {
         await api.dispositionLead(item.id, { status, ...extra });
+        if (status === 'SOLD') {
+          setSaleNudge({
+            lead: { ...item.raw, salePremiumCents: extra?.salePremiumCents ?? item.raw.salePremiumCents },
+            preSoldStatus: item.status,
+          });
+          return;
+        }
       } else if (item.itemType === 'OPPORTUNITY') {
         await api.dispositionOpportunity(item.id, { status, ...extra });
       } else {
@@ -63,6 +78,21 @@ export default function ProducerDashboard() {
     } finally {
       setBusyId(null);
     }
+  }
+
+  async function cancelSaleNudge() {
+    const pending = saleNudge;
+    setSaleNudge(null);
+    try {
+      await api.dispositionLead(pending.lead.id, { status: pending.preSoldStatus, note: 'SOLD cancelled — no Closed Sale was logged.' });
+    } finally {
+      await load();
+    }
+  }
+
+  function loggedSaleNudge() {
+    setSaleNudge(null);
+    load();
   }
 
   function startDay() {
@@ -202,6 +232,8 @@ export default function ProducerDashboard() {
           </div>
         </div>
       )}
+
+      {saleNudge && <SaleLogNudge lead={saleNudge.lead} onCancelled={cancelSaleNudge} onLogged={loggedSaleNudge} />}
     </div>
   );
 }
