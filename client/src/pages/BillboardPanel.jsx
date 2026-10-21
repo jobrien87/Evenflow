@@ -50,7 +50,11 @@ export default function BillboardPanel() {
   const [error, setError] = useState('');
   const [showAddSale, setShowAddSale] = useState(false);
   const [missingSales, setMissingSales] = useState([]);
-  const [logSaleFor, setLogSaleFor] = useState(null);
+  // A queue, not a single row, so "LOG ALL" can chain Add Closed Sale
+  // across every orphaned lead without reopening the modal from scratch
+  // each time — carrier/policy type still need a human, but everything
+  // else (product, premium, customer contact) is already prefilled.
+  const [logSaleQueue, setLogSaleQueue] = useState([]);
   const [missingExpanded, setMissingExpanded] = useState(false);
   // Guards against a slow earlier request resolving after a faster, newer
   // one and clobbering its result (e.g. rapidly switching periods) — only
@@ -77,6 +81,16 @@ export default function BillboardPanel() {
       // Non-critical to the page's main purpose — fails silently rather
       // than blocking the real Billboard numbers from loading.
     }
+  }
+
+  // Called once the row currently at the front of the queue is saved —
+  // pops it and, if more remain, stays open against the next row's own
+  // prefill instead of closing, so a human can step through the whole
+  // backlog without re-clicking LOG SALE each time.
+  function advanceLogSaleQueue() {
+    setLogSaleQueue((q) => q.slice(1));
+    load();
+    loadMissingSales();
   }
 
   function selectPeriod(key) {
@@ -142,12 +156,12 @@ export default function BillboardPanel() {
         <AddClosedSaleModal onClose={() => setShowAddSale(false)} onSaved={() => { load(); loadMissingSales(); }} />
       )}
 
-      {logSaleFor && (
+      {logSaleQueue.length > 0 && (
         <AddClosedSaleModal
-          leadId={logSaleFor.id}
-          prefill={prefillFromMissingSaleRow(logSaleFor)}
-          onClose={() => setLogSaleFor(null)}
-          onSaved={() => { setLogSaleFor(null); load(); loadMissingSales(); }}
+          leadId={logSaleQueue[0].id}
+          prefill={prefillFromMissingSaleRow(logSaleQueue[0])}
+          onClose={() => setLogSaleQueue([])}
+          onSaved={advanceLogSaleQueue}
         />
       )}
 
@@ -158,9 +172,14 @@ export default function BillboardPanel() {
               <Icon name="alert" size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
               {missingSales.length} sold lead{missingSales.length === 1 ? '' : 's'} not counted yet
             </div>
-            <Button variant="secondary" size="sm" onClick={() => setMissingExpanded((v) => !v)}>
-              {missingExpanded ? 'HIDE' : 'REVIEW'}
-            </Button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {missingSales.length > 1 && (
+                <Button variant="primary" size="sm" onClick={() => setLogSaleQueue(missingSales)}>LOG ALL</Button>
+              )}
+              <Button variant="secondary" size="sm" onClick={() => setMissingExpanded((v) => !v)}>
+                {missingExpanded ? 'HIDE' : 'REVIEW'}
+              </Button>
+            </div>
           </div>
           <div style={s.missingExplain}>
             Marking a lead SOLD doesn't put it on the Billboard by itself — it still needs a Closed Sale logged.
@@ -177,7 +196,7 @@ export default function BillboardPanel() {
               <div style={s.rowRight}>
                 {row.salePremiumCents != null && <span style={s.rowStat}>{money(row.salePremiumCents)}</span>}
                 <span style={s.rowStat}>sold {new Date(row.soldAt).toLocaleDateString()}</span>
-                <Button size="sm" variant="primary" onClick={() => setLogSaleFor(row)}>LOG SALE</Button>
+                <Button size="sm" variant="primary" onClick={() => setLogSaleQueue([row])}>LOG SALE</Button>
               </div>
             </div>
           ))}

@@ -28,34 +28,23 @@ function buildSalePrefillFromLead(lead) {
   };
 }
 
-// One-time, dismissible prompt shown the moment a lead's status transitions
-// into SOLD (whichever path caused it) — disposition succeeds regardless
-// of what the producer picks here; this never blocks it.
-function SaleLogNudge({ lead, onDismiss, onLogged }) {
-  const [open, setOpen] = useState(false);
-  if (open) {
-    return (
-      <AddClosedSaleModal
-        leadId={lead.id}
-        prefill={buildSalePrefillFromLead(lead)}
-        onClose={onDismiss}
-        onSaved={onLogged}
-      />
-    );
-  }
+// Shown the moment a lead's status transitions into SOLD (whichever path
+// caused it — the whole-lead disposition dropdown or a per-product quote
+// reaching SOLD) — mandatory, not a dismissible nudge: a SOLD lead that
+// never gets a real Closed Sale logged is exactly how leads silently
+// vanish from Billboard/Financials with no visible trace. Cancelling
+// (the form's own Cancel button, or the Modal's backdrop/X — both already
+// route through this same onClose) reverts the status change instead of
+// leaving an orphaned SOLD lead behind.
+function SaleLogNudge({ lead, onCancelled, onLogged }) {
   return (
-    <div style={s.confirmOverlay}>
-      <div style={s.confirmBox}>
-        <div style={s.confirmTitle}>Log this as a Closed Sale?</div>
-        <div style={s.confirmBody}>
-          Marking a lead SOLD no longer records production on its own — an explicit Closed Sale entry is what actually credits it. Want to log one now?
-        </div>
-        <div style={s.confirmActions}>
-          <Button variant="secondary" size="sm" onClick={onDismiss}>NOT NOW</Button>
-          <Button variant="primary" size="sm" onClick={() => setOpen(true)}>LOG CLOSED SALE</Button>
-        </div>
-      </div>
-    </div>
+    <AddClosedSaleModal
+      leadId={lead.id}
+      prefill={buildSalePrefillFromLead(lead)}
+      blockingNote="Marking this lead SOLD requires logging the sale — cancel to leave its status unchanged instead."
+      onClose={onCancelled}
+      onSaved={onLogged}
+    />
   );
 }
 
@@ -229,6 +218,9 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
   const [bareCallLogged, setBareCallLogged] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
   const [showSaleNudge, setShowSaleNudge] = useState(false);
+  // The lead's status immediately before a detected transition into SOLD —
+  // what cancelling the now-mandatory Closed Sale gate reverts back to.
+  const [preSoldStatus, setPreSoldStatus] = useState(null);
   // null until the first real load resolves — guards against firing the
   // nudge just because a lead that was ALREADY sold happens to be opened,
   // rather than a genuine transition into SOLD this session.
@@ -244,6 +236,7 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
       const data = await api.leadDetail(leadId);
       const prevStatus = prevStatusRef.current;
       if (prevStatus !== null && prevStatus !== 'SOLD' && data.lead.status === 'SOLD') {
+        setPreSoldStatus(prevStatus);
         setShowSaleNudge(true);
       }
       prevStatusRef.current = data.lead.status;
@@ -252,6 +245,20 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
       setError(err.data?.message || 'Could not load this lead.');
     } finally {
       setLoading(false);
+    }
+  }
+
+  // Cancelling the mandatory sale gate must not leave a SOLD lead with no
+  // Sale behind — that's the exact silent gap this whole change exists to
+  // close — so it reverts the status instead of merely hiding the modal.
+  async function cancelSaleNudge() {
+    setShowSaleNudge(false);
+    try {
+      await api.dispositionLead(lead.id, { status: preSoldStatus, note: 'SOLD cancelled — no Closed Sale was logged.' });
+    } catch (err) {
+      setError(err.data?.message || "Could not revert this lead's status — try again.");
+    } finally {
+      await refresh();
     }
   }
 
@@ -346,8 +353,12 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
       {showSaleNudge && (
         <SaleLogNudge
           lead={lead}
-          onDismiss={() => setShowSaleNudge(false)}
-          onLogged={() => setShowSaleNudge(false)}
+          onCancelled={cancelSaleNudge}
+          onLogged={() => {
+            setShowSaleNudge(false);
+            fireCelebration('MONEY', { message: 'Sale logged! 🎉' });
+            onChanged?.();
+          }}
         />
       )}
       <div style={s.header}>
@@ -728,11 +739,12 @@ function DispositionBlock({ lead, onDone }) {
     setBusy(true);
     setErr('');
     try {
+      // No celebration here even when this picks SOLD — that now only
+      // fires once a real Closed Sale is actually logged (see
+      // SaleLogNudge's onLogged below), not the moment the dropdown
+      // changes.
       await api.dispositionLead(lead.id, { status, note: note || undefined });
       setNote('');
-      if (status === 'SOLD' && lead.status !== 'SOLD') {
-        fireCelebration('MONEY', { message: 'Sale logged! 🎉' });
-      }
       await onDone();
     } catch (e) {
       setErr(e.data?.message || 'Failed to update disposition.');

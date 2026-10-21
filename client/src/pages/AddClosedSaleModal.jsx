@@ -71,7 +71,7 @@ function formFromSale(sale) {
 // of the editable Sale fields (they live on the linked Customer, set only
 // at creation), so those two inputs are intentionally left blank in edit
 // mode rather than guessed at.
-export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill, sale }) {
+export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill, sale, blockingNote }) {
   const { user } = useAuth();
   const isEdit = Boolean(sale);
   const isProducer = user?.role === 'PRODUCER';
@@ -219,6 +219,7 @@ export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill, 
 
   return (
     <Modal onClose={onClose} title={modalTitle} maxWidth={720}>
+      {blockingNote && <div style={s.linkedLeadNote}>{blockingNote}</div>}
       {error && <div style={s.error}>{error}</div>}
       {isEdit && sale.leadId && (
         <div style={s.linkedLeadNote}>Linked to a Lead — this connection can&rsquo;t be changed here.</div>
