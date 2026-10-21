@@ -123,7 +123,7 @@ export default function YieldTransfersPanel() {
     downloadCsv('yield-transfers-leads', allLeads, [
       { key: (l) => l.customer?.firstName || '', label: 'First Name' },
       { key: (l) => l.customer?.lastName || '', label: 'Last Name' },
-      { key: (l) => l.customer?.phone || '', label: 'Phone' },
+      { key: (l) => l.customer?.phoneNormalized || '', label: 'Phone' },
       { key: (l) => l.customer?.email || '', label: 'Email' },
       { key: 'product', label: 'Product' },
       { key: 'status', label: 'Status' },
@@ -411,7 +411,7 @@ function LeadCard({ lead, onDisposition, onDiscuss, selected, onToggleSelected }
       </div>
 
       <div style={s.infoGrid}>
-        <InfoRow icon="📞">{c?.phone || null}</InfoRow>
+        <InfoRow icon="📞">{c?.phoneNormalized || null}</InfoRow>
         <InfoRow icon="✉️">{c?.email || null}</InfoRow>
         <InfoRow icon="🏠">{[lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(', ') || null}</InfoRow>
         <InfoRow icon="🎂">{lead.dob ? `DOB: ${new Date(lead.dob).toLocaleDateString()}` : null}</InfoRow>

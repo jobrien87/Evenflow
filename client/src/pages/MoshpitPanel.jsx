@@ -128,7 +128,7 @@ export default function MoshpitPanel() {
               </div>
 
               <div style={s.infoGrid}>
-                <InfoRow icon="📞">{c?.phone || null}</InfoRow>
+                <InfoRow icon="📞">{c?.phoneNormalized || null}</InfoRow>
                 <InfoRow icon="✉️">{c?.email || null}</InfoRow>
                 <InfoRow icon="📍">{[c?.state, c?.zip].filter(Boolean).join(' ') || null}</InfoRow>
               </div>

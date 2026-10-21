@@ -18,7 +18,7 @@ function buildSalePrefillFromLead(lead) {
   return {
     firstName: c.firstName || '',
     lastName: c.lastName || '',
-    phone: c.phone || '',
+    phone: c.phoneNormalized || '',
     email: c.email || '',
     zip: lead.zip || c.zip || '',
     state: lead.state || c.state || '',
@@ -396,7 +396,7 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
 
       <Section title="CONTACT & INTAKE INFO" icon="support">
         <div style={s.infoGrid}>
-          <InfoRow icon="phone" label="Phone">{c?.phone}</InfoRow>
+          <InfoRow icon="phone" label="Phone">{c?.phoneNormalized}</InfoRow>
           <InfoRow icon="mail" label="Email">{c?.email}</InfoRow>
           <InfoRow icon="home" label="Address">{[lead.address || c?.address, lead.city || c?.city, lead.state || c?.state, lead.zip || c?.zip].filter(Boolean).join(', ')}</InfoRow>
           <InfoRow icon="clock" label="DOB">{lead.dob ? new Date(lead.dob).toLocaleDateString() : null}</InfoRow>
