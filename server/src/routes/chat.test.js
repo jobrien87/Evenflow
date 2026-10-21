@@ -7,6 +7,7 @@ process.env.NODE_ENV = 'development';
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const http = require('http');
 const bcrypt = require('bcryptjs');
 const { prisma } = require('../lib/db');
@@ -14,7 +15,7 @@ const { createSession } = require('../lib/auth');
 const app = require('../app');
 
 const suffix = Date.now();
-let agencyId, ownerId, ownerCookie, platformOwnerId, platformOwnerCookie, leadId, customerId, server, baseUrl;
+let agencyId, ownerId, ownerCookie, platformOwnerId, platformOwnerCookie, producerId, producerCookie, leadId, customerId, server, baseUrl;
 
 before(async () => {
   const agency = await prisma.agency.create({ data: { name: `Chat Test Agency ${suffix}` } });
@@ -35,6 +36,17 @@ before(async () => {
   const platformSession = await createSession(platformOwnerId);
   platformOwnerCookie = `evenflow_session=${platformSession.rawToken}`;
 
+  // A real, active agency member — becomes a genuine ConversationParticipant
+  // of the AGENCY team room once synced (unlike the platform owner above,
+  // who only ever gets in via the bypass), so there's someone real to
+  // @-mention.
+  const producer = await prisma.user.create({
+    data: { email: `chat-producer-${suffix}@test.local`, passwordHash: hash, firstName: 'Produce', lastName: 'Markson', role: 'PRODUCER', agencyId, status: 'ACTIVE' },
+  });
+  producerId = producer.id;
+  const producerSession = await createSession(producerId);
+  producerCookie = `evenflow_session=${producerSession.rawToken}`;
+
   const customer = await prisma.customer.create({ data: { firstName: 'Lead', lastName: 'Customer' } });
   customerId = customer.id;
   const lead = await prisma.lead.create({
@@ -53,6 +65,7 @@ after(async () => {
   const messages = await prisma.message.findMany({ where: { conversationId: { in: conversationIds } }, select: { id: true } });
   const messageIds = messages.map((m) => m.id);
   await prisma.messageReaction.deleteMany({ where: { messageId: { in: messageIds } } });
+  await prisma.messageMention.deleteMany({ where: { messageId: { in: messageIds } } });
   // Clear replyToId self-references before deleting messages — Message has
   // no onDelete: Cascade (no migration in this schema does), so a reply
   // still pointing at a to-be-deleted original would violate the FK.
@@ -62,8 +75,9 @@ after(async () => {
   await prisma.conversation.deleteMany({ where: { agencyId } });
   await prisma.lead.deleteMany({ where: { id: leadId } });
   await prisma.customer.deleteMany({ where: { id: customerId } });
-  await prisma.session.deleteMany({ where: { userId: { in: [ownerId, platformOwnerId] } } });
-  await prisma.user.deleteMany({ where: { id: { in: [ownerId, platformOwnerId] } } });
+  await prisma.notification.deleteMany({ where: { userId: { in: [ownerId, platformOwnerId, producerId] } } });
+  await prisma.session.deleteMany({ where: { userId: { in: [ownerId, platformOwnerId, producerId] } } });
+  await prisma.user.deleteMany({ where: { id: { in: [ownerId, platformOwnerId, producerId] } } });
   await prisma.agency.delete({ where: { id: agencyId } });
   await new Promise((resolve) => server.close(resolve));
   await prisma.$disconnect();
@@ -229,4 +243,63 @@ test('replyToId only links within the same conversation — a reply in the right
   assert.equal(crossReplyRes.status, 201);
   const { message: crossReply } = await crossReplyRes.json();
   assert.equal(crossReply.replyToId, null, 'a replyToId from another conversation must never be trusted');
+});
+
+test('GET participants returns every real participant of the conversation except the caller themselves', async () => {
+  const entityRes = await fetch(`${baseUrl}/api/chat/conversations/entity/AGENCY/${agencyId}`, { headers: { Cookie: ownerCookie } });
+  const { conversation } = await entityRes.json();
+
+  const asOwnerRes = await fetch(`${baseUrl}/api/chat/conversations/${conversation.id}/participants`, { headers: { Cookie: ownerCookie } });
+  assert.equal(asOwnerRes.status, 200);
+  const { participants: asOwner } = await asOwnerRes.json();
+  assert.ok(asOwner.some((p) => p.id === producerId), 'a real agency member must be a mentionable participant');
+  assert.ok(!asOwner.some((p) => p.id === ownerId), 'the caller must never see themselves in their own candidate list');
+  assert.ok(!asOwner.some((p) => p.id === platformOwnerId), 'the platform owner bypasses this room without a real participant row, so is never mentionable here');
+
+  const asProducerRes = await fetch(`${baseUrl}/api/chat/conversations/${conversation.id}/participants`, { headers: { Cookie: producerCookie } });
+  assert.equal(asProducerRes.status, 200);
+  const { participants: asProducer } = await asProducerRes.json();
+  assert.ok(asProducer.some((p) => p.id === ownerId));
+  assert.ok(!asProducer.some((p) => p.id === producerId));
+});
+
+test('mentioning a real participant records a MessageMention and fires a chat.mention notification instead of chat.message; a non-participant id is silently dropped', async () => {
+  const entityRes = await fetch(`${baseUrl}/api/chat/conversations/entity/AGENCY/${agencyId}`, { headers: { Cookie: ownerCookie } });
+  const { conversation } = await entityRes.json();
+
+  const postRes = await fetch(`${baseUrl}/api/chat/conversations/${conversation.id}/messages`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ content: '@Produce Markson can you take a look at this?', mentionedUserIds: [producerId] }),
+  });
+  assert.equal(postRes.status, 201);
+  const { message } = await postRes.json();
+
+  const getRes = await fetch(`${baseUrl}/api/chat/conversations/${conversation.id}/messages`, { headers: { Cookie: ownerCookie } });
+  const { messages } = await getRes.json();
+  const found = messages.find((m) => m.id === message.id);
+  assert.equal(found.mentions.length, 1);
+  assert.equal(found.mentions[0].userId, producerId);
+
+  const notification = await prisma.notification.findFirst({
+    where: { userId: producerId, type: 'chat.mention' },
+    orderBy: { createdAt: 'desc' },
+  });
+  assert.ok(notification, 'a mentioned real participant must get a chat.mention notification');
+  assert.match(notification.title, /mentioned you/);
+  assert.equal(notification.relatedEntityType, conversation.relatedEntityType);
+  assert.equal(notification.relatedEntityId, conversation.relatedEntityId);
+
+  // A fake/non-participant id (and the author's own id) must never be
+  // trusted blindly — silently dropped, not stored and not notified.
+  const fakeId = crypto.randomUUID();
+  const droppedRes = await fetch(`${baseUrl}/api/chat/conversations/${conversation.id}/messages`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ content: 'Mentioning a stranger and myself.', mentionedUserIds: [fakeId, ownerId] }),
+  });
+  assert.equal(droppedRes.status, 201);
+  const { message: droppedMessage } = await droppedRes.json();
+  const getRes2 = await fetch(`${baseUrl}/api/chat/conversations/${conversation.id}/messages`, { headers: { Cookie: ownerCookie } });
+  const { messages: messages2 } = await getRes2.json();
+  const foundDropped = messages2.find((m) => m.id === droppedMessage.id);
+  assert.equal(foundDropped.mentions.length, 0, 'a fake id and the author\'s own id must both be dropped, never stored as a mention');
 });

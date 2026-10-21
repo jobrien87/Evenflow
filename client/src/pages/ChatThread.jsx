@@ -16,6 +16,37 @@ function truncate(text, max = 80) {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
+// Splits plain message content on any exact "FirstName LastName" occurrence
+// of a user actually recorded in that message's own `mentions` (never a
+// regex built from arbitrary user-controlled name text) and wraps each hit
+// in a highlighted span. `content` itself stays plain text — mentions are
+// never markup — so this is the one place that turns a mention back into
+// something visually distinct.
+function renderContentWithMentions(content, mentions) {
+  // Includes the leading "@" in the matched token itself — content already
+  // contains the literal inserted text ("@FirstName LastName"), so matching
+  // just the name would leave the "@" stranded in the preceding plain-text
+  // segment.
+  const tokens = [...new Set((mentions || []).map((m) => `@${m.user?.firstName || ''} ${m.user?.lastName || ''}`.trim()))].filter((t) => t.length > 2);
+  if (tokens.length === 0) return content;
+  const segments = [];
+  let i = 0;
+  let key = 0;
+  while (i < content.length) {
+    const match = tokens.find((t) => content.startsWith(t, i));
+    if (match) {
+      segments.push(<span key={key++} style={s.mentionText}>{match}</span>);
+      i += match.length;
+    } else {
+      let j = i + 1;
+      while (j < content.length && !tokens.some((t) => content.startsWith(t, j))) j++;
+      segments.push(content.slice(i, j));
+      i = j;
+    }
+  }
+  return segments;
+}
+
 // One pill per distinct emoji present on a message, with a count and
 // whether the current user is one of the reactors (drives the highlight).
 function groupReactions(reactions, userId) {
@@ -50,7 +81,21 @@ export default function ChatThread({ entityType, entityId, title, onClose, varia
   const [error, setError] = useState('');
   const [hoveredId, setHoveredId] = useState(null);
   const [replyingTo, setReplyingTo] = useState(null);
+  // Every real participant of this conversation except the caller — the
+  // @-mention picker's candidate list, fetched once per open (not on every
+  // poll tick — membership changing mid-session is rare enough that a
+  // plain in-memory array filter on each keystroke is all this needs).
+  const [participants, setParticipants] = useState([]);
+  // Users actually inserted via the picker in the CURRENT draft — what
+  // gets sent as mentionedUserIds, after filtering out anyone whose
+  // "@FirstName LastName" text got deleted again before sending.
+  const [mentionedUsers, setMentionedUsers] = useState([]);
+  // null when no "@word" is being typed; otherwise { start, text } — start
+  // is the index of the "@" itself, so a selection can splice it back out.
+  const [mentionQuery, setMentionQuery] = useState(null);
+  const [mentionHighlight, setMentionHighlight] = useState(0);
   const bottomRef = useRef(null);
+  const inputRef = useRef(null);
   const mountedRef = useRef(true);
 
   useEffect(() => () => { mountedRef.current = false; }, []);
@@ -73,6 +118,7 @@ export default function ChatThread({ entityType, entityId, title, onClose, varia
         const res = await api.chatEntityConversation(entityType, entityId);
         if (cancelled) return;
         setConversationId(res.conversation.id);
+        api.chatParticipants(res.conversation.id).then((p) => { if (!cancelled) setParticipants(p.participants); }).catch(() => {});
         await refreshMessages(res.conversation.id);
         if (cancelled) return;
         interval = setInterval(() => refreshMessages(res.conversation.id), POLL_MS);
@@ -98,21 +144,85 @@ export default function ChatThread({ entityType, entityId, title, onClose, varia
     setSending(true);
     setError('');
     try {
-      const res = await api.postChatMessage(conversationId, content, replyingTo?.id);
-      // Attach the quoted snippet locally so the sender sees it on their own
-      // reply right away — postMessage's response has no `replyTo` include,
-      // and the other party gets it from the next poll tick regardless.
-      const message = replyingTo
-        ? { ...res.message, replyTo: { id: replyingTo.id, content: replyingTo.content, authorId: replyingTo.authorId, author: replyingTo.author } }
-        : res.message;
+      // Only send ids whose "@FirstName LastName" text is still actually
+      // present — covers deleting an inserted mention before sending.
+      const sentMentions = mentionedUsers.filter((p) => content.includes(`@${p.firstName} ${p.lastName}`));
+      const res = await api.postChatMessage(conversationId, content, replyingTo?.id, sentMentions.map((p) => p.id));
+      // Attach the quoted snippet/mentions locally so the sender sees them
+      // on their own message right away — postMessage's response has
+      // neither `replyTo` nor `mentions` includes, and the other party
+      // gets both from the next poll tick regardless.
+      const message = {
+        ...res.message,
+        ...(replyingTo ? { replyTo: { id: replyingTo.id, content: replyingTo.content, authorId: replyingTo.authorId, author: replyingTo.author } } : {}),
+        mentions: sentMentions.map((p) => ({ userId: p.id, user: { firstName: p.firstName, lastName: p.lastName } })),
+      };
       setMessages((prev) => [...(prev || []), message]);
       setDraft('');
       setReplyingTo(null);
+      setMentionedUsers([]);
     } catch (err) {
       setError(err.data?.message || 'Message failed to send.');
     } finally {
       setSending(false);
     }
+  }
+
+  function handleDraftChange(e) {
+    const value = e.target.value;
+    const cursor = e.target.selectionStart ?? value.length;
+    setDraft(value);
+    const beforeCursor = value.slice(0, cursor);
+    const atIndex = beforeCursor.lastIndexOf('@');
+    if (atIndex === -1) {
+      setMentionQuery(null);
+      return;
+    }
+    const between = beforeCursor.slice(atIndex + 1);
+    const precededOk = atIndex === 0 || /\s/.test(beforeCursor[atIndex - 1]);
+    if (precededOk && !/\s/.test(between)) {
+      setMentionQuery({ start: atIndex, text: between });
+      setMentionHighlight(0);
+    } else {
+      setMentionQuery(null);
+    }
+  }
+
+  const mentionMatches = mentionQuery
+    ? participants
+        .filter((p) => {
+          const q = mentionQuery.text.toLowerCase();
+          return p.firstName?.toLowerCase().startsWith(q) || p.lastName?.toLowerCase().startsWith(q);
+        })
+        .slice(0, 6)
+    : [];
+
+  function selectMention(p) {
+    if (!mentionQuery) return;
+    const name = `${p.firstName} ${p.lastName}`;
+    const before = draft.slice(0, mentionQuery.start);
+    const after = draft.slice(mentionQuery.start + 1 + mentionQuery.text.length);
+    const inserted = `@${name} `;
+    setDraft(`${before}${inserted}${after}`);
+    setMentionedUsers((prev) => (prev.some((u) => u.id === p.id) ? prev : [...prev, p]));
+    setMentionQuery(null);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      const pos = before.length + inserted.length;
+      el.focus();
+      el.setSelectionRange(pos, pos);
+    });
+  }
+
+  function handleInputKeyDown(e) {
+    if (mentionQuery && mentionMatches.length > 0) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setMentionHighlight((i) => (i + 1) % mentionMatches.length); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setMentionHighlight((i) => (i - 1 + mentionMatches.length) % mentionMatches.length); return; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); selectMention(mentionMatches[mentionHighlight] || mentionMatches[0]); return; }
+      if (e.key === 'Escape') { e.preventDefault(); setMentionQuery(null); return; }
+    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   }
 
   async function handleReact(messageId, emoji) {
@@ -143,6 +253,7 @@ export default function ChatThread({ entityType, entityId, title, onClose, varia
         {messages?.map((m) => {
           const mine = m.authorId === user?.id;
           const reactionGroups = groupReactions(m.reactions, user?.id);
+          const mentionsMe = (m.mentions || []).some((mn) => mn.userId === user?.id);
           return (
             <div
               key={m.id}
@@ -159,7 +270,7 @@ export default function ChatThread({ entityType, entityId, title, onClose, varia
                     ))}
                   </div>
                 )}
-                <div style={s.bubble(mine)}>
+                <div style={s.bubble(mine, mentionsMe)}>
                   {!mine && <div style={s.author}>{m.author?.firstName} {m.author?.lastName}</div>}
                   {m.replyTo && (
                     <div style={s.quoteBlock}>
@@ -167,7 +278,7 @@ export default function ChatThread({ entityType, entityId, title, onClose, varia
                       <div style={s.quoteContent}>{truncate(m.replyTo.content, 80)}</div>
                     </div>
                   )}
-                  <div>{m.content}</div>
+                  <div>{renderContentWithMentions(m.content, m.mentions)}</div>
                   <div style={s.time}>{new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
                 </div>
                 {reactionGroups.length > 0 && (
@@ -197,13 +308,29 @@ export default function ChatThread({ entityType, entityId, title, onClose, varia
         </div>
       )}
 
+      {mentionQuery && mentionMatches.length > 0 && (
+        <div style={s.mentionDropdown}>
+          {mentionMatches.map((p, i) => (
+            <div
+              key={p.id}
+              style={s.mentionItem(i === mentionHighlight)}
+              onMouseDown={(e) => { e.preventDefault(); selectMention(p); }}
+              onMouseEnter={() => setMentionHighlight(i)}
+            >
+              {p.firstName} {p.lastName}
+            </div>
+          ))}
+        </div>
+      )}
+
       <div style={s.inputRow}>
         <input
+          ref={inputRef}
           style={s.input}
-          placeholder="Type a message…"
+          placeholder="Type a message… (@ to mention someone)"
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+          onChange={handleDraftChange}
+          onKeyDown={handleInputKeyDown}
           disabled={!conversationId}
         />
         <MicButton onTranscript={(text) => setDraft((d) => (d ? `${d} ${text}` : text))} />
@@ -239,12 +366,14 @@ const s = {
   messageCol: (mine) => ({ display: 'flex', flexDirection: 'column', alignItems: mine ? 'flex-end' : 'flex-start', maxWidth: '80%' }),
   hoverToolbar: (mine) => ({ display: 'flex', gap: 2, alignSelf: mine ? 'flex-end' : 'flex-start', marginBottom: 2, background: 'var(--bg-elevated)', border: '1px solid var(--border-strong)', borderRadius: 8, padding: '2px 4px' }),
   toolbarButton: { background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 13, padding: '2px 5px', borderRadius: 4, lineHeight: 1.4 },
-  bubble: (mine) => ({
+  bubble: (mine, mentionsMe) => ({
     maxWidth: '100%', padding: '8px 12px', borderRadius: 10, fontSize: 13,
     background: mine ? 'var(--accent)' : 'var(--bg-hover)', color: mine ? 'var(--accent-on)' : 'var(--text-primary)',
-    border: mine ? 'none' : '1px solid var(--border-strong)',
+    border: mine ? 'none' : mentionsMe ? '1px solid var(--accent)' : '1px solid var(--border-strong)',
+    boxShadow: mentionsMe && !mine ? '0 0 0 1px var(--accent) inset' : 'none',
   }),
   author: { fontSize: 10, fontWeight: 700, opacity: 0.7, marginBottom: 2 },
+  mentionText: { fontWeight: 700, color: 'inherit', background: 'var(--accent-gradient-soft)', borderRadius: 3, padding: '0 2px' },
   quoteBlock: { borderLeft: '2px solid currentColor', paddingLeft: 8, marginBottom: 4, opacity: 0.75 },
   quoteAuthor: { fontSize: 10, fontWeight: 700 },
   quoteContent: { fontSize: 11 },
@@ -259,6 +388,8 @@ const s = {
   replyBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '6px 10px', background: 'var(--bg-hover)', border: '1px solid var(--border-strong)', borderRadius: 6, marginBottom: 8, fontSize: 11 },
   replyBarText: { color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   replyBarCancel: { background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13, flexShrink: 0 },
+  mentionDropdown: { display: 'flex', flexDirection: 'column', background: 'var(--bg-elevated)', border: '1px solid var(--border-strong)', borderRadius: 6, marginBottom: 8, overflow: 'hidden' },
+  mentionItem: (active) => ({ padding: '7px 12px', fontSize: 12, cursor: 'pointer', color: 'var(--text-primary)', background: active ? 'var(--bg-hover)' : 'transparent' }),
   inputRow: { display: 'flex', gap: 8 },
   input: { flex: 1, padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 13 },
   sendButton: { padding: '10px 16px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },

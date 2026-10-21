@@ -378,7 +378,8 @@ export const api = {
   chatConversations: () => request('/chat/conversations'),
   chatEntityConversation: (entityType, entityId) => request(`/chat/conversations/entity/${entityType}/${entityId}`),
   chatMessages: (conversationId) => request(`/chat/conversations/${conversationId}/messages`),
-  postChatMessage: (conversationId, content, replyToId) => request(`/chat/conversations/${conversationId}/messages`, { method: 'POST', body: { content, replyToId: replyToId || '' } }),
+  chatParticipants: (conversationId) => request(`/chat/conversations/${conversationId}/participants`),
+  postChatMessage: (conversationId, content, replyToId, mentionedUserIds) => request(`/chat/conversations/${conversationId}/messages`, { method: 'POST', body: { content, replyToId: replyToId || '', mentionedUserIds: mentionedUserIds || [] } }),
   toggleMessageReaction: (messageId, emoji) => request(`/chat/messages/${messageId}/reactions`, { method: 'POST', body: { emoji } }),
 
   // Break Room Arcade — every route here is already gated server-side by

@@ -124,6 +124,7 @@ router.get('/conversations/:id/messages', async (req, res, next) => {
         author: { select: { id: true, firstName: true, lastName: true } },
         reactions: { select: { userId: true, emoji: true } },
         replyTo: { select: { id: true, content: true, authorId: true, author: { select: { firstName: true, lastName: true } } } },
+        mentions: { select: { userId: true, user: { select: { firstName: true, lastName: true } } } },
       },
       orderBy: { createdAt: 'asc' },
       take: 200,
@@ -135,11 +136,33 @@ router.get('/conversations/:id/messages', async (req, res, next) => {
   }
 });
 
+// The @-mention picker's candidate list — every real participant of this
+// conversation except the caller themselves (you can't mention yourself).
+// Same access rule as reading/posting here. For an AGENCY room, this is
+// already fresh without re-syncing: ChatThread always opens the thread via
+// GET /conversations/entity/AGENCY/:agencyId first, which already calls
+// getOrSyncAgencyConversation before this route is ever hit.
+router.get('/conversations/:id/participants', async (req, res, next) => {
+  try {
+    if (!(await platformOwnerAgencyBypass(req, req.params.id)) && !(await isParticipant(req.params.id, req.user.id))) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    const rows = await prisma.conversationParticipant.findMany({
+      where: { conversationId: req.params.id, userId: { not: req.user.id } },
+      include: { user: { select: { id: true, firstName: true, lastName: true } } },
+    });
+    return res.json({ success: true, participants: rows.map((r) => r.user) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 const postSchema = z.object({
   content: z.string().min(1).max(4000),
   // '' means "not a reply" — a plain z.string().uuid().optional() rejects
   // '' outright (same gotcha/fix already used elsewhere, e.g. routes/leads.js's vendorId).
   replyToId: z.preprocess((v) => (v === '' ? undefined : v), z.string().uuid().optional()),
+  mentionedUserIds: z.array(z.string().uuid()).max(20).optional(),
 });
 
 router.post('/conversations/:id/messages', async (req, res, next) => {
@@ -151,7 +174,13 @@ router.post('/conversations/:id/messages', async (req, res, next) => {
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
     }
-    const message = await postMessage({ conversationId: req.params.id, authorId: req.user.id, content: parsed.data.content, replyToId: parsed.data.replyToId });
+    const message = await postMessage({
+      conversationId: req.params.id,
+      authorId: req.user.id,
+      content: parsed.data.content,
+      replyToId: parsed.data.replyToId,
+      mentionedUserIds: parsed.data.mentionedUserIds,
+    });
     return res.status(201).json({ success: true, message });
   } catch (err) {
     next(err);

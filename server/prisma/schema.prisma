@@ -392,6 +392,7 @@ model User {
   conversationParticipants  ConversationParticipant[]
   messagesAuthored          Message[]
   messageReactions          MessageReaction[]
+  messageMentions           MessageMention[]
   passwordResetTokens       PasswordResetToken[]
   mfaChallenges             MfaChallenge[]
   timeClockEntries          TimeClockEntry[]
@@ -2509,6 +2510,7 @@ model Message {
   replies   Message[] @relation("MessageReplies")
 
   reactions MessageReaction[]
+  mentions  MessageMention[]
 
   @@index([conversationId, createdAt])
 }
@@ -2527,6 +2529,24 @@ model MessageReaction {
   createdAt DateTime @default(now())
 
   @@unique([messageId, userId, emoji])
+  @@index([messageId])
+}
+
+// One row per (message, user) actually @-mentioned — the source of truth
+// for who got tagged, never re-derived from a substring match against
+// Message.content (which stays plain, human-readable "@FirstName
+// LastName" text, not markup). lib/chat.js's postMessage only ever
+// creates these for ids that are real participants of the same
+// conversation, never trusted blindly from the client.
+model MessageMention {
+  id        String   @id @default(uuid())
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([messageId, userId])
   @@index([messageId])
 }
 

@@ -52,7 +52,7 @@ async function isParticipant(conversationId, userId) {
 // server-side, rather than trusting any client-supplied string.
 const REACTION_EMOJI = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
-async function postMessage({ conversationId, authorId, content, replyToId }) {
+async function postMessage({ conversationId, authorId, content, replyToId, mentionedUserIds }) {
   // Never trust a client-supplied replyToId as belonging to this
   // conversation — a reply quoting a message from a DIFFERENT conversation
   // would be a real cross-thread data leak (the quoted snippet/author
@@ -64,36 +64,52 @@ async function postMessage({ conversationId, authorId, content, replyToId }) {
     if (replyTo && replyTo.conversationId === conversationId) validReplyToId = replyToId;
   }
 
-  const message = await prisma.message.create({ data: { conversationId, authorId, content, replyToId: validReplyToId } });
-
-  await prisma.conversationParticipant.update({
-    where: { conversationId_userId: { conversationId, userId: authorId } },
-    data: { lastReadAt: new Date() },
-  }).catch(() => {});
-
   const [conversation, author, others] = await Promise.all([
     prisma.conversation.findUnique({ where: { id: conversationId } }),
     prisma.user.findUnique({ where: { id: authorId }, select: { firstName: true, lastName: true } }),
     prisma.conversationParticipant.findMany({ where: { conversationId, userId: { not: authorId } } }),
   ]);
 
-  const title = validReplyToId
+  // Never trust client-supplied mentionedUserIds blindly — only a real
+  // participant of THIS conversation (never the author themselves, since
+  // `others` already excludes authorId) can actually be mentioned.
+  const validMentionIds = [...new Set(mentionedUserIds || [])].filter((id) => others.some((p) => p.userId === id));
+
+  const message = await prisma.message.create({
+    data: {
+      conversationId,
+      authorId,
+      content,
+      replyToId: validReplyToId,
+      mentions: { create: validMentionIds.map((userId) => ({ userId })) },
+    },
+  });
+
+  await prisma.conversationParticipant.update({
+    where: { conversationId_userId: { conversationId, userId: authorId } },
+    data: { lastReadAt: new Date() },
+  }).catch(() => {});
+
+  const replyTitle = validReplyToId
     ? `${author.firstName} ${author.lastName} replied to your message`
     : `New message from ${author.firstName} ${author.lastName}`;
+  const mentionTitle = `${author.firstName} ${author.lastName} mentioned you`;
+  const body = content.length > 140 ? `${content.slice(0, 140)}…` : content;
 
   Promise.all(
-    others.map((p) =>
-      notifyUser({
+    others.map((p) => {
+      const mentioned = validMentionIds.includes(p.userId);
+      return notifyUser({
         userId: p.userId,
         agencyId: conversation.agencyId,
-        type: 'chat.message',
+        type: mentioned ? 'chat.mention' : 'chat.message',
         severity: 'INFO',
-        title,
-        body: content.length > 140 ? `${content.slice(0, 140)}…` : content,
+        title: mentioned ? mentionTitle : replyTitle,
+        body,
         relatedEntityType: conversation.relatedEntityType,
         relatedEntityId: conversation.relatedEntityId,
-      })
-    )
+      });
+    })
   ).catch((err) => console.error('[chat] notify failed', err.message));
 
   return message;
