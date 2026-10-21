@@ -16,7 +16,11 @@ const HEADER_SYNONYMS = {
   firstName: ['firstname', 'first', 'fname'],
   lastName: ['lastname', 'last', 'lname', 'surname'],
   name: ['name', 'fullname', 'customername', 'clientname'],
-  phone: ['phone', 'phonenumber', 'cell', 'cellphone', 'mobile', 'mobilephone', 'telephone', 'contactnumber'],
+  phone: [
+    'phone', 'phonenumber', 'phoneno', 'phonenum', 'phone1', 'cell', 'cellphone', 'cellnumber',
+    'mobile', 'mobilephone', 'mobilenumber', 'telephone', 'telephonenumber', 'tel', 'tel1',
+    'contactnumber', 'contactphone', 'primaryphone', 'bestphone', 'homephone', 'daytimephone',
+  ],
   email: ['email', 'emailaddress'],
   product: ['product', 'line', 'productline', 'lineofbusiness', 'lob'],
   dob: ['dob', 'dateofbirth', 'birthdate', 'birthday'],

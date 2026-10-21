@@ -412,6 +412,21 @@ export default function LeadDetailModal({ leadId, onClose, onChanged }) {
         )}
       </Section>
 
+      {lead.rawImportFields && Object.keys(lead.rawImportFields).length > 0 && (
+        // A bulk-import column that didn't match a recognized field (e.g.
+        // a phone-number header our synonym list doesn't cover yet) is
+        // never dropped — it's captured here under its own original
+        // header text, so the data is still visible even when it wasn't
+        // promoted into a real field above.
+        <Section title="OTHER IMPORTED FIELDS" icon="archive">
+          <div style={s.infoGrid}>
+            {Object.entries(lead.rawImportFields).map(([header, value]) => (
+              <InfoRow key={header} icon="archive" label={header}>{value}</InfoRow>
+            ))}
+          </div>
+        </Section>
+      )}
+
       <Section title="QUICK ACTIONS" icon="sparkle">
         <QuickActionsBlock lead={lead} user={user} onDone={refreshTouched} />
       </Section>
