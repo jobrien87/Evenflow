@@ -254,7 +254,7 @@ test('GET participants returns every real participant of the conversation except
   const { participants: asOwner } = await asOwnerRes.json();
   assert.ok(asOwner.some((p) => p.id === producerId), 'a real agency member must be a mentionable participant');
   assert.ok(!asOwner.some((p) => p.id === ownerId), 'the caller must never see themselves in their own candidate list');
-  assert.ok(!asOwner.some((p) => p.id === platformOwnerId), 'the platform owner bypasses this room without a real participant row, so is never mentionable here');
+  assert.ok(asOwner.some((p) => p.id === platformOwnerId), 'the platform owner bypasses this room without a real participant row, but must still be listed as a mentionable candidate');
 
   const asProducerRes = await fetch(`${baseUrl}/api/chat/conversations/${conversation.id}/participants`, { headers: { Cookie: producerCookie } });
   assert.equal(asProducerRes.status, 200);
