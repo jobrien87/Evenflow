@@ -4,17 +4,18 @@ import { api } from './api';
 import { useAuth } from './AuthContext';
 import { notificationTarget, notificationUrl } from './notificationRouting';
 import { pushToast } from '../ui/Toast';
-import { playDrumRoll } from './drumRoll';
+import { playHiHat } from './drumRoll';
 
 const POLL_MS = 15000;
 
 // Mirrors useLeadAlerts.js's exact pattern (a separate poll, not shared —
 // same "keep it simple rather than refactoring the working bell" reasoning)
-// but for chat.mention notifications specifically — a Platform Owner is
-// never a real chat participant anywhere (see activePlatformOwners in
-// server/src/lib/chat.js), so this is the one case where they need to be
-// told about a message at all, and it should be hard to miss.
-export function usePlatformMentionAlerts() {
+// but for chat.mention notifications — mounted for every authenticated
+// role, since postMessage (server/src/lib/chat.js) creates a chat.mention
+// Notification for whoever was actually @-mentioned, regardless of role or
+// conversation type. Each user only ever sees their own notifications, so
+// the hi-hat only ever plays for the person who was tagged.
+export function useMentionAlerts() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const lastSeenAtRef = useRef(Date.now());
@@ -36,7 +37,7 @@ export function usePlatformMentionAlerts() {
         // stacking sound/toasts when several mentions land in one interval.
         const newest = candidates[candidates.length - 1];
         if (newest) {
-          playDrumRoll();
+          playHiHat();
           const target = notificationTarget(newest, user?.role, user?.id);
           pushToast({
             title: newest.title,
@@ -64,9 +65,9 @@ export function usePlatformMentionAlerts() {
   }, [user?.role, navigate]);
 }
 
-// Non-rendering wrapper so AppLayout.jsx can conditionally mount this by
-// role without violating the rules of hooks, same pattern as LeadAlertListener.
-export default function PlatformMentionAlertListener() {
-  usePlatformMentionAlerts();
+// Non-rendering wrapper so AppLayout.jsx can mount this unconditionally
+// without violating the rules of hooks, same pattern as LeadAlertListener.
+export default function MentionAlertListener() {
+  useMentionAlerts();
   return null;
 }

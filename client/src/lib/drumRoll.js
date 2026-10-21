@@ -1,8 +1,8 @@
-// A synthesized "drum roll into a crash" alert sound for new leads — built
-// entirely from Web Audio API oscillators/noise, no external audio file.
-// This app has no static-assets folder at all today (client/public doesn't
-// exist), and synthesizing avoids any licensing question around a real
-// recorded sample.
+// Synthesized alert sounds — a "drum roll into a crash" for new leads and a
+// short hi-hat for @-mentions — built entirely from Web Audio API
+// oscillators/noise, no external audio file. This app has no static-assets
+// folder at all today (client/public doesn't exist), and synthesizing
+// avoids any licensing question around a real recorded sample.
 
 let ctx = null;
 let masterBus = null;
@@ -139,4 +139,20 @@ export function playDrumRoll() {
   noiseBurst(c, bus, { at: t, duration: 0.45, freq: 4000, q: 0.6, gain: 0.7, type: 'highpass' });
   kickThud(c, bus, t);
   powerChordStab(c, bus, t);
+}
+
+// Plays a short, bright "tss-tss" hi-hat — the @-mention alert sound,
+// distinct from playDrumRoll's longer new-lead alert so a mention reads as
+// its own, immediately recognizable cue. Two quick closed-hi-hat-style
+// high-passed noise taps. Same fail-silent contract as playDrumRoll.
+export function playHiHat() {
+  const c = getContext();
+  if (!c) return;
+  if (c.state === 'suspended') c.resume().catch(() => {});
+  const bus = getMasterBus(c);
+
+  const start = c.currentTime + 0.02;
+  [{ offset: 0, duration: 0.045, gain: 0.5 }, { offset: 0.09, duration: 0.07, gain: 0.4 }].forEach(({ offset, duration, gain }) => {
+    noiseBurst(c, bus, { at: start + offset, duration, freq: 9000, q: 0.7, gain, type: 'highpass' });
+  });
 }

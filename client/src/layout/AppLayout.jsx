@@ -7,7 +7,7 @@ import { GradientDefs, TourOverlay, ToastHost, CelebrationHost } from '../ui';
 import { stepsForRole } from '../lib/tourSteps';
 import { unlockAudio } from '../lib/drumRoll';
 import LeadAlertListener, { LEAD_ALERT_ROLES } from '../lib/useLeadAlerts';
-import PlatformMentionAlertListener from '../lib/usePlatformMentionAlerts';
+import MentionAlertListener from '../lib/useMentionAlerts';
 import useAccountCelebrations from '../lib/useAccountCelebrations';
 import Sidebar from './Sidebar';
 import MobileTopBar from './MobileTopBar';
@@ -57,7 +57,8 @@ export default function AppLayout() {
 
   // Browsers block AudioContext playback until a real user gesture — warm
   // it up on the first click/keypress anywhere in the app so the new-lead
-  // drum roll (lib/drumRoll.js) is already unlocked by the time it's needed.
+  // drum roll and @-mention hi-hat (lib/drumRoll.js, shared AudioContext)
+  // are already unlocked by the time either is needed.
   useEffect(() => {
     document.addEventListener('pointerdown', unlockAudio, { once: true });
     document.addEventListener('keydown', unlockAudio, { once: true });
@@ -109,7 +110,7 @@ export default function AppLayout() {
       {tourSteps && <TourOverlay steps={tourSteps} startIndex={manualTourOpen ? tourStartIndex : 0} onDone={finishTour} />}
       <AnnouncementModal />
       {user && LEAD_ALERT_ROLES.has(user.role) && <LeadAlertListener />}
-      {user && user.role === 'PLATFORM_OWNER' && <PlatformMentionAlertListener />}
+      {user && <MentionAlertListener />}
       <ToastHost />
     </div>
   );
