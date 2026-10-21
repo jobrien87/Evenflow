@@ -313,6 +313,53 @@ test('computeBillboardPeriod: all_years shows a separate zero-filled total for e
   assert.equal(y2026.premiumCents, 5000 + 7000 + 3000 + 4000);
 });
 
+test('computeBillboardPeriod: all_years includes a year whose only data has no premium yet (Sale and HistoricalRecord), not just years with a dollar amount already entered', async () => {
+  // Regression test for agencyDataYearSpan's own premiumCents filter
+  // (billboardPeriods.js) — before that fix, a year whose only rows had
+  // no premium yet wasn't just under-totaled, it never appeared in the
+  // min/max year span at all, so the real query range sent to
+  // saleLeadLikeRows/historicalLeadLikeRows silently excluded the whole
+  // year's data, not just its dollar amount. A dedicated agency keeps this
+  // independent of the suite-level periodAgencyId fixture's own years.
+  const agency = await prisma.agency.create({ data: { name: `Billboard Zero-Premium Year Agency ${suffix}`, timezone: 'America/New_York' } });
+  const owner = await prisma.user.create({
+    data: { agencyId: agency.id, email: `billboard-zeroyear-owner-${suffix}@test.local`, passwordHash: 'x', firstName: 'Zero', lastName: 'Owner', role: 'AGENCY_OWNER', status: 'ACTIVE' },
+  });
+  const producer = await prisma.user.create({
+    data: { agencyId: agency.id, email: `billboard-zeroyear-${suffix}@test.local`, passwordHash: 'x', firstName: 'Zero', lastName: 'Year', role: 'PRODUCER', status: 'ACTIVE' },
+  });
+
+  // 2023's only Sale has no premium entered yet.
+  const customer = await prisma.customer.create({ data: { firstName: 'Early', lastName: 'NoDollar' } });
+  await prisma.sale.create({
+    data: {
+      agencyId: agency.id, customerId: customer.id, firstName: 'Early', lastName: 'NoDollar',
+      saleDate: new Date('2023-06-01'), carrier: 'Test', policyType: 'Standard', productFamily: 'AUTO',
+      premiumCents: null, assignedToId: producer.id, createdById: owner.id,
+    },
+  });
+
+  // 2024's only data is a HistoricalRecord import row with the same gap.
+  const batch = await prisma.leadImportBatch.create({
+    data: { agencyId: agency.id, uploadedById: owner.id, totalRows: 1, created: 1, skipped: 0, sourceSystem: 'OTHER', isHistorical: true },
+  });
+  await prisma.historicalRecord.create({
+    data: {
+      agencyId: agency.id, importBatchId: batch.id, recordDate: new Date('2024-03-10'),
+      product: 'AUTO', assignedToId: producer.id, isSold: true, premiumCents: 0, items: 1,
+      sourceSystem: 'OTHER',
+    },
+  });
+
+  const result = await computeBillboardPeriod({ agencyId: agency.id, period: 'all_years', now: PERIOD_NOW });
+  const y2023 = result.series.find((y) => y.label === '2023');
+  const y2024 = result.series.find((y) => y.label === '2024');
+  assert.ok(y2023, '2023 must appear even though its only Sale has no premium yet');
+  assert.equal(y2023.soldCount, 1, 'the no-premium 2023 Sale is real sold production, not dropped from the year span');
+  assert.ok(y2024, '2024 must appear even though its only HistoricalRecord has zero premium');
+  assert.equal(y2024.soldCount, 1, 'the zero-premium 2024 HistoricalRecord is real sold production, not dropped from the year span');
+});
+
 test('computeBillboardPeriod: a $0 or null-premium SOLD row still counts toward soldCount, contributes nothing to premiumCents, and only the null one is flagged as missing premium', async () => {
   const zeroCustomer = await prisma.customer.create({ data: { firstName: 'Zero', lastName: 'Premium' } });
   await prisma.sale.create({

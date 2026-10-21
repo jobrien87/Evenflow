@@ -478,18 +478,18 @@ test('a $0-premium row imported with a positive-keyword outcome is excluded end-
   await fetch(`${baseUrl}/api/leads/import-batches/${body.batchId}/undo`, { method: 'POST', headers: { Cookie: ownerCookie } });
 });
 
-test('historicalAggregates read-time guard: a pre-existing bad row (isSold:true, premiumCents:0) is excluded from every consumer, not just future imports', async () => {
+test('historicalAggregates: a pre-existing isSold:true row with no premium still counts as sold production, same as a Sale logged before its premium is known', async () => {
   const batch = await prisma.leadImportBatch.create({
     data: { agencyId, uploadedById: ownerId, isHistorical: true, totalRows: 1, created: 1, skipped: 0 },
   });
-  const badRecord = await prisma.historicalRecord.create({
+  const zeroRecord = await prisma.historicalRecord.create({
     data: {
       agencyId,
       importBatchId: batch.id,
       recordDate: new Date('2024-08-01'),
-      firstName: 'Legacy', lastName: 'BadRow',
+      firstName: 'Legacy', lastName: 'ZeroPremium',
       premiumCents: 0,
-      isSold: true, // simulates a row imported before the classifyIsSold fix shipped
+      isSold: true, // e.g. a row imported before the source system recorded a premium
       product: 'AUTO',
       sourceSystem: 'OTHER',
     },
@@ -497,12 +497,12 @@ test('historicalAggregates read-time guard: a pre-existing bad row (isSold:true,
 
   const from = new Date('2024-07-01');
   const to = new Date('2024-09-01');
-  assert.equal(await sumHistoricalPremium({ agencyId, from, to }), 0, 'the bad row contributes nothing to the premium sum');
-  assert.equal(await countHistoricalSold({ agencyId, from, to }), 0, 'the bad row is not counted as sold');
+  assert.equal(await sumHistoricalPremium({ agencyId, from, to }), 0, 'a real zero contributes zero to the premium sum');
+  assert.equal(await countHistoricalSold({ agencyId, from, to }), 1, 'the row still counts as sold production, premium or not');
   const rows = await historicalLeadLikeRows({ agencyId, from, to });
-  assert.equal(rows.length, 0, 'the bad row never reaches Billboard via historicalLeadLikeRows');
+  assert.equal(rows.length, 1, 'the row still reaches Billboard via historicalLeadLikeRows');
 
-  await prisma.historicalRecord.delete({ where: { id: badRecord.id } });
+  await prisma.historicalRecord.delete({ where: { id: zeroRecord.id } });
   await prisma.leadImportBatch.delete({ where: { id: batch.id } });
 });
 

@@ -102,15 +102,22 @@ function yearMonthBuckets(year, timeZone) {
 // Performology/AgencyZoom/Ricochet port-in) IS included here, so a month
 // with only historical data is still selectable in the Billboard's Month
 // view. Returns null when the agency has no real sold data anywhere yet.
+//
+// No premiumCents filter on either side — a logged Sale or imported
+// HistoricalRecord counts the moment it exists, premium or not (see
+// manualSaleAggregates.js's dateRangeWhere for the full rationale). A
+// filter here would do more than under-total a year's numbers: it could
+// drop that year's min/max contribution entirely, silently removing the
+// whole year from the All Years range and the Month picker.
 async function agencyDataYearSpan({ agencyId, timeZone }) {
   const [historicalSpan, saleSpan] = await Promise.all([
     prisma.historicalRecord.aggregate({
-      where: { agencyId, isSold: true, premiumCents: { gt: 0 } },
+      where: { agencyId, isSold: true },
       _min: { recordDate: true },
       _max: { recordDate: true },
     }),
     prisma.sale.aggregate({
-      where: { agencyId, voidedAt: null, premiumCents: { gt: 0 } },
+      where: { agencyId, voidedAt: null },
       _min: { saleDate: true },
       _max: { saleDate: true },
     }),

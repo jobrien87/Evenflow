@@ -185,4 +185,5 @@ module.exports = {
   salesByProduct,
   salesByVendor,
   saleLeadLikeRows,
+  toCalendarUtcMidnight,
 };

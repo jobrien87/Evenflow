@@ -41,12 +41,16 @@ function dateRangeWhere(agencyId, from, to, extra = {}, timeZone) {
     // billboard.js's bucketBySpans (the reference exclusive behavior).
     recordDate: { gte: gteBound, lt: ltBound },
     isSold: true,
-    // A zero/null-premium row must never count as sold production,
-    // regardless of its stored isSold flag — this protects every
-    // consumer below (sums, counts, by-vendor/agent/product breakdowns,
-    // and Billboard via historicalLeadLikeRows) at read time, including
-    // rows that were already imported before classifyIsSold's own fix.
-    premiumCents: { gt: 0 },
+    // An imported row counts as sold production the moment it's marked
+    // isSold:true — premium or not. Same decision as
+    // manualSaleAggregates.js's own dateRangeWhere (a producer can log a
+    // real sale before the carrier confirms premium; a Back Catalog import
+    // can likewise carry a real sold row the source system never recorded
+    // a premium for). No row-level exclusion here on premiumCents — every
+    // sum below already null-coalesces to 0 on its own, and billboard.js's
+    // aggregateSoldRows tracks the paired unknownPremiumCount so an
+    // understated dollar total stays visibly flagged instead of the row
+    // silently vanishing from soldCount/itemCount/byProducer.
     ...extra,
   };
 }

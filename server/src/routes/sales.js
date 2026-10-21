@@ -13,6 +13,7 @@ const { normalizePhone, normalizeEmail } = require('../lib/normalize');
 const { syncSaleRevenueEvent } = require('../lib/financialEvents');
 const { updateCustomerProductsAndDetectCrossSells } = require('../lib/opportunityEvents');
 const { PRODUCTS } = require('../lib/products');
+const { toCalendarUtcMidnight } = require('../lib/manualSaleAggregates');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -287,6 +288,34 @@ router.get('/', requireRole(...CREATE_ROLES), async (req, res, next) => {
     // happens to be selected (same "find it by name, not by digging
     // through a date filter" convenience GET /leads/search gives leads).
     const q = (req.query.q || '').trim();
+
+    // saleDate is stored as UTC-midnight-of-calendar-date, but a client-
+    // sent from/to instant (e.g. a browser-local-midnight preset boundary)
+    // can land a few hours into the *next* UTC day — a raw instant compare
+    // then silently drops a sale logged on the very first day of the
+    // selected range. Re-deriving each boundary's own agency-timezone
+    // calendar day first (the same toCalendarUtcMidnight conversion
+    // Billboard/Financials/Performance Breakdown/Running Report already
+    // share via manualSaleAggregates.js's dateRangeWhere) fixes this
+    // regardless of what hour-offset the client's instant happens to
+    // carry. `to` here means "through the end of that calendar day" (both
+    // the quick presets' "now" and the custom range's T23:59:59.999Z
+    // already encode that), so the upper bound is one day past its own
+    // re-derived calendar day, kept exclusive.
+    let dateRange = {};
+    if (!q && (req.query.from || req.query.to)) {
+      const agency = await prisma.agency.findUnique({ where: { id: agencyId }, select: { timezone: true } });
+      const timeZone = agency?.timezone || 'America/New_York';
+      dateRange = {
+        saleDate: {
+          ...(req.query.from ? { gte: toCalendarUtcMidnight(new Date(req.query.from), timeZone) } : {}),
+          ...(req.query.to
+            ? { lt: new Date(toCalendarUtcMidnight(new Date(req.query.to), timeZone).getTime() + 24 * 60 * 60 * 1000) }
+            : {}),
+        },
+      };
+    }
+
     const where = {
       agencyId,
       ...(req.user.role === 'PRODUCER' ? { assignedToId: req.user.id } : {}),
@@ -296,9 +325,7 @@ router.get('/', requireRole(...CREATE_ROLES), async (req, res, next) => {
       ...(req.query.includeVoided === 'true' ? {} : { voidedAt: null }),
       ...(q
         ? { OR: [{ firstName: { contains: q, mode: 'insensitive' } }, { lastName: { contains: q, mode: 'insensitive' } }] }
-        : (req.query.from || req.query.to)
-          ? { saleDate: { ...(req.query.from ? { gte: new Date(req.query.from) } : {}), ...(req.query.to ? { lte: new Date(req.query.to) } : {}) } }
-          : {}),
+        : dateRange),
     };
     const sales = await prisma.sale.findMany({
       where,

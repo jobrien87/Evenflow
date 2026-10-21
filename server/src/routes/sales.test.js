@@ -121,6 +121,43 @@ test('a standalone sale reaches Billboard\'s byProducer and byProduct with the r
   await prisma.revenueEvent.deleteMany({ where: { notes: { contains: sale.id } } });
 });
 
+// Regression test for the Closed-Sales-doesn't-match-Billboard bug: a
+// client-sent from/to instant that's a few hours past UTC midnight (e.g.
+// a browser-local-midnight preset boundary in a US timezone) must not
+// silently drop a sale dated on that same calendar day. saleDate is
+// always stored as exact UTC midnight of its calendar date (passing a
+// plain "YYYY-MM-DD" string below reproduces that encoding exactly).
+test('GET /sales date range is calendar-day-correct, not a raw instant compare — a sale on day 1 (or the last day) of the range is never silently dropped', async () => {
+  const day1Res = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ firstName: 'DayOne', lastName: `Boundary${Date.now()}`, saleDate: '2026-02-01' })),
+  });
+  assert.equal(day1Res.status, 201);
+  const { sale: day1Sale } = await day1Res.json();
+
+  const lastDayRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ firstName: 'LastDay', lastName: `Boundary${Date.now()}`, saleDate: '2026-02-28' })),
+  });
+  assert.equal(lastDayRes.status, 201);
+  const { sale: lastDaySale } = await lastDayRes.json();
+
+  // from: local midnight on Feb 1 in a US-Eastern-style browser, already
+  // past the sale's own UTC-midnight saleDate — this is exactly what a raw
+  // instant `gte` compare would wrongly exclude. to: an inclusive
+  // end-of-day boundary on the last day of the range, same shape
+  // client/src/lib/dateRange.js's custom-range path sends.
+  const res = await fetch(`${baseUrl}/api/sales?from=${encodeURIComponent('2026-02-01T05:00:00.000Z')}&to=${encodeURIComponent('2026-02-28T23:59:59.999Z')}`, { headers: { Cookie: ownerCookie } });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.ok(body.sales.some((s) => s.id === day1Sale.id), 'a sale dated the 1st of the month must not be dropped by a local-midnight-shifted from boundary');
+  assert.ok(body.sales.some((s) => s.id === lastDaySale.id), 'a sale dated the last day of the range must still be included under the exclusive upper bound');
+
+  await prisma.sale.deleteMany({ where: { id: { in: [day1Sale.id, lastDaySale.id] } } });
+  await prisma.revenueEvent.deleteMany({ where: { notes: { contains: day1Sale.id } } });
+  await prisma.revenueEvent.deleteMany({ where: { notes: { contains: lastDaySale.id } } });
+});
+
 // Item 4 of the correction round: a real, full customer-name search for
 // Closed Sales, independent of whatever date range happens to be
 // selected -- same "find it by name" convenience Find a Lead gives leads.
