@@ -220,11 +220,29 @@ test('financials /by-agent: Historical Data contributes nothing to any agent row
   assert.equal(unattributedRow, undefined, 'no unattributed-sales bucket without a real Sale row');
 });
 
-test('computeBillboard: Historical Data contributes nothing to totals/byVendor; a live Lead reaching SOLD also contributes nothing', async () => {
+test('computeBillboard: Historical Data counts toward totals/byVendor (restored by 20db309); a live Lead reaching SOLD with no linked Sale still contributes nothing', async () => {
+  // Unlike Financials/Performance Breakdown/Running Report (which stay
+  // Closed-Sale-only, see the other tests in this file), Billboard
+  // deliberately re-includes Historical Data — see billboard.js's own
+  // module comment and commit 20db309 ("Restore Historical Data in
+  // Billboard's Past Months"). Of the 5 imported CSV rows, only the 2
+  // in-range, premium-bearing ones (Pat Historical $500/Vendor A, Sam
+  // Unknown $300/no vendor match) count; the no-premium row, the
+  // out-of-range row, and the no-date row (skipped at parse) don't.
   const result = await computeBillboard({ agencyId, granularity: 'month', from: rangeFrom, to: rangeTo });
-  assert.equal(result.totals.soldCount, 0);
-  assert.equal(result.totals.premiumCents, 0);
-  assert.deepEqual(result.byVendor, [], 'no Sale rows exist, so no vendor breakdown rows at all — not even a "Direct / No Vendor" bucket');
+  assert.equal(result.totals.soldCount, 2, 'the live Lead reaching SOLD has no linked Sale row, so only the 2 real historical rows count');
+  assert.equal(result.totals.premiumCents, 50000 + 30000);
+
+  const vendorARow = result.byVendor.find((v) => v.vendorId === vendorAId);
+  assert.ok(vendorARow, 'the Vendor-A-matched historical row must appear');
+  assert.equal(vendorARow.soldCount, 1);
+  assert.equal(vendorARow.premiumCents, 50000);
+
+  const directRow = result.byVendor.find((v) => v.vendorId === null);
+  assert.ok(directRow, 'the unmatched-vendor historical row buckets under the same "Direct / No Vendor" row a standalone Sale would');
+  assert.equal(directRow.vendorName, 'Direct / No Vendor');
+  assert.equal(directRow.soldCount, 1);
+  assert.equal(directRow.premiumCents, 30000);
 });
 
 test('computeGoalActual: Historical Data adds nothing to the sales or premium_cents goal metrics', async () => {
