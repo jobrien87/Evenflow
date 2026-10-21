@@ -42,6 +42,8 @@ import AgencyDetailPage from './pages/AgencyDetailPage';
 import TelemarketersPanel from './pages/TelemarketersPanel';
 import BillingPanel from './pages/BillingPanel';
 import PlatformChatsPanel from './pages/PlatformChatsPanel';
+import DirectMessagesPanel from './pages/DirectMessagesPanel';
+import DirectMessageThread from './pages/DirectMessageThread';
 
 import TelemarketerDashboard from './pages/TelemarketerDashboard';
 import PersonalizePage from './pages/PersonalizePage';
@@ -95,6 +97,10 @@ export default function App() {
         <Route index element={<RoleRedirect />} />
         <Route path="personalize" element={<PersonalizePage />} />
         <Route path="security" element={<SecurityPage />} />
+        {/* Any authenticated role can land here to see/reply to a direct
+            message aimed at them — only starting a brand-new DM is
+            Platform-Owner-only (server-enforced), not opening one. */}
+        <Route path="messages/:userId" element={<DirectMessageThread />} />
 
         <Route element={<RoleGate allow={['PRODUCER']} />}>
           <Route path="producer" element={<ProducerDashboard />} />
@@ -150,6 +156,7 @@ export default function App() {
         <Route element={<RoleGate allow={['PLATFORM_OWNER']} />}>
           <Route path="platform" element={<AgenciesPanel />} />
           <Route path="platform/chats" element={<PlatformChatsPanel />} />
+          <Route path="platform/messages" element={<DirectMessagesPanel />} />
           <Route path="platform/sales-studio" element={<SalesStudioPanel />} />
           <Route path="platform/drills" element={<RedirectToSalesStudio tab="drills" />} />
           <Route path="platform/drills/:courseId/:lessonId" element={<DrillDetailPage />} />

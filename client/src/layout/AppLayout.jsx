@@ -7,6 +7,7 @@ import { GradientDefs, TourOverlay, ToastHost, CelebrationHost } from '../ui';
 import { stepsForRole } from '../lib/tourSteps';
 import { unlockAudio } from '../lib/drumRoll';
 import LeadAlertListener, { LEAD_ALERT_ROLES } from '../lib/useLeadAlerts';
+import PlatformMentionAlertListener from '../lib/usePlatformMentionAlerts';
 import useAccountCelebrations from '../lib/useAccountCelebrations';
 import Sidebar from './Sidebar';
 import MobileTopBar from './MobileTopBar';
@@ -108,6 +109,7 @@ export default function AppLayout() {
       {tourSteps && <TourOverlay steps={tourSteps} startIndex={manualTourOpen ? tourStartIndex : 0} onDone={finishTour} />}
       <AnnouncementModal />
       {user && LEAD_ALERT_ROLES.has(user.role) && <LeadAlertListener />}
+      {user && user.role === 'PLATFORM_OWNER' && <PlatformMentionAlertListener />}
       <ToastHost />
     </div>
   );

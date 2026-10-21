@@ -59,7 +59,7 @@ export default function NotificationBell({ openUpward = false }) {
   // param the destination page reads) to wherever that real entity lives.
   function handleClick(n) {
     if (!n.readAt) markRead(n.id);
-    const target = notificationTarget(n, user?.role);
+    const target = notificationTarget(n, user?.role, user?.id);
     const url = notificationUrl(target);
     if (!url) return;
     setOpen(false);

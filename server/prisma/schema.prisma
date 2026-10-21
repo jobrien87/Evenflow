@@ -2463,6 +2463,12 @@ enum ConversationEntityType {
   LEAD
   TRANSFER
   AGENCY
+  // A 1:1 direct message — relatedEntityId is a deterministic
+  // [userAId, userBId].sort().join(':') key (not a real foreign key, same
+  // non-FK convention AGENCY already uses for its own relatedEntityId), so
+  // reopening by either user's id resolves to the same row regardless of
+  // who started it. See lib/chat.js's getOrCreateDmConversation.
+  DM
 }
 
 model Conversation {

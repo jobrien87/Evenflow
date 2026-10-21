@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Card, SectionHeader, EmptyState } from '../ui';
 import ChatThread from './ChatThread';
@@ -21,11 +22,26 @@ export default function PlatformChatsPanel() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [selected, setSelected] = useState(null);
+  const [searchParams] = useSearchParams();
+  // A mention-alert notification deep-links here with ?highlight=<agencyId>
+  // — that agency may not be on whatever page/search the list currently
+  // shows, so it's resolved directly rather than requiring it to appear in
+  // the paginated list first. Only ever acted on once per page load.
+  const highlightId = searchParams.get('highlight');
+  const handledHighlightRef = useRef(false);
 
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, search]);
+
+  useEffect(() => {
+    if (!highlightId || handledHighlightRef.current) return;
+    handledHighlightRef.current = true;
+    api.agencyDetail(highlightId)
+      .then((data) => setSelected(data.agency))
+      .catch(() => {});
+  }, [highlightId]);
 
   useEffect(() => {
     const timer = setTimeout(() => {

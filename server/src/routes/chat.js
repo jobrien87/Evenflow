@@ -2,7 +2,17 @@ const express = require('express');
 const { z } = require('zod');
 const { prisma } = require('../lib/db');
 const { requireAuth } = require('../middleware/auth');
-const { getOrCreateEntityConversation, isParticipant, postMessage, markRead, toggleReaction, REACTION_EMOJI } = require('../lib/chat');
+const {
+  getOrCreateEntityConversation,
+  dmEntityId,
+  getOrCreateDmConversation,
+  isParticipant,
+  activePlatformOwners,
+  postMessage,
+  markRead,
+  toggleReaction,
+  REACTION_EMOJI,
+} = require('../lib/chat');
 const { getOrSyncAgencyConversation } = require('../lib/agencyChat');
 
 const router = express.Router();
@@ -49,8 +59,44 @@ router.get('/conversations', async (req, res, next) => {
 router.get('/conversations/entity/:entityType/:entityId', async (req, res, next) => {
   try {
     const entityType = req.params.entityType.toUpperCase();
-    if (!['LEAD', 'TRANSFER', 'AGENCY'].includes(entityType)) {
-      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'entityType must be LEAD, TRANSFER, or AGENCY.' });
+    if (!['LEAD', 'TRANSFER', 'AGENCY', 'DM'].includes(entityType)) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'entityType must be LEAD, TRANSFER, AGENCY, or DM.' });
+    }
+
+    if (entityType === 'DM') {
+      // entityId is the OTHER user's id, never a conversation id — so
+      // either side of an existing DM resolves the same row from their
+      // own point of view, with no third-party access risk (the pair is
+      // always [caller, entityId], never anyone else). Reopening an
+      // existing DM is open to either participant; only a Platform Owner
+      // may START a brand new one, and only with a real, active,
+      // non-platform-owner agency user.
+      if (req.params.entityId === req.user.id) {
+        return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Cannot start a conversation with yourself.' });
+      }
+      const existingId = dmEntityId(req.user.id, req.params.entityId);
+      let [conversation, otherUser] = await Promise.all([
+        prisma.conversation.findUnique({
+          where: { relatedEntityType_relatedEntityId: { relatedEntityType: 'DM', relatedEntityId: existingId } },
+        }),
+        prisma.user.findUnique({ where: { id: req.params.entityId }, select: { id: true, firstName: true, lastName: true } }),
+      ]);
+      if (!otherUser) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+      if (!conversation) {
+        if (req.user.role !== 'PLATFORM_OWNER') {
+          return res.status(403).json({ success: false, error: 'FORBIDDEN', message: 'Only a Platform Owner can start a new direct message.' });
+        }
+        const target = await prisma.user.findUnique({ where: { id: req.params.entityId } });
+        if (!target || target.status !== 'ACTIVE' || target.role === 'PLATFORM_OWNER' || !target.agencyId) {
+          return res.status(400).json({ success: false, error: 'VALIDATION', message: 'That user cannot be direct messaged.' });
+        }
+        conversation = await getOrCreateDmConversation({ userAId: req.user.id, userBId: target.id, agencyId: target.agencyId });
+      }
+      return res.json({
+        success: true,
+        conversation: { id: conversation.id, relatedEntityType: conversation.relatedEntityType, relatedEntityId: conversation.relatedEntityId },
+        otherUser,
+      });
     }
 
     if (entityType === 'AGENCY') {
@@ -147,11 +193,25 @@ router.get('/conversations/:id/participants', async (req, res, next) => {
     if (!(await platformOwnerAgencyBypass(req, req.params.id)) && !(await isParticipant(req.params.id, req.user.id))) {
       return res.status(403).json({ success: false, error: 'FORBIDDEN' });
     }
+    const conversation = await prisma.conversation.findUnique({ where: { id: req.params.id }, select: { relatedEntityType: true } });
     const rows = await prisma.conversationParticipant.findMany({
       where: { conversationId: req.params.id, userId: { not: req.user.id } },
       include: { user: { select: { id: true, firstName: true, lastName: true } } },
     });
-    return res.json({ success: true, participants: rows.map((r) => r.user) });
+    const candidates = rows.map((r) => r.user);
+    // Platform Owners read/post (and can now be @mentioned) in any AGENCY
+    // room via a bypass, never a real ConversationParticipant row — list
+    // them here too, or nobody could ever tag them.
+    if (conversation?.relatedEntityType === 'AGENCY') {
+      const seen = new Set(candidates.map((c) => c.id));
+      for (const owner of await activePlatformOwners()) {
+        if (owner.id !== req.user.id && !seen.has(owner.id)) {
+          candidates.push(owner);
+          seen.add(owner.id);
+        }
+      }
+    }
+    return res.json({ success: true, participants: candidates });
   } catch (err) {
     next(err);
   }

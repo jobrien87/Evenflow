@@ -40,11 +40,55 @@ async function getOrCreateEntityConversation({ agencyId, entityType, entityId, p
   return conversation;
 }
 
+// Deterministic regardless of who starts the DM — [a, b].sort() means
+// userA DMing userB and userB DMing userA always land on the same
+// relatedEntityId, so @@unique([relatedEntityType, relatedEntityId])
+// alone gives this the same idempotency getOrCreateEntityConversation
+// gets from a real Lead/Transfer id.
+function dmEntityId(userAId, userBId) {
+  return [userAId, userBId].sort().join(':');
+}
+
+// A DM's two participants never change after creation (unlike an agency
+// room's live-synced membership), so this is simpler than
+// getOrCreateEntityConversation — just find-or-create by the deterministic
+// key above.
+async function getOrCreateDmConversation({ userAId, userBId, agencyId }) {
+  const relatedEntityId = dmEntityId(userAId, userBId);
+  let conversation = await prisma.conversation.findUnique({
+    where: { relatedEntityType_relatedEntityId: { relatedEntityType: 'DM', relatedEntityId } },
+  });
+  if (!conversation) {
+    conversation = await prisma.conversation.create({
+      data: {
+        agencyId,
+        relatedEntityType: 'DM',
+        relatedEntityId,
+        participants: { create: [userAId, userBId].map((userId) => ({ userId })) },
+      },
+    });
+  }
+  return conversation;
+}
+
 async function isParticipant(conversationId, userId) {
   const row = await prisma.conversationParticipant.findUnique({
     where: { conversationId_userId: { conversationId, userId } },
   });
   return !!row;
+}
+
+// The one "virtual participant" role in an AGENCY room — a Platform Owner
+// reads/posts there via platformOwnerAgencyBypass (routes/chat.js), never
+// a real ConversationParticipant row. Anywhere participants are listed or
+// @mentions are validated for an AGENCY conversation has to merge these in
+// by hand, or a Platform Owner could never be @mentioned (or notified of
+// one) at all.
+async function activePlatformOwners() {
+  return prisma.user.findMany({
+    where: { role: 'PLATFORM_OWNER', status: 'ACTIVE' },
+    select: { id: true, firstName: true, lastName: true },
+  });
 }
 
 // The one curated quick-react set (easy to extend later — emoji stays a
@@ -70,10 +114,18 @@ async function postMessage({ conversationId, authorId, content, replyToId, menti
     prisma.conversationParticipant.findMany({ where: { conversationId, userId: { not: authorId } } }),
   ]);
 
+  // In an AGENCY room, a Platform Owner can be @mentioned too even though
+  // they're never a real participant row (see activePlatformOwners above).
+  const platformOwnerIds = conversation?.relatedEntityType === 'AGENCY'
+    ? (await activePlatformOwners()).map((u) => u.id)
+    : [];
+
   // Never trust client-supplied mentionedUserIds blindly — only a real
-  // participant of THIS conversation (never the author themselves, since
-  // `others` already excludes authorId) can actually be mentioned.
-  const validMentionIds = [...new Set(mentionedUserIds || [])].filter((id) => others.some((p) => p.userId === id));
+  // participant of THIS conversation, or (in an AGENCY room) an active
+  // Platform Owner, can actually be mentioned. Never the author themselves.
+  const validMentionIds = [...new Set(mentionedUserIds || [])].filter(
+    (id) => id !== authorId && (others.some((p) => p.userId === id) || platformOwnerIds.includes(id))
+  );
 
   const message = await prisma.message.create({
     data: {
@@ -96,8 +148,14 @@ async function postMessage({ conversationId, authorId, content, replyToId, menti
   const mentionTitle = `${author.firstName} ${author.lastName} mentioned you`;
   const body = content.length > 140 ? `${content.slice(0, 140)}…` : content;
 
-  Promise.all(
-    others.map((p) => {
+  // A Platform Owner validly @mentioned above but not a real participant
+  // (see platformOwnerIds) would otherwise never hear about a message that
+  // explicitly tagged them — the loop below only covers real participants.
+  const othersIds = new Set(others.map((p) => p.userId));
+  const mentionOnlyRecipientIds = validMentionIds.filter((id) => !othersIds.has(id));
+
+  Promise.all([
+    ...others.map((p) => {
       const mentioned = validMentionIds.includes(p.userId);
       return notifyUser({
         userId: p.userId,
@@ -109,8 +167,20 @@ async function postMessage({ conversationId, authorId, content, replyToId, menti
         relatedEntityType: conversation.relatedEntityType,
         relatedEntityId: conversation.relatedEntityId,
       });
-    })
-  ).catch((err) => console.error('[chat] notify failed', err.message));
+    }),
+    ...mentionOnlyRecipientIds.map((userId) =>
+      notifyUser({
+        userId,
+        agencyId: conversation.agencyId,
+        type: 'chat.mention',
+        severity: 'INFO',
+        title: mentionTitle,
+        body,
+        relatedEntityType: conversation.relatedEntityType,
+        relatedEntityId: conversation.relatedEntityId,
+      })
+    ),
+  ]).catch((err) => console.error('[chat] notify failed', err.message));
 
   return message;
 }
@@ -138,4 +208,14 @@ async function toggleReaction({ messageId, userId, emoji }) {
   return { reacted: true };
 }
 
-module.exports = { getOrCreateEntityConversation, isParticipant, postMessage, markRead, toggleReaction, REACTION_EMOJI };
+module.exports = {
+  getOrCreateEntityConversation,
+  dmEntityId,
+  getOrCreateDmConversation,
+  isParticipant,
+  activePlatformOwners,
+  postMessage,
+  markRead,
+  toggleReaction,
+  REACTION_EMOJI,
+};

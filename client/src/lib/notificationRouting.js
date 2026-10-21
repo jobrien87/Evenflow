@@ -8,7 +8,7 @@ import { basePathForRole } from '../layout/navConfig';
 // routes each role has — a role with no real view for an entity type falls
 // back to its own base path rather than pointing at a route that doesn't
 // exist for them or a panel that can't show the thing.
-export function notificationTarget(notification, role) {
+export function notificationTarget(notification, role, userId) {
   const base = basePathForRole(role);
   const id = notification.relatedEntityId;
   if (!id) return { path: base, highlightId: null, openChat: false };
@@ -43,7 +43,7 @@ export function notificationTarget(notification, role) {
 
     case 'Transfer':
       if (role === 'AGENCY_OWNER' || role === 'AGENCY_MANAGER') {
-        return { path: '/agency/transfers', highlightId: id, openChat: notification.type === 'chat.message' };
+        return { path: '/agency/transfers', highlightId: id, openChat: notification.type === 'chat.message' || notification.type === 'chat.mention' };
       }
       if (role === 'TELEMARKETER') return { path: '/telemarketer', highlightId: id, openChat: false };
       return { path: base, highlightId: null, openChat: false };
@@ -77,11 +77,27 @@ export function notificationTarget(notification, role) {
       // row id; there's no per-game "row" to highlight, just the arcade.
       return { path: `${base}/break-room`, highlightId: null, openChat: false };
 
+    case 'DM': {
+      // relatedEntityId is the deterministic [userA, userB].sort().join(':')
+      // pair key (see server/src/lib/chat.js's dmEntityId) — split it and
+      // pick whichever side isn't the viewer to know who to open the
+      // thread with.
+      const [a, b] = (id || '').split(':');
+      const otherUserId = a === userId ? b : a;
+      if (!otherUserId) return { path: base, highlightId: null, openChat: false };
+      return { path: `/messages/${otherUserId}`, highlightId: null, openChat: true };
+    }
+
     case 'AGENCY':
-      // The persistent agency-wide team room — always a chat.message
-      // notification, always opens straight into the room rather than
-      // just highlighting something (there's no separate "row" for a
-      // room to highlight).
+      // The persistent agency-wide team room — always a chat.message or
+      // chat.mention notification, always opens straight into the room
+      // rather than just highlighting something (there's no separate "row"
+      // for a room to highlight). A Platform Owner has no agency of their
+      // own and isn't a real participant anywhere — relatedEntityId here
+      // IS the agency's own id (see routes/chat.js), so route them to their
+      // own cross-agency Chats tab with that agency pre-selected instead of
+      // the agency-member team-chat page, which isn't theirs to land on.
+      if (role === 'PLATFORM_OWNER') return { path: '/platform/chats', highlightId: id, openChat: true };
       if (role === 'TELEMARKETER') return { path: '/telemarketer', highlightId: null, openChat: true };
       return { path: '/agency/team-chat', highlightId: null, openChat: true };
 

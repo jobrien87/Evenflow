@@ -44,7 +44,7 @@ export function useLeadAlerts() {
         const newest = candidates[candidates.length - 1];
         if (newest) {
           playDrumRoll();
-          const target = notificationTarget(newest, user?.role);
+          const target = notificationTarget(newest, user?.role, user?.id);
           pushToast({
             title: newest.title,
             body: newest.body,
