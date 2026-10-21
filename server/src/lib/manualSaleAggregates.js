@@ -37,13 +37,19 @@ function dateRangeWhere(agencyId, from, to, extra = {}, timeZone) {
     // already-exclusive `to` convention and billboard.js's bucketBySpans.
     saleDate: { gte: gteBound, lt: ltBound },
     voidedAt: null,
-    // A zero/null-premium Sale must never inflate sold production —
-    // explicit user override of this model's earlier "null = unknown,
-    // entered later" aggregation stance. The row itself is still stored
-    // and editable (PATCH can fill in the real premium later); it just
-    // doesn't count toward soldCount/itemCount/revenue until it does,
-    // same floor historicalAggregates.js already applies.
-    premiumCents: { gt: 0 },
+    // A logged sale counts the moment it's logged — premium or not. A
+    // producer routinely logs a real Closed Sale before the carrier has
+    // confirmed the premium (the row stays editable via PATCH once it's
+    // known), and that row must still show up as sold production, not
+    // vanish from soldCount/itemCount/byProducer until someone fills in
+    // a dollar amount. No row-level exclusion here on premiumCents —
+    // every sum below (_sum.premiumCents, `r.premiumCents || 0`
+    // accumulators) already null-coalesces to 0 on its own, so dollar
+    // totals stay exactly as accurate as what's actually been entered
+    // without needing to drop the row from the query. See
+    // billboard.js's aggregateSoldRows for the paired unknownPremiumCount
+    // figure that keeps an understated dollar total visibly flagged
+    // instead of silently wrong.
     ...extra,
   };
 }

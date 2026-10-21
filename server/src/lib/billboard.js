@@ -96,16 +96,21 @@ function buildSeries(soldLeads, granularity, from, to) {
 // The real producer/product/vendor/zip grouping pass — pure, given an
 // already-fetched soldLeads array and a producer roster to zero-fill.
 // Shared by both computeBillboard and computeBillboardPeriod so this
-// logic (and its zero-premium protection, applied upstream in
-// historicalAggregates.js/manualSaleAggregates.js) is written exactly
-// once. soldCount is a policy/row count; itemCount (sum of Sale.items/
-// HistoricalRecord.items) and unknownItemsCount (rows with no recoverable
-// items figure) are tracked as distinct numbers — a policy with 3 items
-// shows 3 items and its premium once, never conflated with row count.
+// logic is written exactly once. soldCount is a policy/row count — every
+// row in soldLeads counts, premium or not (manualSaleAggregates.js no
+// longer excludes a row from the query just because its premium hasn't
+// been entered yet; historicalAggregates.js still does, for a different,
+// import-data-quality reason). itemCount (sum of Sale.items/
+// HistoricalRecord.items), unknownItemsCount (rows with no recoverable
+// items figure), and unknownPremiumCount (rows with no premium entered
+// yet) are tracked as distinct numbers alongside premiumCents — a policy
+// with 3 items and no premium yet shows 3 items, contributes $0, and is
+// flagged via unknownPremiumCount, never silently dropped or conflated
+// with row count.
 function aggregateSoldRows(soldLeads, producers) {
   const byProducerMap = new Map();
   for (const p of producers) {
-    byProducerMap.set(p.id, { userId: p.id, firstName: p.firstName, lastName: p.lastName, soldCount: 0, itemCount: 0, unknownItemsCount: 0, premiumCents: 0 });
+    byProducerMap.set(p.id, { userId: p.id, firstName: p.firstName, lastName: p.lastName, soldCount: 0, itemCount: 0, unknownItemsCount: 0, unknownPremiumCount: 0, premiumCents: 0 });
   }
   const byProductMap = new Map();
   const byVendorMap = new Map();
@@ -117,11 +122,20 @@ function aggregateSoldRows(soldLeads, producers) {
   function isUnknownItems(lead) {
     return lead.items === null || lead.items === undefined ? 1 : 0;
   }
+  // Same null-vs-explicit-zero distinction as isUnknownItems above, applied
+  // to premium: a row whose premium was never entered yet (null) is flagged
+  // as needing reconciliation; an explicit, deliberate $0 sale is not —
+  // it already counts fully toward soldCount/itemCount, it just has
+  // nothing to add to the dollar total.
+  function isUnknownPremium(lead) {
+    return lead.salePremiumCents === null || lead.salePremiumCents === undefined ? 1 : 0;
+  }
 
   for (const lead of soldLeads) {
     const premium = lead.salePremiumCents || 0;
     const items = itemContribution(lead);
     const unknownItems = isUnknownItems(lead);
+    const unknownPremium = isUnknownPremium(lead);
     if (lead.assignedToId) {
       const row = byProducerMap.get(lead.assignedToId) || {
         userId: lead.assignedToId,
@@ -130,19 +144,22 @@ function aggregateSoldRows(soldLeads, producers) {
         soldCount: 0,
         itemCount: 0,
         unknownItemsCount: 0,
+        unknownPremiumCount: 0,
         premiumCents: 0,
       };
       row.soldCount += 1;
       row.itemCount += items;
       row.unknownItemsCount += unknownItems;
+      row.unknownPremiumCount += unknownPremium;
       row.premiumCents += premium;
       byProducerMap.set(lead.assignedToId, row);
     }
     const product = reportingProductKey(lead.saleProduct);
-    const prow = byProductMap.get(product) || { product, label: PRODUCT_LABELS[product] || product, soldCount: 0, itemCount: 0, unknownItemsCount: 0, premiumCents: 0 };
+    const prow = byProductMap.get(product) || { product, label: PRODUCT_LABELS[product] || product, soldCount: 0, itemCount: 0, unknownItemsCount: 0, unknownPremiumCount: 0, premiumCents: 0 };
     prow.soldCount += 1;
     prow.itemCount += items;
     prow.unknownItemsCount += unknownItems;
+    prow.unknownPremiumCount += unknownPremium;
     prow.premiumCents += premium;
     byProductMap.set(product, prow);
 
@@ -156,11 +173,13 @@ function aggregateSoldRows(soldLeads, producers) {
       soldCount: 0,
       itemCount: 0,
       unknownItemsCount: 0,
+      unknownPremiumCount: 0,
       premiumCents: 0,
     };
     vrow.soldCount += 1;
     vrow.itemCount += items;
     vrow.unknownItemsCount += unknownItems;
+    vrow.unknownPremiumCount += unknownPremium;
     vrow.premiumCents += premium;
     byVendorMap.set(vendorKey, vrow);
 
@@ -168,10 +187,11 @@ function aggregateSoldRows(soldLeads, producers) {
     // sale from any other source buckets under an honest "Unknown" row
     // rather than being dropped or fabricated.
     const zipKey = lead.zip || 'Unknown';
-    const zrow = byZipMap.get(zipKey) || { zip: zipKey, soldCount: 0, itemCount: 0, unknownItemsCount: 0, premiumCents: 0 };
+    const zrow = byZipMap.get(zipKey) || { zip: zipKey, soldCount: 0, itemCount: 0, unknownItemsCount: 0, unknownPremiumCount: 0, premiumCents: 0 };
     zrow.soldCount += 1;
     zrow.itemCount += items;
     zrow.unknownItemsCount += unknownItems;
+    zrow.unknownPremiumCount += unknownPremium;
     zrow.premiumCents += premium;
     byZipMap.set(zipKey, zrow);
   }
@@ -188,6 +208,7 @@ function aggregateSoldRows(soldLeads, producers) {
       soldCount: soldLeads.length,
       itemCount: soldLeads.reduce((sum, l) => sum + itemContribution(l), 0),
       unknownItemsCount: soldLeads.reduce((sum, l) => sum + isUnknownItems(l), 0),
+      unknownPremiumCount: soldLeads.reduce((sum, l) => sum + isUnknownPremium(l), 0),
       premiumCents: soldLeads.reduce((sum, l) => sum + (l.salePremiumCents || 0), 0),
     },
     byProducer,

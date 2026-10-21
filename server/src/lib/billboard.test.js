@@ -111,8 +111,12 @@ before(async () => {
   await makeSale(producerAId, 'AUTO', 20000, recordDate, 1);
   await makeSale(producerBId, 'HOME', 30000, recordDate, 2);
 
-  // A zero-premium and a null-premium "sold" row — must never count
-  // toward soldCount/premiumCents/itemCount anywhere.
+  // A zero-premium and a null-premium "sold" row — both still count
+  // toward soldCount/itemCount (a logged sale counts the moment it's
+  // logged, premium or not) and both contribute $0 to premiumCents, but
+  // only the null one (premium never entered yet) is flagged via
+  // unknownPremiumCount — an explicit $0 is a deliberate, known value,
+  // same distinction already applied to items.
   await makeSale(producerBId, 'HOME', 0, recordDate);
   await makeSale(producerBId, 'HOME', null, recordDate);
 });
@@ -120,20 +124,26 @@ before(async () => {
 test('computeBillboard: aggregates real sold leads by producer and by product', async () => {
   const result = await computeBillboard({ agencyId, granularity: 'month', from: new Date('2026-06-01'), to: new Date('2026-07-01') });
 
-  assert.equal(result.totals.soldCount, 3);
-  assert.equal(result.totals.premiumCents, 60000);
-  assert.equal(result.totals.itemCount, 3 + 1 + 2, 'items sum across all 3 real sold rows, never conflated with row count');
+  // 5 real rows: the zero-premium and null-premium sales from the fixture
+  // now count too (a logged sale counts the moment it's logged, premium
+  // or not) — only the null one is flagged via unknownPremiumCount.
+  assert.equal(result.totals.soldCount, 5);
+  assert.equal(result.totals.premiumCents, 60000, 'the $0/null rows contribute nothing to the dollar total, even though they now count as sold');
+  assert.equal(result.totals.itemCount, 3 + 1 + 2 + 1 + 1, 'items sum across all 5 real sold rows, never conflated with row count');
   assert.equal(result.totals.unknownItemsCount, 0, 'every row in this fixture has a known items figure');
+  assert.equal(result.totals.unknownPremiumCount, 1, 'only the null-premium row is flagged — the explicit $0 one is a known, deliberate value');
 
   const rowA = result.byProducer.find((r) => r.userId === producerAId);
   assert.equal(rowA.soldCount, 2);
   assert.equal(rowA.premiumCents, 30000);
   assert.equal(rowA.itemCount, 4, '3 items (historical) + 1 item (sale)');
+  assert.equal(rowA.unknownPremiumCount, 0);
 
   const rowB = result.byProducer.find((r) => r.userId === producerBId);
-  assert.equal(rowB.soldCount, 1);
+  assert.equal(rowB.soldCount, 3, 'the $300 HOME sale plus the $0 and null-premium HOME sales');
   assert.equal(rowB.premiumCents, 30000);
-  assert.equal(rowB.itemCount, 2);
+  assert.equal(rowB.itemCount, 4, '2 items (real sale) + 1 + 1 (default items on the other two)');
+  assert.equal(rowB.unknownPremiumCount, 1);
 
   // Sorted by premium descending — A and B are tied with producers'
   // relative product totals, so check product rows directly instead.
@@ -143,9 +153,10 @@ test('computeBillboard: aggregates real sold leads by producer and by product', 
   assert.equal(auto.itemCount, 4);
 
   const home = result.byProduct.find((p) => p.product === PRODUCT_LABELS.HOME);
-  assert.equal(home.soldCount, 1);
+  assert.equal(home.soldCount, 3);
   assert.equal(home.premiumCents, 30000);
-  assert.equal(home.itemCount, 2);
+  assert.equal(home.itemCount, 4);
+  assert.equal(home.unknownPremiumCount, 1);
 
   const vendorRow = result.byVendor.find((v) => v.vendorId === vendorId);
   assert.equal(vendorRow.soldCount, 1);
@@ -154,16 +165,17 @@ test('computeBillboard: aggregates real sold leads by producer and by product', 
 
   const directRow = result.byVendor.find((v) => v.vendorId === null);
   assert.equal(directRow.vendorName, 'Direct / No Vendor');
-  assert.equal(directRow.soldCount, 2);
+  assert.equal(directRow.soldCount, 4, '1 producer-A sale + 3 producer-B sales (real, $0, and null-premium), all standalone');
   assert.equal(directRow.premiumCents, 50000);
-  assert.equal(directRow.itemCount, 3, '1 item (producer A sale) + 2 items (producer B sale)');
+  assert.equal(directRow.itemCount, 5, '1 item (producer A sale) + 2 + 1 + 1 items (producer B sales)');
+  assert.equal(directRow.unknownPremiumCount, 1);
 
   const zipRow = result.byZip.find((z) => z.zip === '90210');
   assert.equal(zipRow.soldCount, 1);
   assert.equal(zipRow.premiumCents, 10000);
 
   const unknownZipRow = result.byZip.find((z) => z.zip === 'Unknown');
-  assert.equal(unknownZipRow.soldCount, 2);
+  assert.equal(unknownZipRow.soldCount, 4);
   assert.equal(unknownZipRow.premiumCents, 50000);
 
   // Every active producer must appear, zero-filled when they have no
@@ -301,18 +313,29 @@ test('computeBillboardPeriod: all_years shows a separate zero-filled total for e
   assert.equal(y2026.premiumCents, 5000 + 7000 + 3000 + 4000);
 });
 
-test('computeBillboardPeriod: zero-premium SOLD rows never count toward any period\'s totals', async () => {
-  const customer = await prisma.customer.create({ data: { firstName: 'Zero', lastName: 'Premium' } });
+test('computeBillboardPeriod: a $0 or null-premium SOLD row still counts toward soldCount, contributes nothing to premiumCents, and only the null one is flagged as missing premium', async () => {
+  const zeroCustomer = await prisma.customer.create({ data: { firstName: 'Zero', lastName: 'Premium' } });
   await prisma.sale.create({
     data: {
-      agencyId: periodAgencyId, customerId: customer.id, firstName: 'Zero', lastName: 'Premium',
+      agencyId: periodAgencyId, customerId: zeroCustomer.id, firstName: 'Zero', lastName: 'Premium',
       saleDate: new Date('2026-09-30'), carrier: 'Test', policyType: 'Standard', productFamily: 'AUTO',
       premiumCents: 0, assignedToId: periodProducerId, createdById: periodOwnerId,
     },
   });
+  const nullCustomer = await prisma.customer.create({ data: { firstName: 'Null', lastName: 'Premium' } });
+  await prisma.sale.create({
+    data: {
+      agencyId: periodAgencyId, customerId: nullCustomer.id, firstName: 'Null', lastName: 'Premium',
+      saleDate: new Date('2026-09-30'), carrier: 'Test', policyType: 'Standard', productFamily: 'AUTO',
+      premiumCents: null, assignedToId: periodProducerId, createdById: periodOwnerId,
+    },
+  });
   const result = await computeBillboardPeriod({ agencyId: periodAgencyId, period: 'week', now: PERIOD_NOW });
-  assert.equal(result.totals.soldCount, 1, 'the new $0 row must not inflate the week total');
-  assert.equal(result.totals.premiumCents, 5000);
+  // Baseline week total is 1 real $5000 sale (the suite-level fixture's
+  // Sep 30 sale) — both new rows must still count as sold, premium or not.
+  assert.equal(result.totals.soldCount, 3, 'both the $0 and null-premium rows count as real sold production');
+  assert.equal(result.totals.premiumCents, 5000, 'neither new row adds anything to the dollar total');
+  assert.equal(result.totals.unknownPremiumCount, 1, 'only the null-premium row (premium never entered) is flagged — the explicit $0 is a known value');
 });
 
 test('computeBillboardPeriod: the Oct 8 15:17:58 UTC snapshot discrepancy is fixed — a UTC-midnight-encoded business date lands in the correct Eastern period, not the prior day', async () => {

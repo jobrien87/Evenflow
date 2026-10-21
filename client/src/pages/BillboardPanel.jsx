@@ -224,7 +224,11 @@ export default function BillboardPanel() {
           value={data.totals.itemCount}
           sub={data.totals.unknownItemsCount > 0 ? `${data.totals.unknownItemsCount} unknown — needs reconciliation` : undefined}
         />
-        <StatTile label="Premium Total" value={money(data.totals.premiumCents)} />
+        <StatTile
+          label="Premium Total"
+          value={money(data.totals.premiumCents)}
+          sub={data.totals.unknownPremiumCount > 0 ? `${data.totals.unknownPremiumCount} missing premium — needs reconciliation` : undefined}
+        />
       </div>
 
       {showTrend && (
@@ -243,6 +247,7 @@ export default function BillboardPanel() {
             { key: 'soldCount', label: 'Policies Sold' },
             { key: 'itemCount', label: 'Items' },
             { key: 'unknownItemsCount', label: 'Unknown Items' },
+            { key: 'unknownPremiumCount', label: 'Unknown Premium' },
             { key: (r) => (r.premiumCents / 100).toFixed(2), label: 'Premium ($)' },
           ])} />
         </div>
@@ -299,6 +304,7 @@ export default function BillboardPanel() {
               { key: 'soldCount', label: 'Policies Sold' },
               { key: 'itemCount', label: 'Items' },
               { key: 'unknownItemsCount', label: 'Unknown Items' },
+              { key: 'unknownPremiumCount', label: 'Unknown Premium' },
               { key: (r) => (r.premiumCents / 100).toFixed(2), label: 'Premium ($)' },
             ])} />
           </span>
@@ -326,6 +332,7 @@ export default function BillboardPanel() {
             { key: 'soldCount', label: 'Policies Sold' },
             { key: 'itemCount', label: 'Items' },
             { key: 'unknownItemsCount', label: 'Unknown Items' },
+            { key: 'unknownPremiumCount', label: 'Unknown Premium' },
             { key: (r) => (r.premiumCents / 100).toFixed(2), label: 'Premium ($)' },
           ])} />
         </div>
