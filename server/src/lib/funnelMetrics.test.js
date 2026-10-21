@@ -41,27 +41,29 @@ before(async () => {
   // be EXCLUDED from the speed sample, but still counted toward
   // contactRate (ordinary real-time CRM activity, just not vendor-API).
   await makeLead({ vendorId: null, source: 'manual', assignedAt, firstAttemptAt: fastAttemptAt, firstContactAt: fastAttemptAt });
-});
 
-let batchId;
-
-before(async () => {
+  // A second, separate top-level before() hook here previously read this
+  // same `agencyId` right after it was assigned above — node:test does not
+  // guarantee multiple top-level before() hooks in one file run strictly
+  // sequentially, so that one intermittently started before this one's
+  // assignment landed (agencyId: undefined), passing silently through
+  // User.agencyId (optional) and only exploding on the required
+  // LeadImportBatch.agencyId. Kept as one hook so there's no boundary left
+  // to race across.
   const uploader = await prisma.user.create({
     data: { agencyId, email: `funnel-uploader-${suffix}@test.local`, passwordHash: 'x', firstName: 'Up', lastName: 'Loader', role: 'AGENCY_OWNER', status: 'ACTIVE' },
   });
   const batch = await prisma.leadImportBatch.create({
     data: { agencyId, uploadedById: uploader.id, totalRows: 1, created: 1, skipped: 0 },
   });
-  batchId = batch.id;
 
-  const assignedAt = new Date('2026-01-01T00:00:00Z');
   const customer = await prisma.customer.create({ data: { firstName: 'Bulk', lastName: 'Upload' } });
   // A real bulk-imported row, even one that was round-robin-assigned and
   // contacted/quoted/sold for real (none of that should matter) — it must
   // never count toward any rate below, the whole point of this fixture.
   await prisma.lead.create({
     data: {
-      agencyId, customerId: customer.id, status: 'SOLD', source: 'bulk_upload', importBatchId: batchId,
+      agencyId, customerId: customer.id, status: 'SOLD', source: 'bulk_upload', importBatchId: batch.id,
       assignedAt, firstContactAt: assignedAt, receivedAt: assignedAt,
     },
   });
