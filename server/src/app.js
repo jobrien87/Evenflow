@@ -45,6 +45,7 @@ const rosterRoutes = require('./routes/roster');
 const salesRoutes = require('./routes/sales');
 const hrRoutes = require('./routes/hr');
 const emailWebhookRoutes = require('./routes/emailWebhook');
+const boberdooDeliveryRoutes = require('./routes/boberdooDelivery');
 
 const app = express();
 
@@ -63,6 +64,17 @@ app.use(
 app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), (req, res) => {
   billingRoutes.handleStripeWebhook(req, res);
 });
+// Boberdoo's HTTP-Post lead delivery may send form-encoded or JSON bodies
+// (its exact behavior was never confirmed against a real delivery before
+// this shipped — see routes/boberdooDelivery.js) — parse both here,
+// mounted ahead of the app-wide express.json() below, rather than assume
+// the app-wide JSON-only parser will always be right.
+app.use(
+  '/api/webhooks/boberdoo',
+  express.urlencoded({ extended: true, limit: '256kb' }),
+  express.json({ limit: '256kb' }),
+  boberdooDeliveryRoutes
+);
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
