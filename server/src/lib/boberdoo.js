@@ -82,10 +82,15 @@ async function callAction(action, params = {}) {
 
 // createNewPartner — docs §3 "Partners". Required fields per the docs:
 // Login (email), Company_Name, First_Name, Last_Name, Address, City,
-// State, Country, Zip, Phone, Lead_Email, Delivery_Option.
-async function createPartner({ login, companyName, firstName, lastName, address, city, state, zip, phone, leadEmail, deliveryOption = 0, country = 'United States' }) {
+// State, Country, Zip, Phone, Lead_Email, Delivery_Option. Confirmed
+// against a real account (2026-10-22): Password is also required even
+// though the docs page didn't list it — see provisionPartner's comment
+// for why this is always a discarded, auto-generated value rather than
+// something a Partner ever logs in with.
+async function createPartner({ login, companyName, firstName, lastName, address, city, state, zip, phone, leadEmail, password, deliveryOption = 0, country = 'United States' }) {
   const result = await callAction('createNewPartner', {
     Login: login,
+    Password: password,
     Company_Name: companyName,
     First_Name: firstName,
     Last_Name: lastName,
@@ -101,8 +106,13 @@ async function createPartner({ login, companyName, firstName, lastName, address,
   if (!result.success) return result;
   // The docs don't pin down the exact response key name for the new id
   // (varies by endpoint version) — check the documented aliases defensively
-  // rather than assuming one.
-  const partnerId = result.data.partner_id || result.data.Partner_ID || result.data.id;
+  // rather than assuming one. Confirmed against a real account
+  // (2026-10-22): Boberdoo returns this as a JSON number, not a string —
+  // every ID this client hands back is coerced to a string so it matches
+  // the String columns (RecordStoreSubscription.boberdooFilterSetId,
+  // Agency.boberdooPartnerId) it ultimately gets written into.
+  const rawPartnerId = result.data.partner_id ?? result.data.Partner_ID ?? result.data.id;
+  const partnerId = rawPartnerId === undefined || rawPartnerId === null ? null : String(rawPartnerId);
   return { ...result, partnerId };
 }
 
@@ -144,7 +154,8 @@ async function setPartnerStatus(partnerId, status, statusReason = '') {
 async function createFilterSet(partnerId, templateFields = {}) {
   const result = await callAction('insertUpdateFilterSet', { Partner_ID: partnerId, ...templateFields });
   if (!result.success) return result;
-  const filterSetId = result.data.filter_set_ID || result.data.Filter_Set_ID || result.data.id;
+  const rawFilterSetId = result.data.filter_set_ID ?? result.data.Filter_Set_ID ?? result.data.id;
+  const filterSetId = rawFilterSetId === undefined || rawFilterSetId === null ? null : String(rawFilterSetId);
   return { ...result, filterSetId };
 }
 
@@ -184,7 +195,8 @@ async function updateFilterSetDailyVolume(filterSetId, dailyVolume, { volumeFiel
 async function createIprFilterSet(partnerId, fields = {}) {
   const result = await callAction('iprInsertFilterSet', { Partner_ID: partnerId, ...fields });
   if (!result.success) return result;
-  const filterSetId = result.data.filter_set_ID || result.data.Filter_Set_ID || result.data.id;
+  const rawFilterSetId = result.data.filter_set_ID ?? result.data.Filter_Set_ID ?? result.data.id;
+  const filterSetId = rawFilterSetId === undefined || rawFilterSetId === null ? null : String(rawFilterSetId);
   return { ...result, filterSetId };
 }
 

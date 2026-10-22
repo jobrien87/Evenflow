@@ -14,6 +14,7 @@
 // this module never silently overwrites local state to match a guess —
 // it records the disagreement (boberdooSyncError) and leaves the customer-
 // facing status exactly where it was before the attempt.
+const crypto = require('crypto');
 const { prisma } = require('./db');
 const boberdoo = require('./boberdoo');
 const { recordAudit } = require('./audit');
@@ -116,8 +117,14 @@ async function provisionPartner(agency, owner, correlationId) {
     return { success: false, errorCode: 'NOT_CONFIGURED', errorMessage: 'Boberdoo is not configured.' };
   }
 
+  // Boberdoo requires a Password on createNewPartner (confirmed against a
+  // real account 2026-10-22 — not in the docs' own field list). Nothing in
+  // EvenFlow ever logs into Boberdoo's portal as this Partner — every real
+  // interaction goes through the API key — so this is generated fresh and
+  // immediately discarded, never stored or logged.
   const result = await boberdoo.createPartner({
     login: owner.email,
+    password: crypto.randomBytes(18).toString('base64'),
     companyName: agency.name,
     firstName: owner.firstName,
     lastName: owner.lastName,
