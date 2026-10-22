@@ -162,10 +162,19 @@ export default function RecordStoreAdminPanel() {
   }
 
   async function submitLink() {
-    setBusyId(linkForm.agencyId);
+    const { agencyId, partnerId } = linkForm;
+    setBusyId(agencyId);
     try {
-      await api.linkBoberdooPartner(linkForm.agencyId, linkForm.partnerId);
+      const res = await api.linkBoberdooPartner(agencyId, partnerId);
       setLinkForm(null);
+      // Surface whatever the lead exchange actually knows about this
+      // Partner ID so a guessed ID gets caught here, before it's trusted
+      // for anything real (importing a filter set, routing leads) — never
+      // silently assume a successful link means it's the right account.
+      const info = res.partnerInfo || {};
+      const summary = info.Company_Name || info.company_name || info.Login || info.login
+        || (Object.keys(info).length ? JSON.stringify(info) : 'no details returned');
+      setStatus(`Linked Partner ${partnerId} — the lead exchange reports: ${summary}. Confirm this is really the right account before importing any filter sets.`);
       await load();
     } catch (err) {
       setStatus(err.data?.message || 'Could not link that Partner ID.');
