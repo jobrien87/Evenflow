@@ -10,15 +10,10 @@ const { countSales, salesByAgent, salesByVendor } = require('../lib/manualSaleAg
 const { eligibleProducersWhere } = require('../lib/eligibleProducersQuery');
 const { QUOTED_OR_BEYOND_STATUSES } = require('../lib/leadStatusGroups');
 const { scoreToGrade } = require('../lib/flowScore');
+const { resolveAgencyDateRange } = require('../lib/dateRangeRequest');
 
 const router = express.Router();
 router.use(requireAuth);
-
-function parseDateRange(req) {
-  const to = req.query.to ? new Date(req.query.to) : new Date();
-  const from = req.query.from ? new Date(req.query.from) : new Date(to.getFullYear(), to.getMonth(), 1);
-  return { from, to };
-}
 
 function scopedAgencyId(req) {
   if (req.user.role === 'PLATFORM_OWNER') return req.query.agencyId || undefined;
@@ -28,12 +23,12 @@ function scopedAgencyId(req) {
 router.get('/summary', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req, res, next) => {
   try {
     const agencyId = scopedAgencyId(req);
-    const { from, to } = parseDateRange(req);
     if (req.user.role !== 'PLATFORM_OWNER' && !agencyId) {
       return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
     }
+    const { from, to } = await resolveAgencyDateRange(req, agencyId);
 
-    const whereBase = { occurredAt: { gte: from, lte: to }, ...(agencyId ? { agencyId } : {}) };
+    const whereBase = { occurredAt: { gte: from, lt: to }, ...(agencyId ? { agencyId } : {}) };
 
     // Lead reaching SOLD (whole-lead or per-product) is a queue/pipeline
     // disposition only and is never counted here — the real production
@@ -94,7 +89,7 @@ router.get('/by-vendor', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (r
     if (!agencyId) {
       return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
     }
-    const { from, to } = parseDateRange(req);
+    const { from, to } = await resolveAgencyDateRange(req, agencyId);
     const [vendors, saleRows] = await Promise.all([
       prisma.vendor.findMany({ where: { agencyId } }),
       salesByVendor({ agencyId, from, to }),
@@ -104,8 +99,8 @@ router.get('/by-vendor', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (r
     const rows = await Promise.all(
       vendors.map(async (v) => {
         const [costAgg, leads] = await Promise.all([
-          prisma.costEvent.aggregate({ where: { vendorId: v.id, occurredAt: { gte: from, lte: to } }, _sum: { amountCents: true } }),
-          prisma.lead.findMany({ where: { vendorId: v.id, createdAt: { gte: from, lte: to } }, select: { status: true } }),
+          prisma.costEvent.aggregate({ where: { vendorId: v.id, occurredAt: { gte: from, lt: to } }, _sum: { amountCents: true } }),
+          prisma.lead.findMany({ where: { vendorId: v.id, createdAt: { gte: from, lt: to } }, select: { status: true } }),
         ]);
         const costCents = costAgg._sum.amountCents || 0;
         const leadCount = leads.length;
@@ -171,7 +166,7 @@ router.get('/by-agent', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER'
     if (!agencyId) {
       return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
     }
-    const { from, to } = parseDateRange(req);
+    const { from, to } = await resolveAgencyDateRange(req, agencyId);
     const [producers, manualSaleRows] = await Promise.all([
       // Active PRODUCER or selling AGENCY_MANAGER — an eligible manager
       // (e.g. one who carries her own book of business) must retain her
@@ -188,7 +183,7 @@ router.get('/by-agent', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER'
     const rows = await Promise.all(
       producers.map(async (p) => {
         const [leads, scoreSnapshot] = await Promise.all([
-          prisma.lead.findMany({ where: { assignedToId: p.id, receivedAt: { gte: from, lte: to } }, select: { status: true } }),
+          prisma.lead.findMany({ where: { assignedToId: p.id, receivedAt: { gte: from, lt: to } }, select: { status: true } }),
           prisma.flowScoreSnapshot.findFirst({ where: { subjectType: 'USER', subjectId: p.id }, orderBy: { computedAt: 'desc' }, select: { score: true } }),
         ]);
         const leadCount = leads.length;
@@ -216,18 +211,32 @@ router.get('/by-agent', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER'
       })
     );
 
-    // A Sale assigned to a producer who's since left/been deactivated —
-    // kept visible so the agency-wide total still reconciles rather than
-    // silently vanishing.
+    // A Sale assigned to someone outside the active-roster query above
+    // (deactivated, still invited, or a role eligibleProducersWhere
+    // doesn't include, e.g. an AGENCY_OWNER who occasionally logs one —
+    // sales.js's create route places no role restriction on assignedToId)
+    // gets its own real, named row here, same as Billboard's own
+    // aggregateSoldRows already does for the identical case — never
+    // folded into one anonymous bucket, which is how a real sale can look
+    // like it "disappeared" from this view while still showing correctly
+    // everywhere else.
     const unmatchedSales = manualSaleRows.filter((s) => !matchedIds.has(s.userId));
-    const unattributedSalesCount = unmatchedSales.reduce((sum, s) => sum + s.count, 0);
-    const unattributedSalesPremium = unmatchedSales.reduce((sum, s) => sum + s.premiumCents, 0);
-    if (unattributedSalesCount > 0) {
-      rows.push({
-        userId: null, firstName: 'Manual Sales', lastName: '(unattributed)',
-        leadsAssigned: null, salesCount: unattributedSalesCount, revenue: unattributedSalesPremium / 100,
-        conversionRate: null, flowScore: null, flowScoreGrade: null,
+    if (unmatchedSales.length > 0) {
+      const unmatchedUsers = await prisma.user.findMany({
+        where: { id: { in: unmatchedSales.map((s) => s.userId) } },
+        select: { id: true, firstName: true, lastName: true },
       });
+      const unmatchedUserById = new Map(unmatchedUsers.map((u) => [u.id, u]));
+      for (const s of unmatchedSales) {
+        const u = unmatchedUserById.get(s.userId);
+        rows.push({
+          userId: s.userId,
+          firstName: u?.firstName || 'Former',
+          lastName: u?.lastName || 'Producer',
+          leadsAssigned: null, salesCount: s.count, revenue: s.premiumCents / 100,
+          conversionRate: null, flowScore: null, flowScoreGrade: null,
+        });
+      }
     }
 
     return res.json({ success: true, period: { from: from.toISOString(), to: to.toISOString() }, agents: rows });
@@ -292,11 +301,11 @@ router.get('/events', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async (req,
     if (req.user.role !== 'PLATFORM_OWNER' && !agencyId) {
       return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
     }
-    const { from, to } = parseDateRange(req);
+    const { from, to } = await resolveAgencyDateRange(req, agencyId);
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const pageSize = Math.min(Math.max(parseInt(req.query.pageSize, 10) || 50, 1), 200);
 
-    const whereBase = { occurredAt: { gte: from, lte: to }, ...(agencyId ? { agencyId } : {}) };
+    const whereBase = { occurredAt: { gte: from, lt: to }, ...(agencyId ? { agencyId } : {}) };
 
     const [revenueEvents, costEvents] = await Promise.all([
       prisma.revenueEvent.findMany({ where: whereBase, orderBy: { occurredAt: 'desc' } }),
