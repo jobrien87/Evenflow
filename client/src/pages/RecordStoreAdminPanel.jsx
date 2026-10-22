@@ -22,6 +22,10 @@ export default function RecordStoreAdminPanel() {
   const [agencies, setAgencies] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [customRequests, setCustomRequests] = useState([]);
+  const [platformSettings, setPlatformSettings] = useState(null);
+  const [settingsForm, setSettingsForm] = useState(null);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsError, setSettingsError] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [expandedId, setExpandedId] = useState(null);
@@ -39,18 +43,43 @@ export default function RecordStoreAdminPanel() {
   async function load() {
     setLoadError('');
     try {
-      const [customersRes, templatesRes, customRequestsRes] = await Promise.all([
+      const [customersRes, templatesRes, customRequestsRes, settingsRes] = await Promise.all([
         api.adminRecordStoreCustomers(),
         api.adminRecordStoreTemplates(),
         api.adminCustomRequests(),
+        api.recordStorePlatformSettings(),
       ]);
       setAgencies(customersRes.agencies);
       setTemplates(templatesRes.templates);
       setCustomRequests(customRequestsRes.requests);
+      setPlatformSettings(settingsRes.settings);
+      if (!settingsForm) {
+        setSettingsForm({
+          lowBalanceThreshold: centsToDollarInput(settingsRes.settings.lowBalanceThresholdCents),
+          topUpTarget: centsToDollarInput(settingsRes.settings.topUpTargetCents),
+        });
+      }
     } catch (err) {
       setLoadError(err.data?.message || 'Could not load Record Store admin data.');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function saveSettings(e) {
+    e.preventDefault();
+    setSettingsError('');
+    setSavingSettings(true);
+    try {
+      const res = await api.updateRecordStorePlatformSettings({
+        lowBalanceThresholdCents: dollarsToCents(settingsForm.lowBalanceThreshold),
+        topUpTargetCents: dollarsToCents(settingsForm.topUpTarget),
+      });
+      setPlatformSettings(res.settings);
+    } catch (err) {
+      setSettingsError(err.data?.message || 'Could not save these settings.');
+    } finally {
+      setSavingSettings(false);
     }
   }
 
@@ -191,6 +220,28 @@ export default function RecordStoreAdminPanel() {
       </div>
 
       {status && <div style={s.status}>{status}<Button variant="ghost" size="sm" onClick={() => setStatus('')} style={{ marginLeft: 10 }}>DISMISS</Button></div>}
+
+      <section style={s.section}>
+        <SectionHeader>LOW-BALANCE GATE</SectionHeader>
+        <Card>
+          <div style={s.subLine}>
+            Once an agency has funded their account once, adding a lead type they don't already hold never requires a fresh deposit — unless their real Boberdoo balance has dropped below the threshold below, in which case they must top up past the target before the order is allowed.
+          </div>
+          {settingsForm && (
+            <form onSubmit={saveSettings} style={{ ...s.form, marginTop: 12 }}>
+              <div style={s.row3}>
+                <label style={s.fieldLabel}>Low-balance threshold ($)<input style={s.input} type="number" step="0.01" min="0" value={settingsForm.lowBalanceThreshold} onChange={(e) => setSettingsForm({ ...settingsForm, lowBalanceThreshold: e.target.value })} /></label>
+                <label style={s.fieldLabel}>Required top-up target ($)<input style={s.input} type="number" step="0.01" min="0" value={settingsForm.topUpTarget} onChange={(e) => setSettingsForm({ ...settingsForm, topUpTarget: e.target.value })} /></label>
+              </div>
+              {settingsError && <div style={s.error}>{settingsError}</div>}
+              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                <Button variant="primary" type="submit" disabled={savingSettings}>{savingSettings ? 'Saving…' : 'SAVE'}</Button>
+                {platformSettings?.updatedAt && <span style={s.subLine}>Last updated {new Date(platformSettings.updatedAt).toLocaleString()}</span>}
+              </div>
+            </form>
+          )}
+        </Card>
+      </section>
 
       <section style={s.section}>
         <SectionHeader>CUSTOMERS</SectionHeader>

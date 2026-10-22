@@ -2983,6 +2983,23 @@ model BreakRoomPlatformSettings {
   updatedAt                DateTime @updatedAt
 }
 
+// Singleton, same convention as BreakRoomPlatformSettings above — one row,
+// Platform-Owner-editable via Record Store's own admin settings route,
+// never a per-agency or per-template override. Governs whether an
+// already-funded agency (recordStoreDepositConfirmedAt is set) can add a
+// product for a lead type they don't currently have an active
+// subscription for without topping up first. Never applies to an
+// agency's first-ever product — that always goes through the existing
+// minimum-deposit flow unchanged.
+model RecordStorePlatformSettings {
+  id                       String   @id @default("singleton")
+  // Below this real Boberdoo balance, adding another lead type is blocked.
+  lowBalanceThresholdCents Int      @default(25000) // $250
+  // The balance a top-up must reach before the blocked order can proceed.
+  topUpTargetCents         Int      @default(50000) // $500
+  updatedAt                DateTime @updatedAt
+}
+
 // ======================================================================
 // BACKSTAGE HR — Phase 1 Part A: Foundation
 // ======================================================================

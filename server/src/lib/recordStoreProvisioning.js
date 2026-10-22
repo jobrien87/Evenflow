@@ -63,6 +63,39 @@ async function listSources(boberdooTypeId) {
   return { success: true, sources: FALLBACK_SOURCES, live: false };
 }
 
+// ---- Low-balance gate for an additional product --------------------
+// An agency's very FIRST-EVER Record Store product always goes through
+// the existing minimum-deposit flow unchanged (agency.
+// recordStoreDepositConfirmedAt is null, so this returns ok immediately).
+// Once an agency has funded at least once, adding a product for a lead
+// type they don't currently hold is gated on their real, current
+// Boberdoo balance rather than requiring a fresh deposit every time —
+// but only while that balance stays healthy. Thresholds are a Platform-
+// Owner-editable singleton (RecordStorePlatformSettings), never
+// hardcoded, since these are real business numbers that can change.
+async function checkBalanceForAdditionalProduct(agency) {
+  if (!agency.recordStoreDepositConfirmedAt) return { ok: true };
+
+  const settings = await prisma.recordStorePlatformSettings.findUnique({ where: { id: 'singleton' } });
+  const lowBalanceThresholdCents = settings?.lowBalanceThresholdCents ?? 25000;
+  const topUpTargetCents = settings?.topUpTargetCents ?? 50000;
+
+  const balanceResult = await boberdoo.getPartnerBalance(agency.boberdooPartnerId);
+  if (!balanceResult.success) {
+    return { ok: false, errorCode: 'BALANCE_CHECK_FAILED', errorMessage: 'Could not verify your current balance. Please try again shortly.' };
+  }
+  const currentBalanceCents = balanceResult.totalBalanceCents ?? balanceResult.balanceCents ?? 0;
+  if (currentBalanceCents >= lowBalanceThresholdCents) return { ok: true };
+
+  return {
+    ok: false,
+    errorCode: 'LOW_BALANCE',
+    errorMessage: `Your balance is below $${(lowBalanceThresholdCents / 100).toFixed(2)}. Add funds to bring it above $${(topUpTargetCents / 100).toFixed(2)} before adding another lead type.`,
+    currentBalanceCents,
+    requiredBalanceCents: topUpTargetCents,
+  };
+}
+
 async function createOrder({ agencyId, template, dailyVolume, userId, ringToPhone, maxConcurrentCalls }) {
   const volume = Math.max(template.minimumDailyVolume, Math.min(template.maximumDailyVolume, Math.round(dailyVolume)));
 
@@ -742,6 +775,7 @@ module.exports = {
   FRIENDLY_ERROR,
   refreshAgencyBalance,
   listSources,
+  checkBalanceForAdditionalProduct,
   createOrder,
   createSubscriptionFromQuote,
   provisionSubscription,

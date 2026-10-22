@@ -515,6 +515,60 @@ test('createSubscriptionFromQuote creates a priced, provisionable subscription f
   await prisma.recordStoreTemplate.delete({ where: { id: customTemplate.id } });
 });
 
+// ---- Low-balance gate -------------------------------------------------
+
+test('checkBalanceForAdditionalProduct always allows an agency\'s first-ever product, even with a failing/low balance check', async () => {
+  boberdoo.getPartnerBalance = async () => ({ success: false, errorCode: 'PROVIDER_ERROR' });
+  const agency = await prisma.agency.findUnique({ where: { id: agencyId } });
+  assert.equal(agency.recordStoreDepositConfirmedAt, null, 'precondition: never funded before');
+  const result = await provisioning.checkBalanceForAdditionalProduct(agency);
+  assert.equal(result.ok, true, 'a real Boberdoo call must never even be consulted for a first-ever product');
+});
+
+test('checkBalanceForAdditionalProduct blocks an already-funded agency below the default $250 threshold', async () => {
+  boberdoo.getPartnerBalance = async () => ({ success: true, balanceCents: 10000, totalBalanceCents: 10000 });
+  await prisma.agency.update({ where: { id: agencyId }, data: { recordStoreDepositConfirmedAt: new Date() } });
+  const agency = await prisma.agency.findUnique({ where: { id: agencyId } });
+  const result = await provisioning.checkBalanceForAdditionalProduct(agency);
+  assert.equal(result.ok, false);
+  assert.equal(result.errorCode, 'LOW_BALANCE');
+  assert.equal(result.currentBalanceCents, 10000);
+  assert.equal(result.requiredBalanceCents, 50000);
+});
+
+test('checkBalanceForAdditionalProduct allows an already-funded agency at or above the threshold', async () => {
+  boberdoo.getPartnerBalance = async () => ({ success: true, balanceCents: 25000, totalBalanceCents: 25000 });
+  await prisma.agency.update({ where: { id: agencyId }, data: { recordStoreDepositConfirmedAt: new Date() } });
+  const agency = await prisma.agency.findUnique({ where: { id: agencyId } });
+  const result = await provisioning.checkBalanceForAdditionalProduct(agency);
+  assert.equal(result.ok, true, 'exactly at the threshold must pass (>=, not >)');
+});
+
+test('checkBalanceForAdditionalProduct respects admin-configured thresholds over the defaults', async () => {
+  boberdoo.getPartnerBalance = async () => ({ success: true, balanceCents: 40000, totalBalanceCents: 40000 });
+  await prisma.agency.update({ where: { id: agencyId }, data: { recordStoreDepositConfirmedAt: new Date() } });
+  await prisma.recordStorePlatformSettings.upsert({
+    where: { id: 'singleton' },
+    create: { id: 'singleton', lowBalanceThresholdCents: 50000, topUpTargetCents: 100000 },
+    update: { lowBalanceThresholdCents: 50000, topUpTargetCents: 100000 },
+  });
+  const agency = await prisma.agency.findUnique({ where: { id: agencyId } });
+  const result = await provisioning.checkBalanceForAdditionalProduct(agency);
+  // $400 would clear the $250 default but not a $500 configured threshold.
+  assert.equal(result.ok, false);
+  assert.equal(result.requiredBalanceCents, 100000);
+  await prisma.recordStorePlatformSettings.delete({ where: { id: 'singleton' } });
+});
+
+test('checkBalanceForAdditionalProduct surfaces an honest error if the real balance can\'t be read, never silently allows or blocks', async () => {
+  boberdoo.getPartnerBalance = async () => ({ success: false, errorCode: 'NETWORK_ERROR' });
+  await prisma.agency.update({ where: { id: agencyId }, data: { recordStoreDepositConfirmedAt: new Date() } });
+  const agency = await prisma.agency.findUnique({ where: { id: agencyId } });
+  const result = await provisioning.checkBalanceForAdditionalProduct(agency);
+  assert.equal(result.ok, false);
+  assert.equal(result.errorCode, 'BALANCE_CHECK_FAILED');
+});
+
 test('listSources returns the real list when Boberdoo succeeds, and an honest fallback (live: false) when it fails', async () => {
   boberdoo.getVendorsAndSources = async () => ({
     success: true,

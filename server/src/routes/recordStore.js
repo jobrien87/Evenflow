@@ -145,6 +145,18 @@ router.post('/custom-requests/:id/accept', mutationLimiter, requireRole(...AGENC
       return res.status(409).json({ success: false, error: 'NOT_QUOTED', message: 'This request has not been quoted yet.' });
     }
 
+    // Accepting a quote always creates a genuinely new program (never a
+    // re-order of something already held), so the balance gate always
+    // applies here when the agency has funded before.
+    const agency = await prisma.agency.findUnique({ where: { id: request.agencyId } });
+    const balanceCheck = await provisioning.checkBalanceForAdditionalProduct(agency);
+    if (!balanceCheck.ok) {
+      return res.status(409).json({
+        success: false, error: balanceCheck.errorCode, message: balanceCheck.errorMessage,
+        currentBalanceCents: balanceCheck.currentBalanceCents, requiredBalanceCents: balanceCheck.requiredBalanceCents,
+      });
+    }
+
     const template = await prisma.recordStoreTemplate.findFirst({ where: { isCustomBuilder: true } });
     if (!template) return res.status(500).json({ success: false, error: 'NO_CUSTOM_TEMPLATE' });
 
@@ -213,6 +225,26 @@ router.post('/orders', mutationLimiter, requireRole(...AGENCY_ROLES), async (req
     if (!template || !template.active) return res.status(404).json({ success: false, error: 'TEMPLATE_NOT_FOUND' });
     if (!template.wholesalePriceCents) {
       return res.status(409).json({ success: false, error: 'TEMPLATE_NOT_PRICED', message: 'This product is not yet available for purchase.' });
+    }
+
+    // Only a genuinely NEW product (no existing non-cancelled/non-error
+    // subscription for this exact template — the same predicate
+    // createOrder's own dedup check uses) is gated on balance. Re-ordering
+    // something already DRAFT/PENDING/ACTIVE/PAUSED just returns that
+    // existing row below, same as always — no fresh financial commitment,
+    // so nothing to gate.
+    const existingForTemplate = await prisma.recordStoreSubscription.findFirst({
+      where: { agencyId, recordStoreTemplateId: template.id, status: { notIn: ['CANCELLED', 'ERROR'] } },
+    });
+    if (!existingForTemplate) {
+      const agency = await prisma.agency.findUnique({ where: { id: agencyId } });
+      const balanceCheck = await provisioning.checkBalanceForAdditionalProduct(agency);
+      if (!balanceCheck.ok) {
+        return res.status(409).json({
+          success: false, error: balanceCheck.errorCode, message: balanceCheck.errorMessage,
+          currentBalanceCents: balanceCheck.currentBalanceCents, requiredBalanceCents: balanceCheck.requiredBalanceCents,
+        });
+      }
     }
 
     const { subscription, created } = await provisioning.createOrder({
@@ -438,6 +470,43 @@ router.get('/activity', requireRole(...AGENCY_ROLES), async (req, res, next) => 
 // ============================================================================
 // SUPER ADMIN — Record Store control center
 // ============================================================================
+
+// Low-balance gate thresholds — same singleton-settings pattern as
+// routes/breakRoom.js's GET/PATCH /admin/platform-settings.
+router.get('/admin/platform-settings', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const settings = await prisma.recordStorePlatformSettings.findUnique({ where: { id: 'singleton' } });
+    return res.json({ success: true, settings: settings || { id: 'singleton', lowBalanceThresholdCents: 25000, topUpTargetCents: 50000 } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const platformSettingsSchema = z.object({
+  lowBalanceThresholdCents: z.number().int().positive(),
+  topUpTargetCents: z.number().int().positive(),
+}).refine((data) => data.topUpTargetCents > data.lowBalanceThresholdCents, {
+  message: 'The top-up target must be higher than the low-balance threshold.',
+});
+
+router.patch('/admin/platform-settings', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const parsed = platformSettingsSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    const settings = await prisma.recordStorePlatformSettings.upsert({
+      where: { id: 'singleton' },
+      create: { id: 'singleton', ...parsed.data },
+      update: parsed.data,
+    });
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, action: 'RECORD_STORE_PLATFORM_SETTINGS_UPDATED',
+      entityType: 'RecordStorePlatformSettings', entityId: 'singleton', after: parsed.data, correlationId: req.correlationId,
+    });
+    return res.json({ success: true, settings });
+  } catch (err) {
+    next(err);
+  }
+});
 
 router.get('/admin/templates', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
   try {

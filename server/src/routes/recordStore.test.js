@@ -15,7 +15,7 @@ const boberdoo = require('../lib/boberdoo');
 const app = require('../app');
 
 const suffix = Date.now();
-let agencyId, ownerId, ownerCookie, platformOwnerId, platformOwnerCookie, templateId, server, baseUrl;
+let agencyId, ownerId, ownerCookie, platformOwnerId, platformOwnerCookie, templateId, fixedTemplateId, fixedTemplate2Id, server, baseUrl;
 
 const originalBoberdoo = { ...boberdoo };
 function resetBoberdoo() { Object.assign(boberdoo, originalBoberdoo); }
@@ -50,6 +50,22 @@ before(async () => {
   });
   templateId = template.id;
 
+  const fixedTemplate = await prisma.recordStoreTemplate.create({
+    data: {
+      slug: `TEST_FIXED_ROUTE_${suffix}`, displayName: 'Test Fixed Product', productCategory: 'AUTO', leadType: 'INTERNET',
+      wholesalePriceCents: 2500, minimumDailyVolume: 1, maximumDailyVolume: 100, defaultDailyVolume: 10, minimumDepositCents: 150000,
+    },
+  });
+  fixedTemplateId = fixedTemplate.id;
+
+  const fixedTemplate2 = await prisma.recordStoreTemplate.create({
+    data: {
+      slug: `TEST_FIXED2_ROUTE_${suffix}`, displayName: 'Test Fixed Product Two', productCategory: 'HOME', leadType: 'INTERNET',
+      wholesalePriceCents: 3000, minimumDailyVolume: 1, maximumDailyVolume: 100, defaultDailyVolume: 10, minimumDepositCents: 150000,
+    },
+  });
+  fixedTemplate2Id = fixedTemplate2.id;
+
   await new Promise((resolve) => { server = http.createServer(app).listen(0, '127.0.0.1', resolve); });
   baseUrl = `http://127.0.0.1:${server.address().port}`;
 });
@@ -59,7 +75,7 @@ beforeEach(() => { resetBoberdoo(); });
 after(async () => {
   await prisma.recordStoreSubscription.deleteMany({ where: { agencyId } });
   await prisma.recordStoreCustomRequest.deleteMany({ where: { agencyId } });
-  await prisma.recordStoreTemplate.delete({ where: { id: templateId } });
+  await prisma.recordStoreTemplate.deleteMany({ where: { id: { in: [templateId, fixedTemplateId, fixedTemplate2Id] } } });
   await prisma.session.deleteMany({ where: { userId: { in: [ownerId, platformOwnerId] } } });
   await prisma.user.deleteMany({ where: { id: { in: [ownerId, platformOwnerId] } } });
   await prisma.agency.delete({ where: { id: agencyId } });
@@ -181,4 +197,80 @@ test('a custom request can be declined, and a declined request cannot later be a
     method: 'POST', headers: { Cookie: ownerCookie },
   });
   assert.equal(acceptRes.status, 409);
+});
+
+// ---- Low-balance gate (POST /orders + custom-request accept) -----------
+
+test('an agency\'s first-ever order is never blocked by balance, even if the check would otherwise fail', async () => {
+  boberdoo.getPartnerBalance = async () => ({ success: false, errorCode: 'PROVIDER_ERROR' });
+  const res = await fetch(`${baseUrl}/api/record-store/orders`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ templateSlug: (await prisma.recordStoreTemplate.findUnique({ where: { id: fixedTemplateId } })).slug, dailyVolume: 10 }),
+  });
+  assert.equal(res.status, 201);
+  const subscription = (await res.json()).subscription;
+
+  await prisma.recordStoreSubscription.delete({ where: { id: subscription.id } });
+});
+
+test('once funded, ordering a genuinely new product type is blocked below $250, but re-ordering an existing one is not', async () => {
+  fakeHappyBoberdoo();
+  await prisma.agency.update({ where: { id: agencyId }, data: { recordStoreDepositConfirmedAt: new Date(), boberdooPartnerId: `P-balance-test-${suffix}` } });
+  const fixedTemplate = await prisma.recordStoreTemplate.findUnique({ where: { id: fixedTemplateId } });
+  const fixedTemplate2 = await prisma.recordStoreTemplate.findUnique({ where: { id: fixedTemplate2Id } });
+
+  // Create the first product directly (bypassing the route) so "re-order"
+  // below is testing against something that already genuinely exists.
+  const existing = await prisma.recordStoreSubscription.create({
+    data: {
+      agencyId, recordStoreTemplateId: fixedTemplateId, productNameSnapshot: fixedTemplate.displayName,
+      leadType: fixedTemplate.leadType, filterSetType: fixedTemplate.filterSetType, isIpr: false,
+      priceSnapshotCents: fixedTemplate.wholesalePriceCents, dailyVolume: 10, status: 'ACTIVE', provisioningStatus: 'ACTIVE',
+    },
+  });
+
+  boberdoo.getPartnerBalance = async () => ({ success: true, balanceCents: 10000, totalBalanceCents: 10000 });
+
+  const newProductRes = await fetch(`${baseUrl}/api/record-store/orders`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ templateSlug: fixedTemplate2.slug, dailyVolume: 10 }),
+  });
+  assert.equal(newProductRes.status, 409, 'a genuinely new product type must be blocked below the threshold');
+  const newProductBody = await newProductRes.json();
+  assert.equal(newProductBody.error, 'LOW_BALANCE');
+
+  const reorderRes = await fetch(`${baseUrl}/api/record-store/orders`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ templateSlug: fixedTemplate.slug, dailyVolume: 15 }),
+  });
+  assert.equal(reorderRes.status, 200, 'returning the existing subscription for a product already held must never be blocked');
+  const reordered = (await reorderRes.json()).subscription;
+  assert.equal(reordered.id, existing.id);
+
+  await prisma.recordStoreSubscription.delete({ where: { id: existing.id } });
+});
+
+test('accepting a custom-request quote is also blocked below $250 once the agency has funded before', async () => {
+  await prisma.agency.update({ where: { id: agencyId }, data: { recordStoreDepositConfirmedAt: new Date(), boberdooPartnerId: `P-balance-test2-${suffix}` } });
+  boberdoo.getPartnerBalance = async () => ({ success: true, balanceCents: 5000, totalBalanceCents: 5000 });
+
+  const createRes = await fetch(`${baseUrl}/api/record-store/custom-requests`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ leadTypeLabel: 'Auto Insurance', sources: ['Fidadto'], dailyLimit: 5 }),
+  });
+  const request = (await createRes.json()).request;
+  await fetch(`${baseUrl}/api/record-store/admin/custom-requests/${request.id}/quote`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: platformOwnerCookie },
+    body: JSON.stringify({ quotedPriceCents: 600, boberdooTypeId: '23' }),
+  });
+
+  const acceptRes2 = await fetch(`${baseUrl}/api/record-store/custom-requests/${request.id}/accept`, {
+    method: 'POST', headers: { Cookie: ownerCookie },
+  });
+  assert.equal(acceptRes2.status, 409);
+  const body = await acceptRes2.json();
+  assert.equal(body.error, 'LOW_BALANCE');
+
+  const stillQuoted = await prisma.recordStoreCustomRequest.findUnique({ where: { id: request.id } });
+  assert.equal(stillQuoted.status, 'QUOTED', 'a blocked accept must never convert the request or create a subscription');
 });
