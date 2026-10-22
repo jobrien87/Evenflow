@@ -4,23 +4,25 @@ import { Modal, Button } from '../ui';
 
 // Mirrors VendorsPanel.jsx's AgentPicker checkbox-list pattern — this
 // codebase has no shared multi-select component, so each page hand-rolls
-// its own, file-local.
+// its own, file-local. `sources` is [{ value, label }] — value is what
+// gets submitted (and what the lead exchange needs internally), label
+// ("EvenFlow A", "EvenFlow B", ...) is the only thing ever shown.
 function SourcesPicker({ sources, selectedSources, onChange }) {
   if (sources.length === 0) {
     return <div style={s.pickerEmpty}>No known sources for this lead type yet.</div>;
   }
   return (
     <div style={s.pickerBox}>
-      {sources.map((name) => {
-        const checked = selectedSources.includes(name);
+      {sources.map(({ value, label }) => {
+        const checked = selectedSources.includes(value);
         return (
-          <label key={name} style={s.pickerRow}>
+          <label key={value} style={s.pickerRow}>
             <input
               type="checkbox"
               checked={checked}
-              onChange={() => onChange(checked ? selectedSources.filter((s) => s !== name) : [...selectedSources, name])}
+              onChange={() => onChange(checked ? selectedSources.filter((s) => s !== value) : [...selectedSources, value])}
             />
-            {name}
+            {label}
           </label>
         );
       })}
@@ -169,7 +171,7 @@ export default function RecordStoreCustomWizard({ onClose, onSubmitted }) {
             <div style={s.form}>
               <div style={s.reviewCard}>
                 <div style={s.reviewRow}><span>Lead Type</span><strong>{leadTypeLabel}</strong></div>
-                <div style={s.reviewRow}><span>Sources</span><strong>{selectedSources.join(', ')}</strong></div>
+                <div style={s.reviewRow}><span>Sources</span><strong>{selectedSources.map((v) => sources.find((s) => s.value === v)?.label || v).join(', ')}</strong></div>
                 <div style={s.reviewRow}><span>Daily Cap</span><strong>{dailyLimit}/day</strong></div>
                 {weeklyLimit && <div style={s.reviewRow}><span>Weekly Cap</span><strong>{weeklyLimit}/week</strong></div>}
                 {monthlyLimit && <div style={s.reviewRow}><span>Monthly Cap</span><strong>{monthlyLimit}/month</strong></div>}

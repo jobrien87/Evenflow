@@ -148,7 +148,7 @@ export default function RecordStoreWizard({ template, agency, user, onClose, onD
 
       {stepName === 'Agency Info' && (
         <div style={s.form}>
-          <div style={s.helpText}>We already know you — just confirm the company address Boberdoo needs to set up your buyer account.</div>
+          <div style={s.helpText}>We already know you — just confirm the company address we need to set up your buyer account.</div>
           <label style={s.fieldLabel}>Company name<input style={s.input} value={agency.name} disabled /></label>
           <label style={s.fieldLabel}>Contact<input style={s.input} value={`${user.firstName} ${user.lastName} · ${user.email}`} disabled /></label>
           <label style={s.fieldLabel}>Street address<input style={s.input} value={agencyForm.address} onChange={(e) => setAgencyForm({ ...agencyForm, address: e.target.value })} /></label>

@@ -99,14 +99,20 @@ router.post('/', async (req, res) => {
   const partnerId = firstOf(body, ['Partner_ID', 'PartnerID', 'partner_id', 'partnerId']);
   const leadTypeId = firstOf(body, ['TYPE', 'Lead_Type_ID', 'LeadType', 'lead_type_id', 'leadTypeId']);
   const externalLeadId = firstOf(body, ['Lead_ID', 'LeadID', 'lead_id', 'leadId', 'Ping_ID', 'Post_ID']);
+  const filterSetId = firstOf(body, ['Filter_Set_ID', 'FilterSetID', 'filter_set_id', 'filterSetId']);
+  // The raw source code this lead matched under (e.g. "Fidadto") — the
+  // one field recordStoreSourcePerformance.js's per-source reporting and
+  // the 30-day auto-optimization sweep are built on. Never shown to any
+  // user directly; always decoded through lib/recordStoreSourceLabels.js.
+  const sourceCode = firstOf(body, ['SRC', 'Source', 'source', 'Src']);
 
   if (!partnerId) {
     await logDelivery({ resultCode: 'MISSING_PARTNER_ID', rawPayload: body, startedAt });
     await notifyPlatformOwners(null, {
       type: 'record_store.delivery_failed',
       severity: 'ACTION',
-      title: 'Boberdoo lead delivery missing Partner ID',
-      body: 'A lead was posted to the Boberdoo delivery webhook with no recognizable Partner ID field. Check the raw payload in the ApiTransaction log.',
+      title: 'Record Store lead delivery missing Partner ID',
+      body: 'A lead was posted to the Record Store delivery webhook with no recognizable Partner ID field. Check the raw payload in the ApiTransaction log.',
     });
     return respondOk({ warning: 'MISSING_PARTNER_ID' });
   }
@@ -117,13 +123,40 @@ router.post('/', async (req, res) => {
     await notifyPlatformOwners(null, {
       type: 'record_store.delivery_failed',
       severity: 'ACTION',
-      title: 'Boberdoo lead delivery — unknown Partner ID',
+      title: 'Record Store lead delivery — unknown Partner ID',
       body: `No agency found with boberdooPartnerId "${partnerId}". Check the raw payload in the ApiTransaction log.`,
     });
     return respondOk({ warning: 'UNKNOWN_PARTNER' });
   }
 
   const product = LEAD_TYPE_TO_PRODUCT[Number(leadTypeId)] || null;
+
+  // Attribute this delivery back to the specific lead program (Record-
+  // StoreSubscription) that bought it — precisely, by Filter_Set_ID when
+  // the delivery includes one (the normal case); otherwise a best-effort
+  // match on agency + product category, so performance reporting still
+  // has *something* to group by even on an older/minimal delivery
+  // payload. Never blocks lead creation either way — a lead with no
+  // resolvable subscription still gets created, just without source-
+  // performance attribution.
+  let subscriptionId = null;
+  if (filterSetId) {
+    const bySubscription = await prisma.recordStoreSubscription.findFirst({
+      where: { agencyId: agency.id, boberdooFilterSetId: filterSetId },
+    });
+    subscriptionId = bySubscription?.id || null;
+  }
+  if (!subscriptionId && product) {
+    const byProduct = await prisma.recordStoreSubscription.findFirst({
+      where: {
+        agencyId: agency.id,
+        status: { notIn: ['CANCELLED', 'ERROR'] },
+        template: { productCategory: { equals: product.toUpperCase(), mode: 'insensitive' } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    subscriptionId = byProduct?.id || null;
+  }
 
   const firstName = firstOf(body, ['First_Name', 'FirstName', 'first_name', 'firstName']) || 'Unknown';
   const lastName = firstOf(body, ['Last_Name', 'LastName', 'last_name', 'lastName']) || 'Lead';
@@ -187,6 +220,8 @@ router.post('/', async (req, res) => {
           city,
           state,
           zip,
+          recordStoreSourceCode: sourceCode || null,
+          recordStoreSubscriptionId: subscriptionId,
         },
       });
 
@@ -202,6 +237,7 @@ router.post('/', async (req, res) => {
           metadata: {
             boberdooPartnerId: partnerId,
             boberdooLeadTypeId: leadTypeId || null,
+            sourceCode: sourceCode || null,
             ...(isSuppressed ? { suppressedReason: customer.doNotContactReason || 'Customer marked DO_NOT_CONTACT' } : {}),
           },
         },
@@ -230,7 +266,7 @@ router.post('/', async (req, res) => {
     await notifyPlatformOwners(null, {
       type: 'record_store.delivery_failed',
       severity: 'ACTION',
-      title: 'Boberdoo lead delivery failed',
+      title: 'Record Store lead delivery failed',
       body: `Lead creation failed for agency ${agency.name}: ${err.message}`,
     });
     return respondOk({ warning: 'INTERNAL_ERROR' });

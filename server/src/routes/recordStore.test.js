@@ -274,3 +274,81 @@ test('accepting a custom-request quote is also blocked below $250 once the agenc
   const stillQuoted = await prisma.recordStoreCustomRequest.findUnique({ where: { id: request.id } });
   assert.equal(stillQuoted.status, 'QUOTED', 'a blocked accept must never convert the request or create a subscription');
 });
+
+// ---- Source performance / 30-day auto-optimization routes --------------
+
+test('GET /subscriptions/:id/source-performance and PATCH /auto-optimize are scoped to the owning agency and real data', async () => {
+  const sub = await prisma.recordStoreSubscription.create({
+    data: {
+      agencyId, recordStoreTemplateId: fixedTemplateId, productNameSnapshot: 'Perf Route Test',
+      leadType: 'INTERNET', filterSetType: 'STANDARD', priceSnapshotCents: 500, dailyVolume: 20,
+      status: 'ACTIVE', boberdooFilterSetId: `FS-PERF-ROUTE-${suffix}`,
+    },
+  });
+
+  const forbiddenOwner = await prisma.user.create({
+    data: { email: `cb-other-owner-${suffix}@test.local`, passwordHash: await bcrypt.hash('TestPass123!', 12), firstName: 'Other', lastName: 'Owner', role: 'AGENCY_OWNER', status: 'ACTIVE' },
+  });
+  const forbiddenOtherAgency = await prisma.agency.create({ data: { name: `Other Agency ${suffix}` } });
+  await prisma.user.update({ where: { id: forbiddenOwner.id }, data: { agencyId: forbiddenOtherAgency.id } });
+  const forbiddenCookie = `evenflow_session=${(await createSession(forbiddenOwner.id)).rawToken}`;
+
+  const forbiddenRes = await fetch(`${baseUrl}/api/record-store/subscriptions/${sub.id}/source-performance`, { headers: { Cookie: forbiddenCookie } });
+  assert.equal(forbiddenRes.status, 403, 'a different agency must never see this subscription\'s performance');
+
+  const perfRes = await fetch(`${baseUrl}/api/record-store/subscriptions/${sub.id}/source-performance`, { headers: { Cookie: ownerCookie } });
+  assert.equal(perfRes.status, 200);
+  const perfBody = await perfRes.json();
+  assert.equal(perfBody.performance.subscription.id, sub.id);
+  assert.equal(perfBody.autoOptimizeSources, true, 'on by default');
+  assert.deepEqual(perfBody.history, []);
+
+  const toggleRes = await fetch(`${baseUrl}/api/record-store/subscriptions/${sub.id}/auto-optimize`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ autoOptimizeSources: false }),
+  });
+  assert.equal(toggleRes.status, 200);
+  assert.equal((await toggleRes.json()).subscription.autoOptimizeSources, false);
+
+  const forbiddenToggle = await fetch(`${baseUrl}/api/record-store/subscriptions/${sub.id}/auto-optimize`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: forbiddenCookie },
+    body: JSON.stringify({ autoOptimizeSources: true }),
+  });
+  assert.equal(forbiddenToggle.status, 403);
+
+  await prisma.recordStoreSubscription.delete({ where: { id: sub.id } });
+  await prisma.session.deleteMany({ where: { userId: forbiddenOwner.id } });
+  await prisma.user.delete({ where: { id: forbiddenOwner.id } });
+  await prisma.agency.delete({ where: { id: forbiddenOtherAgency.id } });
+});
+
+test('GET /admin/source-optimizations is Platform-Owner-only and returns decoded source labels', async () => {
+  const sub = await prisma.recordStoreSubscription.create({
+    data: {
+      agencyId, recordStoreTemplateId: fixedTemplateId, productNameSnapshot: 'Admin Opt Route Test',
+      leadType: 'INTERNET', filterSetType: 'STANDARD', priceSnapshotCents: 500, dailyVolume: 20,
+      status: 'ACTIVE', boberdooFilterSetId: `FS-ADMIN-OPT-${suffix}`,
+    },
+  });
+  const run = await prisma.recordStoreSourceOptimization.create({
+    data: {
+      recordStoreSubscriptionId: sub.id, windowStart: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), windowEnd: new Date(),
+      previousSources: ['Fidadto', 'Quoting_Fast'], newSources: ['Fidadto'], droppedSources: ['Quoting_Fast'],
+      reasoning: 'test reasoning', performanceSnapshot: [], status: 'APPLIED',
+    },
+  });
+
+  const forbiddenRes = await fetch(`${baseUrl}/api/record-store/admin/source-optimizations`, { headers: { Cookie: ownerCookie } });
+  assert.equal(forbiddenRes.status, 403);
+
+  const res = await fetch(`${baseUrl}/api/record-store/admin/source-optimizations`, { headers: { Cookie: platformOwnerCookie } });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  const found = body.runs.find((r) => r.id === run.id);
+  assert.ok(found);
+  assert.deepEqual(found.droppedSourceLabels, ['EvenFlow B']);
+  assert.equal(found.subscription.agencyId, agencyId);
+
+  await prisma.recordStoreSourceOptimization.delete({ where: { id: run.id } });
+  await prisma.recordStoreSubscription.delete({ where: { id: sub.id } });
+});

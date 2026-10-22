@@ -519,7 +519,7 @@ model Invitation {
 // natural dedupe key — Brevo documents at-least-once delivery, and a
 // retried webhook call must never be recorded twice.
 model EmailDeliveryEvent {
-  id           String    @id @default(uuid())
+  id           String      @id @default(uuid())
   messageId    String
   event        String // the normalized status, see classifyBrevoEvent()
   rawEvent     String // Brevo's own raw event string, kept verbatim for debugging a future mapping gap
@@ -528,7 +528,7 @@ model EmailDeliveryEvent {
   invitationId String?
   invitation   Invitation? @relation(fields: [invitationId], references: [id])
   rawPayload   Json
-  receivedAt   DateTime  @default(now())
+  receivedAt   DateTime    @default(now())
 
   @@unique([messageId, event])
   @@index([invitationId])
@@ -550,16 +550,16 @@ model Session {
 }
 
 model Agency {
-  id                     String       @id @default(uuid())
-  name                   String
-  status                 AgencyStatus @default(CREATED)
-  timezone               String       @default("America/New_York")
-  officeHours            Json?
-  products               String[]     @default([])
+  id                             String       @id @default(uuid())
+  name                           String
+  status                         AgencyStatus @default(CREATED)
+  timezone                       String       @default("America/New_York")
+  officeHours                    Json?
+  products                       String[]     @default([])
   // Configurable lead-queue ordering: { typeRank: LeadType[], statusRules:
   // { [LeadStatus]: { afterDays: number, action: 'BUMP_UP' | 'BUMP_DOWN' |
   // 'DROP_OFF' } } }. Null = lib/priority.js's seeded default applies.
-  priorityRules          Json?
+  priorityRules                  Json?
   // Disposition-based follow-up rules: { [LeadStatus]: afterDays }. When a
   // lead is dispositioned into one of these statuses, lib/leadFollowUp.js
   // schedules a real Follow-Up Task afterDays later (see Lead.followUpAt).
@@ -568,23 +568,23 @@ model Agency {
   // nothing is auto-scheduled). Distinct from priorityRules.statusRules
   // above, which only ever adjusts sort order and never schedules
   // anything real.
-  followUpRules          Json?
+  followUpRules                  Json?
   // Null = fall back to the FIRST_ATTEMPT_SLA_MINUTES env var (or its own
   // 30-minute default) in lib/firstAttemptSlaAlerts.js — same null-falls-
   // back-to-default convention as priorityRules above.
-  firstAttemptSlaMinutes Int?
+  firstAttemptSlaMinutes         Int?
   // Null = fall back to the STALE_LEAD_HOURS env var (or its own 4-hour
   // default) in lib/staleLeadReminders.js.
-  staleLeadHours         Int?
+  staleLeadHours                 Int?
   // Window (in days, both directions) lib/sales.js's findPossibleDuplicates
   // uses when cross-checking a new Closed Sale against existing
   // HistoricalRecord rows by customer name. Matches today's hardcoded
   // default exactly until an agency changes it.
-  saleDuplicateWindowDays Int     @default(3)
+  saleDuplicateWindowDays        Int          @default(3)
   // Lead statuses that require a note before a disposition to that status
   // is accepted (POST /:leadId/disposition). Empty = never required —
   // today's exact behavior.
-  requireDispositionNoteStatuses String[] @default([])
+  requireDispositionNoteStatuses String[]     @default([])
   // Which LeadStatus values count as "closed out" for automation purposes
   // — a lead in one of these statuses is exempt from speed-to-lead SLA
   // alerts (lib/firstAttemptSlaAlerts.js), stale-lead reminders
@@ -595,57 +595,57 @@ model Agency {
   // Deliberately distinct from the Work Queue/funnel "active stage"
   // groupings in leadStatusGroups.js, which stay fixed app-wide — this
   // field only controls which statuses stop generating nag automations.
-  closedLeadStatuses String[] @default(["SOLD","LOST","NOT_INTERESTED","BAD_CONTACT","DUPLICATE","DO_NOT_CONTACT","INELIGIBLE","ARCHIVED"])
+  closedLeadStatuses             String[]     @default(["SOLD", "LOST", "NOT_INTERESTED", "BAD_CONTACT", "DUPLICATE", "DO_NOT_CONTACT", "INELIGIBLE", "ARCHIVED"])
   // The score (0-100) below which a call-scoring category becomes a
   // flagged "coaching opportunity" in lib/callScoring.js's
   // computeCoachingBreakdown. Only meaningful when coachingEnabled.
-  coachingThreshold      Int     @default(75)
-  crmEnabled             Boolean      @default(true)
-  transfersEnabled       Boolean      @default(false)
-  coachingEnabled        Boolean      @default(false)
+  coachingThreshold              Int          @default(75)
+  crmEnabled                     Boolean      @default(true)
+  transfersEnabled               Boolean      @default(false)
+  coachingEnabled                Boolean      @default(false)
   // Sales Studio (merged Drills + Call Scoring) is gated behind the same
   // coachingEnabled unlock as everything else "Sales Coaching" already
   // covers — this is a SEPARATE compliance-buffer switch, defaulting to
   // enforced. Platform Owner can flip it off per-agency to fully open
   // Sales Studio regardless of unlock status (e.g. a temporary waiver),
   // without touching the real unlock/billing flag.
-  salesStudioGateEnabled Boolean      @default(true)
+  salesStudioGateEnabled         Boolean      @default(true)
   // Break Room — the employee arcade. On by default (a built-in perk, not
   // an upsell), with the same requireModuleEnabled() gate every other
   // module flag already uses — zero new gating code needed for the
   // on/off switch itself.
-  breakRoomEnabled       Boolean      @default(true)
+  breakRoomEnabled               Boolean      @default(true)
   // { games: {CONGO_LINE,BUCKETS,FULL_SEND,PILL_POP: bool}, pickMeUpEnabled,
   // lunchEligible, soundsEnabled, achievementsEnabled,
   // leaderboardScope: {office, agency} } — null = lib/breakRoom.js's
   // seeded default applies, same null-fallback precedent as priorityRules.
-  breakRoomSettings      Json?
+  breakRoomSettings              Json?
   // Backstage HR (docs/hr-suite/) — on by default for every agency (a
   // deliberate reversal of this module's original opt-in design): real
   // usage showed every account expects the Owner/Manager/Producer HR
   // tiering to just be there, not something a Platform Owner has to
   // separately switch on per agency. A Platform Owner or Agency Owner can
   // still turn it off per agency via HR Settings if ever needed.
-  hrEnabled              Boolean      @default(true)
-  transferPaused         Boolean      @default(false)
-  transferDailyCap       Int?
-  transferStates         String[]     @default([])
+  hrEnabled                      Boolean      @default(true)
+  transferPaused                 Boolean      @default(false)
+  transferDailyCap               Int?
+  transferStates                 String[]     @default([])
   // Fee EvenFlow/Yield charges this agency per accepted transfer, in integer cents.
   // Null = not configured; no revenue event is fabricated if unset.
-  transferFeeCents       Int?
+  transferFeeCents               Int?
   // The one Stripe Customer object for this agency's self-serve seat
   // subscription (routes/billing.js's self-serve section). Null until the
   // agency's owner starts a checkout — never fabricated.
-  stripeCustomerId       String?
+  stripeCustomerId               String?
   // Set once, the first time this agency's one-time $250 setup fee is
   // actually charged (webhook-confirmed) — never charged a second time on
   // a later resubscribe/plan-change. Null = never charged.
-  setupFeeChargedAt      DateTime?
+  setupFeeChargedAt              DateTime?
   // Set once, the first time this agency's one-time $950 Sales Studio
   // unlock is actually paid for (webhook-confirmed) — a real purchase
   // record distinct from coachingEnabled, which a Platform Owner can also
   // flip manually (comp/grant) without a real charge. Null = never bought.
-  salesStudioPurchasedAt DateTime?
+  salesStudioPurchasedAt         DateTime?
 
   // ======================================================================
   // RECORD STORE — Boberdoo/LeadPortal wholesale lead marketplace
@@ -687,37 +687,37 @@ model Agency {
   updatedAt  DateTime  @updatedAt
   archivedAt DateTime?
 
-  users                    User[]
-  leads                    Lead[]
-  tasks                    Task[]
-  invitations              Invitation[]
-  auditEvents              AuditEvent[]
-  goals                    Goal[]
-  telemarketerAssignments  TelemarketerAssignment[]
-  transfers                Transfer[]
-  vendors                  Vendor[]
-  revenueEvents            RevenueEvent[]
-  costEvents               CostEvent[]
-  calls                    Call[]
-  subscriptions            AgencySubscription[]
-  opportunities            Opportunity[]
-  conversations            Conversation[]
-  timeClockEntries         TimeClockEntry[]
-  announcements            Announcement[]
-  producerNotes            ProducerNote[]
-  offices                  Office[]
-  recordStoreSubscriptions RecordStoreSubscription[]
+  users                      User[]
+  leads                      Lead[]
+  tasks                      Task[]
+  invitations                Invitation[]
+  auditEvents                AuditEvent[]
+  goals                      Goal[]
+  telemarketerAssignments    TelemarketerAssignment[]
+  transfers                  Transfer[]
+  vendors                    Vendor[]
+  revenueEvents              RevenueEvent[]
+  costEvents                 CostEvent[]
+  calls                      Call[]
+  subscriptions              AgencySubscription[]
+  opportunities              Opportunity[]
+  conversations              Conversation[]
+  timeClockEntries           TimeClockEntry[]
+  announcements              Announcement[]
+  producerNotes              ProducerNote[]
+  offices                    Office[]
+  recordStoreSubscriptions   RecordStoreSubscription[]
   recordStoreFundingPayments RecordStoreFundingPayment[]
-  leadImportBatches        LeadImportBatch[]
-  historicalRecords        HistoricalRecord[]
-  userBadges               UserBadge[]
-  ptoRequests              PtoRequest[]
-  breakRoomGameSessions    BreakRoomGameSession[]
-  breakRoomHighScores      BreakRoomHighScore[]
-  breakRoomAchievements    BreakRoomAchievement[]
-  sales                    Sale[]
-  appointments             Appointment[]
-  flowScoreWeightConfigs   FlowScoreWeightConfig[]
+  leadImportBatches          LeadImportBatch[]
+  historicalRecords          HistoricalRecord[]
+  userBadges                 UserBadge[]
+  ptoRequests                PtoRequest[]
+  breakRoomGameSessions      BreakRoomGameSession[]
+  breakRoomHighScores        BreakRoomHighScore[]
+  breakRoomAchievements      BreakRoomAchievement[]
+  sales                      Sale[]
+  appointments               Appointment[]
+  flowScoreWeightConfigs     FlowScoreWeightConfig[]
 
   // Backstage HR (docs/hr-suite/)
   hrDepartments             HrDepartment[]
@@ -766,30 +766,30 @@ model Office {
 
   // Stored UPPERCASE/trimmed — exact-match city names for geographic
   // auto-routing.
-  routingCities    String[]          @default([])
+  routingCities               String[]          @default([])
   // [{start:"32301", end:"32399"}, ...] — 5-digit zero-padded zip strings
   // (safe for lexicographic range comparison even for leading-zero zips),
   // zod-validated on write (routes/offices.js).
-  routingZipRanges Json?             @default("[]")
+  routingZipRanges            Json?             @default("[]")
   // At most one true per agency — the geography fallback for a lead whose
   // city/zip matches no office's rules. Enforced in application code
   // (routes/offices.js), matching this schema's existing total absence of
   // partial/filtered unique indexes.
-  isDefaultOffice  Boolean           @default(false)
+  isDefaultOffice             Boolean           @default(false)
   // How a producer is picked WITHIN this office once it's been chosen
   // (by geography or by the legacy cross-office fallback). Defaults to
   // ROUND_ROBIN so every existing Office is a no-op on migration day.
-  routingMode      OfficeRoutingMode @default(ROUND_ROBIN)
+  routingMode                 OfficeRoutingMode @default(ROUND_ROBIN)
   // Cursor for ROUND_ROBIN-within-this-office — independent of any
   // Vendor's own roundRobinCursor, which (once this ships) only ever picks
   // WHICH office in the legacy no-geo-match fallback, never the producer
   // within it.
-  roundRobinCursor Int               @default(0)
+  roundRobinCursor            Int               @default(0)
   // Default false, matching a prior fix: a selling AGENCY_MANAGER must not
   // be silently enrolled into ordinary ROUND_ROBIN lead flow she never
   // opted into. An agency that explicitly wants its office manager(s) in
   // the round-robin pool can opt back in per office.
-  includeManagersInRoundRobin Boolean @default(false)
+  includeManagersInRoundRobin Boolean           @default(false)
 
   users             User[]
   alphaAssignments  OfficeAlphaAssignment[]
@@ -1008,6 +1008,20 @@ model Lead {
   updatedAt            DateTime         @updatedAt
   archivedAt           DateTime?
 
+  // Record Store provenance — set only for a lead delivered through
+  // routes/boberdooDelivery.js (source 'record_store:boberdoo'). The raw
+  // source code the lead exchange reported it came from (e.g. "Fidadto")
+  // — never shown to any user directly, only ever through
+  // lib/recordStoreSourceLabels.js's EvenFlow-branded display label — and
+  // which RecordStoreSubscription (lead program) it was attributed to,
+  // when the delivery's Filter_Set_ID (or, failing that, a best-effort
+  // agency+product match) resolved one. Both null for every other source.
+  // This is the join recordStoreSourcePerformance.js's per-source
+  // reporting and the 30-day auto-optimization sweep are built on.
+  recordStoreSourceCode     String?
+  recordStoreSubscriptionId String?
+  recordStoreSubscription   RecordStoreSubscription? @relation(fields: [recordStoreSubscriptionId], references: [id])
+
   // Set the moment a stale-lead reminder notification is sent (Part 4);
   // read back on the next check so the same lead isn't re-notified until
   // the staleness window has passed again.
@@ -1085,6 +1099,7 @@ model Lead {
   @@index([status])
   @@index([receivedAt])
   @@index([importBatchId])
+  @@index([recordStoreSubscriptionId])
 }
 
 // One row per bulk spreadsheet upload (POST /leads/bulk-import) — exists
@@ -1473,21 +1488,21 @@ model Appointment {
   // HighLevel's own appointment id — identifies ONE booking across
   // create/reschedule/cancel events; the idempotency key for this row
   // together with vendorId.
-  providerBookingId String
-  providerContactId String?
+  providerBookingId  String
+  providerContactId  String?
   // A different external id than providerBookingId — one Retell call can
   // produce one booking, kept separately rather than conflated.
-  retellCallId String?
+  retellCallId       String?
 
   startAt         DateTime // UTC
   endAt           DateTime // UTC
   timeZone        String   @default("America/New_York")
   durationMinutes Int      @default(30)
 
-  status         AppointmentStatus @default(SCHEDULED)
+  status            AppointmentStatus @default(SCHEDULED)
   // Raw HighLevel status string, kept verbatim alongside the normalized
   // enum above for debugging.
-  providerStatus String?
+  providerStatus    String?
   // The resolved "as-of" timestamp of the last event actually APPLIED to
   // this row — the out-of-order guard. An incoming event with an
   // earlier-or-equal timestamp is logged (HighLevelWebhookEvent) but never
@@ -1509,7 +1524,7 @@ model Appointment {
 
   syncStatus AppointmentSyncStatus @default(OK)
   // e.g. 'NO_ELIGIBLE_ASSIGNEE', 'STALE_EVENT_IGNORED', 'WEAK_CONTACT_MATCH'
-  syncIssue String?
+  syncIssue  String?
 
   createdAt     DateTime  @default(now()) // immutable intake timestamp
   updatedAt     DateTime  @updatedAt
@@ -1533,19 +1548,19 @@ model Appointment {
 // record a "failed syncs must be visible, not silently lost" requirement
 // needs.
 model HighLevelWebhookEvent {
-  id                String   @id // HighLevel's own event id when present, else a deterministic fingerprint (see routes/highlevelWebhook.js)
+  id                String    @id // HighLevel's own event id when present, else a deterministic fingerprint (see routes/highlevelWebhook.js)
   vendorId          String
-  vendor            Vendor   @relation(fields: [vendorId], references: [id])
-  type              String   // raw event_type string, verbatim
+  vendor            Vendor    @relation(fields: [vendorId], references: [id])
+  type              String // raw event_type string, verbatim
   providerBookingId String?
-  payload           Json     // full raw webhook body
-  receivedAt        DateTime @default(now())
+  payload           Json // full raw webhook body
+  receivedAt        DateTime  @default(now())
   // Null = not yet successfully processed; a retried delivery of a
   // failed/mid-flight event is safely re-attempted since the business
   // logic (find-or-update keyed on vendorId+providerBookingId) is
   // convergent, not destructive.
-  processedAt     DateTime?
-  processingError String?
+  processedAt       DateTime?
+  processingError   String?
 
   @@index([vendorId])
   @@index([providerBookingId])
@@ -1824,7 +1839,7 @@ model Vendor {
   // Which inbound contract this vendor's credential may authenticate
   // against (see middleware/vendorAuth.js's requireIntegrationType guard).
   // Default LEAD_POST preserves every existing vendor's behavior.
-  integrationType VendorIntegrationType @default(LEAD_POST)
+  integrationType     VendorIntegrationType @default(LEAD_POST)
   // Only meaningful when integrationType is APPOINTMENT_WEBHOOK — the
   // exact HighLevel location/calendar this vendor's webhook is scoped to,
   // enforced (not just documented) on every inbound event so a
@@ -2734,11 +2749,79 @@ model RecordStoreSubscription {
   // Monthly_Limit.
   customConfigurationJson Json?
 
-  fundingPayments RecordStoreFundingPayment[]
-  customRequest   RecordStoreCustomRequest?
+  // 30-day rolling source-performance optimization (see
+  // lib/recordStoreSourceOptimization.js). On by default — an Agency
+  // Owner can opt a specific lead program out via PATCH
+  // /subscriptions/:id/auto-optimize if they'd rather manage sources
+  // manually. lastSourceOptimizationAt drives the sweep's own "due for
+  // another look" check (startedAt the first time, then this) and is
+  // updated on every sweep pass, even one that changes nothing — so a
+  // quiet, healthy subscription is re-checked every 30 days rather than
+  // evaluated once and never again.
+  autoOptimizeSources      Boolean   @default(true)
+  lastSourceOptimizationAt DateTime?
+
+  fundingPayments     RecordStoreFundingPayment[]
+  customRequest       RecordStoreCustomRequest?
+  leads               Lead[]
+  sourceOptimizations RecordStoreSourceOptimization[]
 
   @@index([agencyId])
   @@index([status])
+}
+
+// A single raw lead-source code's EvenFlow-branded display name — e.g.
+// "Fidadto" -> "EvenFlow A". Never store or show the raw code to any
+// user; always go through getOrCreateSourceLabel/labelSources
+// (lib/recordStoreSourceLabels.js). The label itself is never a stored
+// column — it's derived purely from this row's own autoincrement id (1 ->
+// EvenFlow A, 2 -> EvenFlow B, ... 26 -> EvenFlow Z, 27 -> EvenFlow AA,
+// ...), so the cadence an agency sees for sources #1-3 today (seeded in
+// insertion order at launch) continues automatically for whatever source
+// the lead exchange adds #4, #5, ... onward, the first time EvenFlow ever
+// sees it — no renumbering, no manual catalog to maintain.
+model RecordStoreSourceLabel {
+  id         Int      @id @default(autoincrement())
+  sourceCode String   @unique
+  createdAt  DateTime @default(now())
+}
+
+// One row per automatic (or, for FAILED, attempted) source-list change
+// the 30-day optimization sweep makes to a lead program — the full,
+// auditable "what changed and why" record this app shows back to both
+// the agency (so "EvenFlow optimized your leads" is a real, inspectable
+// claim, not a marketing slogan) and the Platform Owner (oversight across
+// every agency). Never mutated after creation.
+enum RecordStoreSourceOptimizationStatus {
+  APPLIED
+  FAILED
+  SKIPPED_NO_CHANGE
+}
+
+model RecordStoreSourceOptimization {
+  id                        String                              @id @default(uuid())
+  recordStoreSubscriptionId String
+  subscription              RecordStoreSubscription             @relation(fields: [recordStoreSubscriptionId], references: [id])
+  windowStart               DateTime
+  windowEnd                 DateTime
+  previousSources           String[]
+  newSources                String[]
+  droppedSources            String[]
+  // Plain-English explanation referencing the real per-source numbers
+  // that drove the decision (e.g. "EvenFlow C closed 2% of 41 leads vs.
+  // 38% for your other sources — dropped to focus your budget on what's
+  // converting.") — written once at decision time, never regenerated.
+  reasoning                 String
+  // Full per-source stats snapshot at decision time (leadCount,
+  // quoteRate, closeRate, revenueCents, costCents) — what the reasoning
+  // text was computed from, kept verbatim for the admin/agency detail view.
+  performanceSnapshot       Json
+  status                    RecordStoreSourceOptimizationStatus @default(APPLIED)
+  errorMessage              String?
+  createdAt                 DateTime                            @default(now())
+
+  @@index([recordStoreSubscriptionId])
+  @@index([createdAt])
 }
 
 // A customer-submitted "Build Your Own" request — the pre-price
@@ -2765,7 +2848,7 @@ model RecordStoreCustomRequest {
   // Customer picks from a short, Super-Admin-curated label list (today:
   // Auto/Home/Life Insurance, the only lead types with a confirmed real
   // boberdooTypeId) — never a raw Boberdoo TYPE id from the customer.
-  leadTypeLabel String
+  leadTypeLabel  String
   // Confirmed/set by the Platform Owner at quote time, not the customer —
   // same "never fabricate a Boberdoo id" discipline as
   // RecordStoreTemplate.boberdooTypeId.
@@ -2782,9 +2865,9 @@ model RecordStoreCustomRequest {
   decidedAt        DateTime?
   // Quote context when QUOTED, or the reason when DECLINED — one field,
   // same convention as CreditRequest's decisionNotes.
-  decisionNotes String?
+  decisionNotes    String?
 
-  recordStoreSubscriptionId String?                 @unique
+  recordStoreSubscriptionId String?                  @unique
   recordStoreSubscription   RecordStoreSubscription? @relation(fields: [recordStoreSubscriptionId], references: [id])
 
   createdAt DateTime @default(now())
@@ -2827,14 +2910,14 @@ model RecordStoreFundingPayment {
   recordStoreSubscription   RecordStoreSubscription? @relation(fields: [recordStoreSubscriptionId], references: [id])
 
   amountCents             Int
-  stripeCheckoutSessionId String @unique
+  stripeCheckoutSessionId String  @unique
   stripePaymentIntentId   String?
 
   status                    RecordStoreFundingPaymentStatus @default(PENDING_SUBMIT)
-  boberdooOperationType     Int                              @default(2) // 2 = Payment on account (credit) — see lib/boberdoo.js submitPayment()
+  boberdooOperationType     Int                             @default(2) // 2 = Payment on account (credit) — see lib/boberdoo.js submitPayment()
   boberdooTotalBalanceCents Int?
   submittedAt               DateTime?
-  failedReason               String?
+  failedReason              String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -3331,14 +3414,14 @@ model HrLeaveType {
 }
 
 model HrLeavePolicy {
-  id                   String      @id @default(uuid())
-  agencyId             String
-  agency               Agency      @relation(fields: [agencyId], references: [id])
-  leaveTypeId          String
-  leaveType            HrLeaveType @relation(fields: [leaveTypeId], references: [id])
-  name                 String
-  accrualMethod        String // FRONT_LOADED | PER_PAY_PERIOD | PER_HOUR_WORKED
-  accrualAmountMinutes Int? // meaning depends on accrualMethod
+  id                              String      @id @default(uuid())
+  agencyId                        String
+  agency                          Agency      @relation(fields: [agencyId], references: [id])
+  leaveTypeId                     String
+  leaveType                       HrLeaveType @relation(fields: [leaveTypeId], references: [id])
+  name                            String
+  accrualMethod                   String // FRONT_LOADED | PER_PAY_PERIOD | PER_HOUR_WORKED
+  accrualAmountMinutes            Int? // meaning depends on accrualMethod
   // PER_HOUR_WORKED only: the worked-minutes denominator accrualAmountMinutes
   // is earned per. Together they express an exact ratio — e.g. "0.5 hours
   // (30 min) earned per 8 hours (480 min) worked" is accrualAmountMinutes:
@@ -3347,13 +3430,13 @@ model HrLeavePolicy {
   // rate. Unused by FRONT_LOADED/PER_PAY_PERIOD. Defaults to 60 (the old,
   // implicit "per hour" denominator) so every pre-existing row keeps its
   // exact prior behavior.
-  accrualWorkedMinutesDenominator Int @default(60)
-  annualCapMinutes     Int?
-  carryoverCapMinutes  Int?
-  waitingPeriodDays    Int         @default(0)
-  effectiveFrom        DateTime    @default(now())
-  effectiveTo          DateTime?
-  createdAt            DateTime    @default(now())
+  accrualWorkedMinutesDenominator Int         @default(60)
+  annualCapMinutes                Int?
+  carryoverCapMinutes             Int?
+  waitingPeriodDays               Int         @default(0)
+  effectiveFrom                   DateTime    @default(now())
+  effectiveTo                     DateTime?
+  createdAt                       DateTime    @default(now())
 
   assignments HrLeavePolicyAssignment[]
 

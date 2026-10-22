@@ -19,6 +19,7 @@ const { prisma } = require('./db');
 const boberdoo = require('./boberdoo');
 const { recordAudit } = require('./audit');
 const { notifyAgencyOwners } = require('./notifications');
+const { labelSources } = require('./recordStoreSourceLabels');
 
 // Never leak a raw provider error to an Agency Owner (see master spec §29) —
 // this is what every customer-facing error message resolves to, while the
@@ -54,13 +55,16 @@ function isIprTemplate(template) {
 const FALLBACK_SOURCES = ['Fidadto', 'Quoting_Fast', 'Visiqua'];
 
 // ---- Custom Builder: list available lead sources for a lead type -------
+// Returns { value, label } pairs, never a raw code alone — value is what
+// a caller sends back (and what Accepted_Sources needs), label is the
+// only thing ever shown to a user (see lib/recordStoreSourceLabels.js).
 async function listSources(boberdooTypeId) {
   const result = await boberdoo.getVendorsAndSources(boberdooTypeId);
-  if (result.success) {
-    const sources = [...new Set((result.vendors || []).flatMap((v) => (v.sources || []).map((s) => s.name)))];
-    return { success: true, sources, live: true };
-  }
-  return { success: true, sources: FALLBACK_SOURCES, live: false };
+  const codes = result.success
+    ? [...new Set((result.vendors || []).flatMap((v) => (v.sources || []).map((s) => s.name)))]
+    : FALLBACK_SOURCES;
+  const sources = await labelSources(codes);
+  return { success: true, sources, live: result.success };
 }
 
 // ---- Low-balance gate for an additional product --------------------
@@ -227,7 +231,7 @@ async function provisionPartner(agency, owner, correlationId) {
     return { success: true, partnerId: agency.boberdooPartnerId, alreadyExisted: true };
   }
   if (!boberdoo.isConfigured()) {
-    return { success: false, errorCode: 'NOT_CONFIGURED', errorMessage: 'Boberdoo is not configured.' };
+    return { success: false, errorCode: 'NOT_CONFIGURED', errorMessage: "Record Store's lead exchange is not configured." };
   }
 
   // Boberdoo requires a Password on createNewPartner (confirmed against a
@@ -280,7 +284,7 @@ async function provisionFilterSet(subscription, template, partnerId, correlation
     return { success: true, filterSetId: subscription.boberdooFilterSetId, alreadyExisted: true };
   }
   if (!boberdoo.isConfigured()) {
-    return { success: false, errorCode: 'NOT_CONFIGURED', errorMessage: 'Boberdoo is not configured.' };
+    return { success: false, errorCode: 'NOT_CONFIGURED', errorMessage: "Record Store's lead exchange is not configured." };
   }
 
   // customConfigurationJson overrides the template's own config — null on
@@ -663,13 +667,49 @@ async function changeDailyVolume(subscriptionId, newVolume, actorId, correlation
   return { success: true, subscription: updated };
 }
 
+// ---- Source-list update (used by the 30-day auto-optimization sweep) --
+// Same shape as changeDailyVolume above: push the real change to the
+// lead exchange first, only ever persist the new Accepted_Sources
+// locally once that call actually succeeds, and on failure record the
+// disagreement (boberdooSyncError) rather than silently assuming the
+// change took.
+async function updateAcceptedSources(subscriptionId, newSourceCodes, correlationId) {
+  const subscription = await prisma.recordStoreSubscription.findUnique({ where: { id: subscriptionId }, include: { template: true, agency: true } });
+  if (!subscription) return { success: false, errorCode: 'NOT_FOUND' };
+  if (!subscription.boberdooFilterSetId) return { success: false, errorCode: 'NOT_PROVISIONED', errorMessage: FRIENDLY_ERROR };
+
+  const acceptedSources = newSourceCodes.join(',');
+  const result = isIprTemplate(subscription.template)
+    ? await boberdoo.updateIprFilterSet(subscription.boberdooFilterSetId, { Accepted_Sources: acceptedSources })
+    : await boberdoo.updateFilterSet(subscription.boberdooFilterSetId, subscription.agency.boberdooPartnerId, { Accepted_Sources: acceptedSources });
+
+  if (!result.success) {
+    await prisma.recordStoreSubscription.update({ where: { id: subscriptionId }, data: { boberdooSyncError: result.errorMessage, lastBoberdooSyncAt: new Date() } });
+    return { success: false, errorCode: result.errorCode, errorMessage: result.errorMessage };
+  }
+
+  const updated = await prisma.recordStoreSubscription.update({
+    where: { id: subscriptionId },
+    data: {
+      customConfigurationJson: { ...(subscription.customConfigurationJson || {}), Accepted_Sources: acceptedSources },
+      boberdooSyncError: null,
+      lastBoberdooSyncAt: new Date(),
+    },
+  });
+  await recordAudit({
+    agencyId: subscription.agencyId, action: 'RECORD_STORE_SOURCES_OPTIMIZED', entityType: 'RecordStoreSubscription',
+    entityId: subscriptionId, after: { Accepted_Sources: acceptedSources }, correlationId,
+  });
+  return { success: true, subscription: updated };
+}
+
 // ---- Admin: link an existing Boberdoo account ---------------------------
 
 async function linkExistingPartner(agencyId, partnerId, actorId, correlationId) {
   const agency = await prisma.agency.findUnique({ where: { id: agencyId } });
   if (!agency) return { success: false, errorCode: 'NOT_FOUND' };
   if (agency.boberdooPartnerId && agency.boberdooPartnerId !== partnerId) {
-    return { success: false, errorCode: 'ALREADY_LINKED', errorMessage: 'This agency is already linked to a different Boberdoo Partner.' };
+    return { success: false, errorCode: 'ALREADY_LINKED', errorMessage: 'This agency is already linked to a different Record Store Partner.' };
   }
 
   const info = await boberdoo.getPartnerInfo(partnerId);
@@ -718,7 +758,7 @@ async function submitFundingPayment(paymentId, correlationId) {
   if (payment.status === 'SUBMITTED') return { success: true, alreadySubmitted: true, payment };
 
   if (!payment.agency.boberdooPartnerId) {
-    await prisma.recordStoreFundingPayment.update({ where: { id: payment.id }, data: { status: 'FAILED', failedReason: 'Agency has no Boberdoo Partner yet.' } });
+    await prisma.recordStoreFundingPayment.update({ where: { id: payment.id }, data: { status: 'FAILED', failedReason: 'Agency has no Record Store Partner yet.' } });
     return { success: false, errorCode: 'NO_PARTNER' };
   }
 
@@ -787,6 +827,7 @@ module.exports = {
   pauseAccount,
   resumeAccount,
   changeDailyVolume,
+  updateAcceptedSources,
   linkExistingPartner,
   submitFundingPayment,
   submitPendingFundingPayments,

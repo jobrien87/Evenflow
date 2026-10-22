@@ -170,6 +170,9 @@ export const api = {
   pauseRecordStoreSubscription: (id) => request(`/record-store/subscriptions/${id}/pause`, { method: 'POST' }),
   resumeRecordStoreSubscription: (id) => request(`/record-store/subscriptions/${id}/resume`, { method: 'POST' }),
   changeRecordStoreVolume: (id, dailyVolume) => request(`/record-store/subscriptions/${id}/volume`, { method: 'POST', body: { dailyVolume } }),
+  recordStoreSourcePerformance: (id, params = '') => request(`/record-store/subscriptions/${id}/source-performance${params}`),
+  setRecordStoreAutoOptimize: (id, autoOptimizeSources) => request(`/record-store/subscriptions/${id}/auto-optimize`, { method: 'PATCH', body: { autoOptimizeSources } }),
+  adminRecordStoreSourceOptimizations: (params = '') => request(`/record-store/admin/source-optimizations${params}`),
   pauseRecordStoreAccount: (params = '') => request(`/record-store/account/pause-all${params}`, { method: 'POST' }),
   resumeRecordStoreAccount: (params = '') => request(`/record-store/account/resume-all${params}`, { method: 'POST' }),
   // Custom Builder — "Build Your Own," manual-quote flow.

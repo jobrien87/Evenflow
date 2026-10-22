@@ -7,6 +7,7 @@ const { checkAgentOfMonth } = require('./lib/agentOfMonth');
 const { startHrAttendanceDetectionJob } = require('./jobs/hrAttendanceDetection');
 const { startHrLeaveAccrualJob } = require('./lib/hrLeaveAccrual');
 const { backfillMissingSales } = require('./lib/missingSaleBackfill');
+const { runSourceOptimizationSweep } = require('./lib/recordStoreSourceOptimization');
 
 const PORT = process.env.PORT || 4000;
 
@@ -65,3 +66,14 @@ startHrLeaveAccrualJob();
 // agentOfMonth above — this is what makes the backfill run automatically
 // on every deploy with no manual step. See lib/missingSaleBackfill.js.
 backfillMissingSales().catch((err) => console.error('[missingSaleBackfill] run failed', err.message));
+
+// Record Store's 30-day rolling lead-source optimizer — same "real
+// cadence, checked on a much tighter interval since there's no real
+// scheduler" pattern as agentOfMonth.js above. Idempotent per
+// subscription via RecordStoreSubscription.lastSourceOptimizationAt, so
+// a redundant check every few hours just confirms "not due yet" for
+// everything except whatever genuinely crossed its 30-day mark since the
+// last tick. See lib/recordStoreSourceOptimization.js.
+setInterval(() => {
+  runSourceOptimizationSweep().catch((err) => console.error('[recordStoreSourceOptimization] sweep failed', err.message));
+}, 6 * 60 * 60 * 1000);

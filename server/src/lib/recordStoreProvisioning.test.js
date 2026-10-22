@@ -576,10 +576,15 @@ test('listSources returns the real list when Boberdoo succeeds, and an honest fa
   });
   const live = await provisioning.listSources('23');
   assert.equal(live.live, true);
-  assert.deepEqual([...live.sources].sort(), ['SourceOne', 'SourceTwo']);
+  assert.deepEqual([...live.sources.map((s) => s.value)].sort(), ['SourceOne', 'SourceTwo']);
+  // Every source is returned as { value, label } — the raw code is never
+  // the only thing a caller gets back; label is always the EvenFlow-
+  // branded display name (see lib/recordStoreSourceLabels.js).
+  assert.ok(live.sources.every((s) => typeof s.label === 'string' && s.label.startsWith('EvenFlow ')));
 
   boberdoo.getVendorsAndSources = async () => ({ success: false, errorCode: 'PROVIDER_ERROR', errorMessage: 'Authentication failed' });
   const fallback = await provisioning.listSources('23');
   assert.equal(fallback.live, false);
   assert.ok(fallback.sources.length > 0, 'a real, non-empty fallback list is still returned so the builder stays usable');
+  assert.ok(fallback.sources.every((s) => s.value && s.label));
 });

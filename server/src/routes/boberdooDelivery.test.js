@@ -16,6 +16,8 @@ const suffix = Date.now();
 let agencyId, ownerId, server, baseUrl;
 let leadIds = [];
 let customerIds = [];
+let templateIds = [];
+let subscriptionIds = [];
 
 before(async () => {
   const agency = await prisma.agency.create({
@@ -40,6 +42,8 @@ after(async () => {
   await prisma.notification.deleteMany({ where: { userId: ownerId } });
   await prisma.lead.deleteMany({ where: { id: { in: leadIds } } });
   await prisma.customer.deleteMany({ where: { id: { in: customerIds } } });
+  await prisma.recordStoreSubscription.deleteMany({ where: { id: { in: subscriptionIds } } });
+  await prisma.recordStoreTemplate.deleteMany({ where: { id: { in: templateIds } } });
   await prisma.user.delete({ where: { id: ownerId } });
   await prisma.agency.delete({ where: { id: agencyId } });
   await new Promise((resolve) => server.close(resolve));
@@ -191,4 +195,65 @@ test('a delivery for a Customer already marked DO_NOT_CONTACT creates a suppress
   const lead = await prisma.lead.findUnique({ where: { id: body.leadId } });
   assert.equal(lead.status, 'DO_NOT_CONTACT');
   assert.ok(lead.archivedAt);
+});
+
+test('a delivery carrying SRC and a matching Filter_Set_ID attributes the Lead to the exact subscription and raw source code', async () => {
+  process.env.BOBERDOO_DELIVERY_SECRET = 'real-secret-value';
+  const template = await prisma.recordStoreTemplate.create({
+    data: { slug: `TEST_DELIVERY_TEMPLATE_${suffix}`, displayName: 'Test Delivery Template', productCategory: 'AUTO', leadType: 'INTERNET' },
+  });
+  templateIds.push(template.id);
+  const subscription = await prisma.recordStoreSubscription.create({
+    data: {
+      agencyId, recordStoreTemplateId: template.id, productNameSnapshot: 'Test Delivery Template',
+      leadType: 'INTERNET', filterSetType: 'STANDARD', priceSnapshotCents: 500, dailyVolume: 20,
+      status: 'ACTIVE', boberdooFilterSetId: `FS-DELIVERY-${suffix}`,
+    },
+  });
+  subscriptionIds.push(subscription.id);
+
+  const res = await fetch(`${baseUrl}/api/webhooks/boberdoo?secret=real-secret-value`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      Partner_ID: `PARTNER-${suffix}`, TYPE: 23, Filter_Set_ID: `FS-DELIVERY-${suffix}`, SRC: 'Fidadto',
+      Lead_ID: `src-${Date.now()}`, First_Name: 'Source', Last_Name: 'Tracked',
+    }),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  await trackLead(body.leadId);
+
+  const lead = await prisma.lead.findUnique({ where: { id: body.leadId } });
+  assert.equal(lead.recordStoreSourceCode, 'Fidadto');
+  assert.equal(lead.recordStoreSubscriptionId, subscription.id);
+});
+
+test('a delivery with no Filter_Set_ID still attributes the Lead via a best-effort agency + product-category match', async () => {
+  process.env.BOBERDOO_DELIVERY_SECRET = 'real-secret-value';
+  const template = await prisma.recordStoreTemplate.create({
+    data: { slug: `TEST_DELIVERY_FALLBACK_${suffix}`, displayName: 'Test Delivery Fallback', productCategory: 'HOME', leadType: 'INTERNET' },
+  });
+  templateIds.push(template.id);
+  const subscription = await prisma.recordStoreSubscription.create({
+    data: {
+      agencyId, recordStoreTemplateId: template.id, productNameSnapshot: 'Test Delivery Fallback',
+      leadType: 'INTERNET', filterSetType: 'STANDARD', priceSnapshotCents: 600, dailyVolume: 20,
+      status: 'ACTIVE', boberdooFilterSetId: `FS-FALLBACK-${suffix}`,
+    },
+  });
+  subscriptionIds.push(subscription.id);
+
+  const res = await fetch(`${baseUrl}/api/webhooks/boberdoo?secret=real-secret-value`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      Partner_ID: `PARTNER-${suffix}`, TYPE: 21, Lead_ID: `fallback-${Date.now()}`,
+      First_Name: 'Fallback', Last_Name: 'Match',
+    }),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  await trackLead(body.leadId);
+
+  const lead = await prisma.lead.findUnique({ where: { id: body.leadId } });
+  assert.equal(lead.recordStoreSubscriptionId, subscription.id);
 });

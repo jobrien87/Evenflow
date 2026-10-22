@@ -22,6 +22,7 @@ export default function RecordStoreAdminPanel() {
   const [agencies, setAgencies] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [customRequests, setCustomRequests] = useState([]);
+  const [sourceOptimizations, setSourceOptimizations] = useState([]);
   const [platformSettings, setPlatformSettings] = useState(null);
   const [settingsForm, setSettingsForm] = useState(null);
   const [savingSettings, setSavingSettings] = useState(false);
@@ -43,16 +44,18 @@ export default function RecordStoreAdminPanel() {
   async function load() {
     setLoadError('');
     try {
-      const [customersRes, templatesRes, customRequestsRes, settingsRes] = await Promise.all([
+      const [customersRes, templatesRes, customRequestsRes, settingsRes, optimizationsRes] = await Promise.all([
         api.adminRecordStoreCustomers(),
         api.adminRecordStoreTemplates(),
         api.adminCustomRequests(),
         api.recordStorePlatformSettings(),
+        api.adminRecordStoreSourceOptimizations(),
       ]);
       setAgencies(customersRes.agencies);
       setTemplates(templatesRes.templates);
       setCustomRequests(customRequestsRes.requests);
       setPlatformSettings(settingsRes.settings);
+      setSourceOptimizations(optimizationsRes.runs);
       if (!settingsForm) {
         setSettingsForm({
           lowBalanceThreshold: centsToDollarInput(settingsRes.settings.lowBalanceThresholdCents),
@@ -225,7 +228,7 @@ export default function RecordStoreAdminPanel() {
         <SectionHeader>LOW-BALANCE GATE</SectionHeader>
         <Card>
           <div style={s.subLine}>
-            Once an agency has funded their account once, adding a lead type they don't already hold never requires a fresh deposit — unless their real Boberdoo balance has dropped below the threshold below, in which case they must top up past the target before the order is allowed.
+            Once an agency has funded their account once, adding a lead type they don't already hold never requires a fresh deposit — unless their real Record Store balance has dropped below the threshold below, in which case they must top up past the target before the order is allowed.
           </div>
           {settingsForm && (
             <form onSubmit={saveSettings} style={{ ...s.form, marginTop: 12 }}>
@@ -291,7 +294,7 @@ export default function RecordStoreAdminPanel() {
                   {expandedId === a.id && (
                     <div style={s.expandedBox}>
                       <div style={s.debugTitle}>ADVANCED / DEBUG VIEW</div>
-                      <div style={s.debugRow}>Boberdoo Partner ID: {a.boberdooPartnerId || 'none yet'}</div>
+                      <div style={s.debugRow}>Record Store Partner ID: {a.boberdooPartnerId || 'none yet'}</div>
                       <div style={s.debugRow}>Sync error: {a.boberdooSyncError || 'none'}</div>
                       <div style={s.debugRow}>Last sync: {a.boberdooLastSyncAt ? new Date(a.boberdooLastSyncAt).toLocaleString() : 'never'}</div>
                       {a.recordStoreSubscriptions.map((sub) => (
@@ -305,12 +308,12 @@ export default function RecordStoreAdminPanel() {
                       {!a.boberdooPartnerId && (
                         linkForm?.agencyId === a.id ? (
                           <div style={s.linkRow}>
-                            <input style={s.input} placeholder="Existing Boberdoo Partner ID" value={linkForm.partnerId} onChange={(e) => setLinkForm({ ...linkForm, partnerId: e.target.value })} />
+                            <input style={s.input} placeholder="Existing Record Store Partner ID" value={linkForm.partnerId} onChange={(e) => setLinkForm({ ...linkForm, partnerId: e.target.value })} />
                             <Button variant="primary" size="sm" disabled={busyId === a.id} onClick={submitLink}>LINK</Button>
                             <Button variant="secondary" size="sm" onClick={() => setLinkForm(null)}>CANCEL</Button>
                           </div>
                         ) : (
-                          <Button variant="secondary" size="sm" onClick={() => setLinkForm({ agencyId: a.id, partnerId: '' })}>LINK EXISTING BOBERDOO PARTNER</Button>
+                          <Button variant="secondary" size="sm" onClick={() => setLinkForm({ agencyId: a.id, partnerId: '' })}>LINK EXISTING RECORD STORE PARTNER</Button>
                         )
                       )}
                     </div>
@@ -338,7 +341,7 @@ export default function RecordStoreAdminPanel() {
             {customRequests.map((r) => (
               <div key={r.id} style={s.customRow}>
                 <span style={s.colAgency}>{r.agency?.name || '—'}<div style={s.subLine}>{r.leadTypeLabel}</div></span>
-                <span style={s.col}>{(r.sources || []).join(', ') || '—'}</span>
+                <span style={s.col}>{(r.sourceLabels || []).join(', ') || '—'}</span>
                 <span style={s.col}>{r.dailyLimit || '—'}/day</span>
                 <span style={s.col}><Badge tone={CUSTOM_REQUEST_STATUS_TONE[r.status]}>{r.status.replace('_', ' ')}</Badge></span>
                 <span style={s.colActions}>
@@ -364,7 +367,7 @@ export default function RecordStoreAdminPanel() {
             <span style={s.col}>PRICE</span>
             <span style={s.col}>VOLUME RANGE</span>
             <span style={s.col}>DEPOSIT</span>
-            <span style={s.col}>BOBERDOO TYPE</span>
+            <span style={s.col}>LEAD TYPE ID</span>
             <span style={s.col}>ACTIVE</span>
             <span style={s.colActions}>ACTIONS</span>
           </div>
@@ -382,6 +385,34 @@ export default function RecordStoreAdminPanel() {
             </div>
           ))}
         </Card>
+      </section>
+
+      <section style={s.section}>
+        <SectionHeader>SOURCE OPTIMIZATION</SectionHeader>
+        {sourceOptimizations.length === 0 ? (
+          <EmptyState title="No optimization runs yet" description="Every 30-day lead-source check EvenFlow makes — applied, failed, or no change needed — shows up here across every agency." />
+        ) : (
+          <Card style={s.tableCard}>
+            <div style={s.optimizationHeaderRow}>
+              <span style={s.colAgency}>AGENCY / PROGRAM</span>
+              <span style={s.col}>WINDOW</span>
+              <span style={s.col}>STATUS</span>
+              <span style={s.col}>DROPPED</span>
+              <span style={s.colWide}>REASONING</span>
+            </div>
+            {sourceOptimizations.map((r) => (
+              <div key={r.id} style={s.optimizationRow}>
+                <span style={s.colAgency}>{r.subscription?.agency?.name || '—'}<div style={s.subLine}>{r.subscription?.productNameSnapshot}</div></span>
+                <span style={s.col}>{new Date(r.windowStart).toLocaleDateString()} – {new Date(r.windowEnd).toLocaleDateString()}</span>
+                <span style={s.col}>
+                  <Badge tone={r.status === 'APPLIED' ? 'accent' : r.status === 'FAILED' ? 'danger' : 'neutral'}>{r.status.replace(/_/g, ' ')}</Badge>
+                </span>
+                <span style={s.col}>{(r.droppedSourceLabels || []).join(', ') || '—'}</span>
+                <span style={s.colWide}>{r.reasoning}{r.errorMessage && <div style={s.subLine}>{r.errorMessage}</div>}</span>
+              </div>
+            ))}
+          </Card>
+        )}
       </section>
 
       {editingTemplate && (
@@ -413,7 +444,7 @@ function QuoteRequestModal({ request, onClose, onSave, busy }) {
       return;
     }
     if (!boberdooTypeId.trim()) {
-      setErr('Enter the real Boberdoo TYPE id for this lead type before quoting.');
+      setErr('Enter the real lead-exchange TYPE id for this lead type before quoting.');
       return;
     }
     onSave({ quotedPriceCents: cents, boberdooTypeId: boberdooTypeId.trim(), decisionNotes: decisionNotes.trim() || undefined });
@@ -424,11 +455,11 @@ function QuoteRequestModal({ request, onClose, onSave, busy }) {
       <Card style={s.modal} onClick={(e) => e.stopPropagation()}>
         <SectionHeader>QUOTE — {request.agency?.name} ({request.leadTypeLabel})</SectionHeader>
         <form onSubmit={submit} style={s.form}>
-          <div style={s.subLine}>Sources: {(request.sources || []).join(', ') || '—'}</div>
+          <div style={s.subLine}>Sources: {(request.sourceLabels || []).join(', ') || '—'}</div>
           <div style={s.subLine}>Daily cap: {request.dailyLimit || '—'}/day{request.weeklyLimit ? ` · Weekly: ${request.weeklyLimit}` : ''}{request.monthlyLimit ? ` · Monthly: ${request.monthlyLimit}` : ''}</div>
           {request.notes && <div style={s.subLine}>Notes: {request.notes}</div>}
           <label style={s.fieldLabel}>Price ($ per lead)<input style={s.input} type="number" step="0.01" min="0" value={priceDollars} onChange={(e) => setPriceDollars(e.target.value)} autoFocus /></label>
-          <label style={s.fieldLabel}>Boberdoo TYPE id<input style={s.input} value={boberdooTypeId} onChange={(e) => setBoberdooTypeId(e.target.value)} placeholder="e.g. 23" /></label>
+          <label style={s.fieldLabel}>Lead Type ID<input style={s.input} value={boberdooTypeId} onChange={(e) => setBoberdooTypeId(e.target.value)} placeholder="e.g. 23" /></label>
           <label style={s.fieldLabel}>Note to the agency (optional)<textarea style={{ ...s.input, minHeight: 60 }} value={decisionNotes} onChange={(e) => setDecisionNotes(e.target.value)} /></label>
           {err && <div style={s.error}>{err}</div>}
           <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
@@ -519,8 +550,8 @@ function TemplateEditModal({ template, onClose, onSave, busy }) {
             <label style={s.fieldLabel}>Max volume<input style={s.input} type="number" value={form.maximumDailyVolume} onChange={(e) => setForm({ ...form, maximumDailyVolume: e.target.value })} /></label>
           </div>
           <label style={s.fieldLabel}>Minimum deposit ($)<input style={s.input} type="number" step="0.01" min="0" value={form.minimumDeposit} onChange={(e) => setForm({ ...form, minimumDeposit: e.target.value })} /></label>
-          <label style={s.fieldLabel}>Boberdoo Lead_Type ID<input style={s.input} value={form.boberdooTypeId} onChange={(e) => setForm({ ...form, boberdooTypeId: e.target.value })} placeholder="e.g. 21" /></label>
-          <label style={s.fieldLabel}>Boberdoo template reference (label only)<input style={s.input} value={form.boberdooTemplateReference} onChange={(e) => setForm({ ...form, boberdooTemplateReference: e.target.value })} /></label>
+          <label style={s.fieldLabel}>Lead_Type ID (lead exchange)<input style={s.input} value={form.boberdooTypeId} onChange={(e) => setForm({ ...form, boberdooTypeId: e.target.value })} placeholder="e.g. 21" /></label>
+          <label style={s.fieldLabel}>Lead exchange template reference (label only)<input style={s.input} value={form.boberdooTemplateReference} onChange={(e) => setForm({ ...form, boberdooTemplateReference: e.target.value })} /></label>
           <label style={s.fieldLabel}>
             Configuration JSON (raw insertUpdateFilterSet / iprInsertFilterSet fields — e.g. {"{"}"volumeField": "leads_per_week"{"}"})
             <textarea style={{ ...s.input, minHeight: 100, fontFamily: 'monospace', fontSize: 11 }} value={form.configurationJson} onChange={(e) => setForm({ ...form, configurationJson: e.target.value })} />
@@ -549,6 +580,9 @@ const s = {
   templateHeaderRow: { display: 'grid', gridTemplateColumns: '2fr 1fr 1.2fr 1fr 1fr 0.8fr 1fr', padding: '10px 16px', fontSize: 10, letterSpacing: 1, color: 'var(--text-muted)', fontWeight: 700, borderBottom: '1px solid var(--border-hairline)' },
   customHeaderRow: { display: 'grid', gridTemplateColumns: '2fr 1.5fr 1fr 1fr 1.5fr', padding: '10px 16px', fontSize: 10, letterSpacing: 1, color: 'var(--text-muted)', fontWeight: 700, borderBottom: '1px solid var(--border-hairline)' },
   customRow: { display: 'grid', gridTemplateColumns: '2fr 1.5fr 1fr 1fr 1.5fr', padding: '10px 16px', fontSize: 12, color: 'var(--text-primary)', borderBottom: '1px solid var(--border-hairline)', alignItems: 'center' },
+  optimizationHeaderRow: { display: 'grid', gridTemplateColumns: '1.5fr 1.2fr 1fr 1.2fr 3fr', padding: '10px 16px', fontSize: 10, letterSpacing: 1, color: 'var(--text-muted)', fontWeight: 700, borderBottom: '1px solid var(--border-hairline)' },
+  optimizationRow: { display: 'grid', gridTemplateColumns: '1.5fr 1.2fr 1fr 1.2fr 3fr', padding: '10px 16px', fontSize: 12, color: 'var(--text-primary)', borderBottom: '1px solid var(--border-hairline)', alignItems: 'center', gap: 8 },
+  colWide: { color: 'var(--text-secondary)', fontSize: 11, lineHeight: 1.4 },
   tableRow: { display: 'grid', gridTemplateColumns: '2fr 1.2fr 0.8fr 0.8fr 1fr 1.2fr 2fr', padding: '10px 16px', fontSize: 12, color: 'var(--text-primary)', borderBottom: '1px solid var(--border-hairline)', alignItems: 'center' },
   colAgency: { fontWeight: 600 },
   col: { color: 'var(--text-secondary)' },

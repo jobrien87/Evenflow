@@ -106,6 +106,23 @@ async function main() {
       console.log(`Created Record Store template: ${t.slug}`);
     }
   }
+
+  // Seed the lead exchange's 3 confirmed-real source codes in a fixed,
+  // known order so they get EvenFlow A/B/C respectively (see
+  // lib/recordStoreSourceLabels.js — the label is derived purely from
+  // each row's insertion-order id, so this seeding order IS the cadence).
+  // Sequential (not Promise.all) and one-at-a-time by design, so a first
+  // run always assigns ids 1/2/3 in this exact order. A 4th+ real source
+  // never needs seeding here — getOrCreateSourceLabel assigns EvenFlow D,
+  // E, ... automatically the first time EvenFlow ever sees it.
+  const recordStoreSourceCodes = ['Fidadto', 'Quoting_Fast', 'Visiqua'];
+  for (const sourceCode of recordStoreSourceCodes) {
+    const existing = await prisma.recordStoreSourceLabel.findUnique({ where: { sourceCode } });
+    if (!existing) {
+      await prisma.recordStoreSourceLabel.create({ data: { sourceCode } });
+      console.log(`Created Record Store source label for: ${sourceCode}`);
+    }
+  }
 }
 
 main()

@@ -19,6 +19,8 @@ const { recordAudit } = require('../lib/audit');
 const provisioning = require('../lib/recordStoreProvisioning');
 const stripeLib = require('../lib/stripe');
 const { notifyAgencyOwners, notifyPlatformOwners } = require('../lib/notifications');
+const { computeSourcePerformance } = require('../lib/recordStoreSourcePerformance');
+const { labelSources, decodeAcceptedSources } = require('../lib/recordStoreSourceLabels');
 
 const APP_URL = process.env.APP_URL || 'http://localhost:5173';
 
@@ -128,7 +130,8 @@ router.get('/custom-requests', requireRole(...AGENCY_ROLES), async (req, res, ne
     const agencyId = scopedAgencyId(req);
     if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
     const requests = await prisma.recordStoreCustomRequest.findMany({ where: { agencyId }, orderBy: { createdAt: 'desc' } });
-    return res.json({ success: true, requests });
+    const withLabels = await Promise.all(requests.map(async (r) => ({ ...r, sourceLabels: (await labelSources(r.sources)).map((l) => l.label) })));
+    return res.json({ success: true, requests: withLabels });
   } catch (err) {
     next(err);
   }
@@ -176,14 +179,17 @@ router.get('/subscriptions', requireRole(...AGENCY_ROLES), async (req, res, next
     const subscriptions = await prisma.recordStoreSubscription.findMany({
       where: { agencyId, status: { not: 'CANCELLED' } },
       orderBy: { createdAt: 'desc' },
-      include: { template: { select: { slug: true, displayName: true, isIpr: true } } },
+      include: { template: { select: { slug: true, displayName: true, isIpr: true, configurationJson: true } } },
     });
     // Never expose raw Boberdoo IDs to Agency Owners — only Platform Owner's
     // advanced/debug view does (master spec §16).
-    const sanitized = subscriptions.map((s) => {
+    const sanitized = await Promise.all(subscriptions.map(async (s) => {
       const { boberdooPartnerId, boberdooFilterSetId, ...rest } = s;
-      return req.user.role === 'PLATFORM_OWNER' ? s : rest;
-    });
+      const config = { ...(s.template?.configurationJson || {}), ...(s.customConfigurationJson || {}) };
+      const acceptedSourceLabels = await decodeAcceptedSources(config.Accepted_Sources);
+      const base = req.user.role === 'PLATFORM_OWNER' ? s : rest;
+      return { ...base, acceptedSourceLabels };
+    }));
     return res.json({ success: true, subscriptions: sanitized });
   } catch (err) {
     next(err);
@@ -414,6 +420,56 @@ router.post('/subscriptions/:id/volume', mutationLimiter, requireRole(...AGENCY_
   }
 });
 
+// ---- Source performance / 30-day auto-optimization --------------------
+// Real, continuously-refreshed per-source numbers (lead count, quote
+// rate, close rate, revenue) for one lead program — see
+// lib/recordStoreSourcePerformance.js. Defaults to the same 30-day
+// rolling window the automatic optimizer itself evaluates, so what an
+// agency sees here always matches the reasoning behind its last
+// automatic change.
+router.get('/subscriptions/:id/source-performance', requireRole(...AGENCY_ROLES), async (req, res, next) => {
+  try {
+    const { subscription, error } = await loadOwnedSubscription(req);
+    if (error) return res.status(error.status).json(error.body);
+    const to = req.query.to ? new Date(req.query.to) : new Date();
+    const from = req.query.from ? new Date(req.query.from) : new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const performance = await computeSourcePerformance({ subscriptionId: subscription.id, from, to });
+    const history = await prisma.recordStoreSourceOptimization.findMany({
+      where: { recordStoreSubscriptionId: subscription.id },
+      orderBy: { createdAt: 'desc' },
+      take: 12,
+      select: { id: true, windowStart: true, windowEnd: true, droppedSources: true, reasoning: true, status: true, createdAt: true },
+    });
+    const historyLabeled = await Promise.all(history.map(async (h) => ({ ...h, droppedSourceLabels: (await labelSources(h.droppedSources)).map((l) => l.label) })));
+    return res.json({ success: true, performance, history: historyLabeled, autoOptimizeSources: subscription.autoOptimizeSources });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const autoOptimizeSchema = z.object({ autoOptimizeSources: z.boolean() });
+
+router.patch('/subscriptions/:id/auto-optimize', mutationLimiter, requireRole(...AGENCY_ROLES), async (req, res, next) => {
+  try {
+    const parsed = autoOptimizeSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    const { subscription, error } = await loadOwnedSubscription(req);
+    if (error) return res.status(error.status).json(error.body);
+    const updated = await prisma.recordStoreSubscription.update({
+      where: { id: subscription.id },
+      data: { autoOptimizeSources: parsed.data.autoOptimizeSources },
+    });
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: subscription.agencyId,
+      action: 'RECORD_STORE_AUTO_OPTIMIZE_TOGGLED', entityType: 'RecordStoreSubscription', entityId: subscription.id,
+      after: { autoOptimizeSources: parsed.data.autoOptimizeSources }, correlationId: req.correlationId,
+    });
+    return res.json({ success: true, subscription: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ---- Pause / resume (whole account) --------------------------------------
 
 router.post('/account/pause-all', mutationLimiter, requireRole(...AGENCY_ROLES), async (req, res, next) => {
@@ -620,6 +676,29 @@ router.post('/admin/agencies/:agencyId/pause-account', requireRole('PLATFORM_OWN
   }
 });
 
+// Cross-agency oversight of the automatic optimizer — every run it has
+// ever made (or attempted), newest first, so a Platform Owner can audit
+// "what has EvenFlow actually been changing" across the whole book of
+// business, not just trust that it's working.
+router.get('/admin/source-optimizations', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const where = req.query.status ? { status: req.query.status } : {};
+    const runs = await prisma.recordStoreSourceOptimization.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      include: { subscription: { select: { agencyId: true, productNameSnapshot: true, agency: { select: { name: true } } } } },
+    });
+    const withLabels = await Promise.all(runs.map(async (r) => ({
+      ...r,
+      droppedSourceLabels: (await labelSources(r.droppedSources)).map((l) => l.label),
+    })));
+    return res.json({ success: true, runs: withLabels });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/admin/agencies/:agencyId/resume-account', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
   try {
     const result = await provisioning.resumeAccount(req.params.agencyId, req.user.id, req.correlationId);
@@ -644,7 +723,11 @@ router.get('/admin/custom-requests', requireRole('PLATFORM_OWNER'), async (req, 
       select: { id: true, name: true },
     });
     const agencyNameById = new Map(agencies.map((a) => [a.id, a.name]));
-    const withAgency = requests.map((r) => ({ ...r, agency: { name: agencyNameById.get(r.agencyId) || '—' } }));
+    const withAgency = await Promise.all(requests.map(async (r) => ({
+      ...r,
+      agency: { name: agencyNameById.get(r.agencyId) || '—' },
+      sourceLabels: (await labelSources(r.sources)).map((l) => l.label),
+    })));
     return res.json({ success: true, requests: withAgency });
   } catch (err) {
     next(err);

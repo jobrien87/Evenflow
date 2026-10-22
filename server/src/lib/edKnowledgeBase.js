@@ -253,7 +253,7 @@ const ENTRIES = [
     id: 'record-store-platform',
     roles: ['PLATFORM_OWNER'],
     title: 'Record Store (Platform Owner)',
-    body: "For a Platform Owner, Record Store is the real admin control center for the Boberdoo-backed lead marketplace — provisioning, pausing/resuming, and volume changes for agencies that have purchased lead programs. For an Agency Owner today, Record Store is a browsable preview of the live storefront — a 'COMING SOON' banner is shown and every purchase/account button is disabled, but the full page and purchase wizard can be explored.",
+    body: "For a Platform Owner, Record Store is the real admin control center for the wholesale lead marketplace — provisioning, pausing/resuming, and volume changes for agencies that have purchased lead programs. For an Agency Owner today, Record Store is a browsable preview of the live storefront — a 'COMING SOON' banner is shown and every purchase/account button is disabled, but the full page and purchase wizard can be explored.",
   },
   {
     id: 'support-platform',

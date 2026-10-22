@@ -50,6 +50,7 @@ export default function RecordStorePanel() {
   const [confirmingResumeAll, setConfirmingResumeAll] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [status, setStatus] = useState('');
+  const [performanceSub, setPerformanceSub] = useState(null); // subscription whose performance modal is open
   const fundingResult = new URLSearchParams(window.location.search).get('funding');
 
   useEffect(() => {
@@ -259,6 +260,9 @@ export default function RecordStorePanel() {
                     <StatTile label="Daily Volume" value={`${sub.dailyVolume}/day`} tone="grey" />
                     <StatTile label="Price" value={centsToDollars(sub.priceSnapshotCents)} tone="grey" />
                   </div>
+                  {sub.acceptedSourceLabels?.length > 0 && (
+                    <div style={s.productMeta}>Sources: {sub.acceptedSourceLabels.join(', ')}</div>
+                  )}
                   {sub.boberdooSyncError && <div style={s.syncError}>We couldn't update your lead program. Your current settings have not been changed. Our team has been notified.</div>}
                   {sub.errorMessage && sub.status === 'ERROR' && <div style={s.syncError}>Setup is still in progress — our team has been notified and will retry shortly.</div>}
                   <div style={s.programActions}>
@@ -270,12 +274,19 @@ export default function RecordStorePanel() {
                     {(sub.status === 'ACTIVE' || sub.status === 'PAUSED') && (
                       <Button variant="secondary" size="sm" onClick={() => setVolumeEdit({ subscription: sub, value: sub.dailyVolume })}>CHANGE VOLUME</Button>
                     )}
+                    {(sub.status === 'ACTIVE' || sub.status === 'PAUSED') && (
+                      <Button variant="secondary" size="sm" onClick={() => setPerformanceSub(sub)}>SOURCE PERFORMANCE</Button>
+                    )}
                   </div>
                 </Card>
               );
             })}
           </div>
         </section>
+      )}
+
+      {performanceSub && (
+        <SourcePerformanceModal subscription={performanceSub} onClose={() => setPerformanceSub(null)} onToggled={(updated) => setSubscriptions((prev) => prev.map((s) => (s.id === updated.id ? { ...s, autoOptimizeSources: updated.autoOptimizeSources } : s)))} />
       )}
 
       {customRequests.length > 0 && (
@@ -290,7 +301,7 @@ export default function RecordStorePanel() {
                     <div style={s.programName}>{r.leadTypeLabel} (Custom)</div>
                     <Badge tone={cs.tone}>{cs.label}</Badge>
                   </div>
-                  <div style={s.productMeta}>Sources: {r.sources.join(', ') || '—'}</div>
+                  <div style={s.productMeta}>Sources: {(r.sourceLabels || []).join(', ') || '—'}</div>
                   <div style={s.productMeta}>Daily cap: {r.dailyLimit || '—'}/day</div>
                   {r.status === 'QUOTED' && (
                     <>
@@ -445,6 +456,98 @@ export default function RecordStorePanel() {
   );
 }
 
+function centsToDisplay(cents) {
+  if (cents === null || cents === undefined) return '—';
+  return `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+// Real per-source performance for one lead program, plus the automatic
+// 30-day optimizer's own on/off switch and recent decision history — so
+// "EvenFlow is optimizing your leads" is something an agency can read
+// back for itself, not just a marketing line.
+function SourcePerformanceModal({ subscription, onClose, onToggled }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [toggling, setToggling] = useState(false);
+  const [autoOptimize, setAutoOptimize] = useState(subscription.autoOptimizeSources);
+
+  useEffect(() => {
+    api.recordStoreSourcePerformance(subscription.id)
+      .then((res) => { setData(res); setAutoOptimize(res.autoOptimizeSources); })
+      .catch((err) => setError(err.data?.message || 'Could not load source performance.'));
+  }, [subscription.id]);
+
+  async function toggleAutoOptimize() {
+    setToggling(true);
+    try {
+      const res = await api.setRecordStoreAutoOptimize(subscription.id, !autoOptimize);
+      setAutoOptimize(res.subscription.autoOptimizeSources);
+      onToggled(res.subscription);
+    } catch {
+      setError('Could not save that setting.');
+    } finally {
+      setToggling(false);
+    }
+  }
+
+  return (
+    <div style={s.volumeModalBackdrop} onClick={onClose}>
+      <Card style={{ ...s.volumeModal, maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+        <div style={s.sectionTitle}>SOURCE PERFORMANCE — {subscription.productNameSnapshot}</div>
+        <div style={s.helpText}>
+          EvenFlow tracks every source's real quote rate, close rate, and revenue, and automatically drops any source that's underperforming once there's enough data — about every 30 days.
+        </div>
+
+        <label style={s.autoOptimizeRow}>
+          <input type="checkbox" checked={!!autoOptimize} disabled={toggling} onChange={toggleAutoOptimize} />
+          Automatically optimize this program's sources
+        </label>
+
+        {error && <div style={s.error}>{error}</div>}
+        {!data && !error && <div style={s.helpText}>Loading…</div>}
+
+        {data && (
+          <>
+            <div style={s.perfTableHeader}>
+              <span>SOURCE</span><span>LEADS</span><span>QUOTE RATE</span><span>CLOSE RATE</span><span>SPEND</span><span>REVENUE</span>
+            </div>
+            {data.performance.perSource.length === 0 ? (
+              <div style={s.helpText}>No leads delivered in the last 30 days yet.</div>
+            ) : (
+              data.performance.perSource.map((row) => (
+                <div key={row.sourceCode} style={s.perfTableRow}>
+                  <span>{row.label}{!row.hasMinimumSample && <span style={s.lowSampleTag}> (low sample)</span>}</span>
+                  <span>{row.leadCount}</span>
+                  <span>{row.quoteRate ?? '—'}%</span>
+                  <span>{row.closeRate ?? '—'}%</span>
+                  <span>{centsToDisplay(row.costCents)}</span>
+                  <span>{centsToDisplay(row.revenueCents)}</span>
+                </div>
+              ))
+            )}
+
+            {data.history.length > 0 && (
+              <>
+                <div style={{ ...s.sectionTitle, fontSize: 12, marginTop: 16 }}>RECENT OPTIMIZATION HISTORY</div>
+                {data.history.map((h) => (
+                  <div key={h.id} style={s.historyRow}>
+                    <div style={s.historyDate}>{new Date(h.createdAt).toLocaleDateString()} · {h.status.replace(/_/g, ' ')}</div>
+                    <div>{h.reasoning}</div>
+                  </div>
+                ))}
+              </>
+            )}
+          </>
+        )}
+
+        <div style={s.confirmActions}>
+          <Button variant="secondary" size="sm" onClick={onClose}>CLOSE</Button>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 const s = {
   wrap: {},
   previewBanner: {
@@ -487,4 +590,11 @@ const s = {
   volumeModal: { maxWidth: 360, width: '100%', display: 'flex', flexDirection: 'column', gap: 10 },
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },
   helpText: { color: 'var(--text-muted)', fontSize: 12 },
+  error: { color: 'var(--danger)', fontSize: 12 },
+  autoOptimizeRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-primary)', padding: '8px 0' },
+  perfTableHeader: { display: 'grid', gridTemplateColumns: '1.5fr 0.8fr 1fr 1fr 1fr 1fr', fontSize: 10, letterSpacing: 0.5, color: 'var(--text-muted)', fontWeight: 700, padding: '6px 0', borderBottom: '1px solid var(--border-hairline)' },
+  perfTableRow: { display: 'grid', gridTemplateColumns: '1.5fr 0.8fr 1fr 1fr 1fr 1fr', fontSize: 12, color: 'var(--text-primary)', padding: '6px 0', borderBottom: '1px solid var(--border-hairline)', alignItems: 'center' },
+  lowSampleTag: { color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 10 },
+  historyRow: { fontSize: 11, color: 'var(--text-secondary)', padding: '6px 0', borderBottom: '1px solid var(--border-hairline)' },
+  historyDate: { color: 'var(--text-muted)', fontSize: 10, marginBottom: 2 },
 };

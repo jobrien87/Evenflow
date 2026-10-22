@@ -34,7 +34,7 @@ function maskKey(key) {
 // an exception.
 async function callAction(action, params = {}) {
   if (!isConfigured()) {
-    return { success: false, configured: false, errorCode: 'NOT_CONFIGURED', errorMessage: 'Boberdoo is not configured.' };
+    return { success: false, configured: false, errorCode: 'NOT_CONFIGURED', errorMessage: "Record Store's lead exchange is not configured." };
   }
 
   const body = new URLSearchParams();
@@ -57,21 +57,21 @@ async function callAction(action, params = {}) {
   }
 
   if (!res.ok) {
-    return { success: false, configured: true, errorCode: 'HTTP_ERROR', errorMessage: `Boberdoo returned HTTP ${res.status}` };
+    return { success: false, configured: true, errorCode: 'HTTP_ERROR', errorMessage: `Record Store's lead exchange returned HTTP ${res.status}` };
   }
 
   let json;
   try {
     json = await res.json();
   } catch (err) {
-    return { success: false, configured: true, errorCode: 'BAD_RESPONSE', errorMessage: 'Boberdoo returned a non-JSON response.' };
+    return { success: false, configured: true, errorCode: 'BAD_RESPONSE', errorMessage: "Record Store's lead exchange returned a non-JSON response." };
   }
 
   const response = json.response || {};
   const errorBlock = response.errors || response.error;
   if (errorBlock) {
     const raw = errorBlock.error;
-    const errorMessage = Array.isArray(raw) ? raw.join('; ') : (raw || 'Unknown Boberdoo error');
+    const errorMessage = Array.isArray(raw) ? raw.join('; ') : (raw || "Unknown error from Record Store's lead exchange");
     return { success: false, configured: true, errorCode: 'PROVIDER_ERROR', errorMessage, raw: response };
   }
 
