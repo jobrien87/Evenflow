@@ -98,8 +98,12 @@ router.post('/', async (req, res) => {
 
   const partnerId = firstOf(body, ['Partner_ID', 'PartnerID', 'partner_id', 'partnerId']);
   const leadTypeId = firstOf(body, ['TYPE', 'Lead_Type_ID', 'LeadType', 'lead_type_id', 'leadTypeId']);
-  const externalLeadId = firstOf(body, ['Lead_ID', 'LeadID', 'lead_id', 'leadId', 'Ping_ID', 'Post_ID']);
-  const filterSetId = firstOf(body, ['Filter_Set_ID', 'FilterSetID', 'filter_set_id', 'filterSetId']);
+  // Some Boberdoo "Delivery Mapping" field labels use a literal space
+  // (e.g. "Lead ID", "Filter Set ID") rather than underscores — confirmed
+  // 2026-10-22 against a real account's Custom Delivery Wizard — so both
+  // forms are tried.
+  const externalLeadId = firstOf(body, ['Lead_ID', 'Lead ID', 'LeadID', 'lead_id', 'leadId', 'Ping_ID', 'Post_ID']);
+  const filterSetId = firstOf(body, ['Filter_Set_ID', 'Filter Set ID', 'FilterSetID', 'filter_set_id', 'filterSetId']);
   // The raw source code this lead matched under (e.g. "Fidadto") — the
   // one field recordStoreSourcePerformance.js's per-source reporting and
   // the 30-day auto-optimization sweep are built on. Never shown to any
@@ -161,7 +165,7 @@ router.post('/', async (req, res) => {
   const firstName = firstOf(body, ['First_Name', 'FirstName', 'first_name', 'firstName']) || 'Unknown';
   const lastName = firstOf(body, ['Last_Name', 'LastName', 'last_name', 'lastName']) || 'Lead';
   const email = firstOf(body, ['Email', 'Email_Address', 'email']);
-  const phone = firstOf(body, ['Phone_Home', 'Phone', 'Phone_Number', 'phone']);
+  const phone = firstOf(body, ['Primary_Phone', 'Phone_Home', 'Phone', 'Phone_Number', 'phone']);
   const address = firstOf(body, ['Address', 'Street_Address', 'address']);
   const city = firstOf(body, ['City', 'city']);
   const state = firstOf(body, ['State', 'state']);
