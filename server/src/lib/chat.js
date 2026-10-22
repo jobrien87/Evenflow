@@ -120,11 +120,42 @@ async function postMessage({ conversationId, authorId, content, replyToId, menti
     ? (await activePlatformOwners()).map((u) => u.id)
     : [];
 
+  // "@team" anywhere in the message (case-insensitive, word-boundary-safe
+  // so "@teammate"/"@teams" never false-positive) notifies every active
+  // user in the conversation's own agency — not just whoever happens to
+  // already be a participant of this specific thread. Detected from the
+  // real message text itself, server-side, never a client-supplied flag —
+  // same "never trust the client" reasoning mentionedUserIds gets below.
+  const mentionsTeam = /(^|\s)@team\b/i.test(content);
+  const teamIds = mentionsTeam && conversation
+    ? (await prisma.user.findMany({
+        where: { agencyId: conversation.agencyId, status: 'ACTIVE', id: { not: authorId } },
+        select: { id: true },
+      })).map((u) => u.id)
+    : [];
+
+  // A Lead/Transfer/DM thread's real participants are normally just a few
+  // specific people — @team-mentioning one of these must not leave the
+  // rest of the agency notified of a thread they can't actually open
+  // (isParticipant gates read/write access everywhere else in this file).
+  // Making them real participants is also just the honest meaning of
+  // "@team" here: inviting the whole agency IN, not pinging them from
+  // outside it — the same standing every AGENCY room's own live-synced
+  // membership already gives everyone, where this is a no-op since
+  // they're already real participants.
+  if (teamIds.length > 0) {
+    await prisma.conversationParticipant.createMany({
+      data: teamIds.map((userId) => ({ conversationId, userId })),
+      skipDuplicates: true,
+    });
+  }
+
   // Never trust client-supplied mentionedUserIds blindly — only a real
-  // participant of THIS conversation, or (in an AGENCY room) an active
-  // Platform Owner, can actually be mentioned. Never the author themselves.
-  const validMentionIds = [...new Set(mentionedUserIds || [])].filter(
-    (id) => id !== authorId && (others.some((p) => p.userId === id) || platformOwnerIds.includes(id))
+  // participant of THIS conversation, an active Platform Owner (in an
+  // AGENCY room), or anyone swept in by a real "@team" above can actually
+  // be mentioned. Never the author themselves.
+  const validMentionIds = [...new Set([...(mentionedUserIds || []), ...teamIds])].filter(
+    (id) => id !== authorId && (others.some((p) => p.userId === id) || platformOwnerIds.includes(id) || teamIds.includes(id))
   );
 
   const message = await prisma.message.create({
@@ -145,7 +176,9 @@ async function postMessage({ conversationId, authorId, content, replyToId, menti
   const replyTitle = validReplyToId
     ? `${author.firstName} ${author.lastName} replied to your message`
     : `New message from ${author.firstName} ${author.lastName}`;
-  const mentionTitle = `${author.firstName} ${author.lastName} mentioned you`;
+  const mentionTitle = mentionsTeam
+    ? `${author.firstName} ${author.lastName} mentioned @team`
+    : `${author.firstName} ${author.lastName} mentioned you`;
   const body = content.length > 140 ? `${content.slice(0, 140)}…` : content;
 
   // A Platform Owner validly @mentioned above but not a real participant

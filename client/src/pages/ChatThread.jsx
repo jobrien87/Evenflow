@@ -16,18 +16,28 @@ function truncate(text, max = 80) {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
+// The one reserved, non-user mention keyword — matches the server's own
+// detection in lib/chat.js's postMessage exactly (case-insensitive, word-
+// boundary-safe so "@teammate"/"@teams" never false-positive). Always
+// highlighted regardless of this message's real `mentions` array, since
+// it's fixed text, not an arbitrary user-controlled name.
+const TEAM_MENTION_PATTERN = /@team\b/i;
+
 // Splits plain message content on any exact "FirstName LastName" occurrence
 // of a user actually recorded in that message's own `mentions` (never a
 // regex built from arbitrary user-controlled name text) and wraps each hit
-// in a highlighted span. `content` itself stays plain text — mentions are
-// never markup — so this is the one place that turns a mention back into
-// something visually distinct.
+// in a highlighted span, plus the literal "@team" keyword wherever it
+// appears. `content` itself stays plain text — mentions are never markup —
+// so this is the one place that turns a mention back into something
+// visually distinct.
 function renderContentWithMentions(content, mentions) {
   // Includes the leading "@" in the matched token itself — content already
   // contains the literal inserted text ("@FirstName LastName"), so matching
   // just the name would leave the "@" stranded in the preceding plain-text
   // segment.
-  const tokens = [...new Set((mentions || []).map((m) => `@${m.user?.firstName || ''} ${m.user?.lastName || ''}`.trim()))].filter((t) => t.length > 2);
+  const names = [...new Set((mentions || []).map((m) => `@${m.user?.firstName || ''} ${m.user?.lastName || ''}`.trim()))].filter((t) => t.length > 2);
+  const teamMatch = content.match(TEAM_MENTION_PATTERN);
+  const tokens = teamMatch ? [...names, teamMatch[0]] : names;
   if (tokens.length === 0) return content;
   const segments = [];
   let i = 0;
@@ -188,23 +198,33 @@ export default function ChatThread({ entityType, entityId, title, onClose, varia
     }
   }
 
+  // A reserved pseudo-candidate, not a real user — never sent as a
+  // mentionedUserId (the server detects the literal "@team" text itself,
+  // see lib/chat.js's postMessage), so it needs no id of its own beyond a
+  // stable React key and a way for selectMention to recognize it.
+  const TEAM_MENTION = { id: '__TEAM__', firstName: 'Team', lastName: '' };
+
   const mentionMatches = mentionQuery
-    ? participants
-        .filter((p) => {
+    ? [
+        ...('team'.startsWith(mentionQuery.text.toLowerCase()) ? [TEAM_MENTION] : []),
+        ...participants.filter((p) => {
           const q = mentionQuery.text.toLowerCase();
           return p.firstName?.toLowerCase().startsWith(q) || p.lastName?.toLowerCase().startsWith(q);
-        })
-        .slice(0, 6)
+        }),
+      ].slice(0, 6)
     : [];
 
   function selectMention(p) {
     if (!mentionQuery) return;
-    const name = `${p.firstName} ${p.lastName}`;
+    const isTeam = p.id === TEAM_MENTION.id;
+    const name = isTeam ? 'team' : `${p.firstName} ${p.lastName}`;
     const before = draft.slice(0, mentionQuery.start);
     const after = draft.slice(mentionQuery.start + 1 + mentionQuery.text.length);
     const inserted = `@${name} `;
     setDraft(`${before}${inserted}${after}`);
-    setMentionedUsers((prev) => (prev.some((u) => u.id === p.id) ? prev : [...prev, p]));
+    if (!isTeam) {
+      setMentionedUsers((prev) => (prev.some((u) => u.id === p.id) ? prev : [...prev, p]));
+    }
     setMentionQuery(null);
     requestAnimationFrame(() => {
       const el = inputRef.current;
@@ -317,7 +337,11 @@ export default function ChatThread({ entityType, entityId, title, onClose, varia
               onMouseDown={(e) => { e.preventDefault(); selectMention(p); }}
               onMouseEnter={() => setMentionHighlight(i)}
             >
-              {p.firstName} {p.lastName}
+              {p.id === TEAM_MENTION.id ? (
+                <>Team <span style={s.mentionTeamHint}>— notify everyone in the agency</span></>
+              ) : (
+                <>{p.firstName} {p.lastName}</>
+              )}
             </div>
           ))}
         </div>
@@ -390,6 +414,7 @@ const s = {
   replyBarCancel: { background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 13, flexShrink: 0 },
   mentionDropdown: { display: 'flex', flexDirection: 'column', background: 'var(--bg-elevated)', border: '1px solid var(--border-strong)', borderRadius: 6, marginBottom: 8, overflow: 'hidden' },
   mentionItem: (active) => ({ padding: '7px 12px', fontSize: 12, cursor: 'pointer', color: 'var(--text-primary)', background: active ? 'var(--bg-hover)' : 'transparent' }),
+  mentionTeamHint: { color: 'var(--text-muted)', fontWeight: 400 },
   inputRow: { display: 'flex', gap: 8 },
   input: { flex: 1, padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)', fontSize: 13 },
   sendButton: { padding: '10px 16px', background: 'var(--accent)', border: 'none', borderRadius: 6, fontWeight: 700, cursor: 'pointer', fontSize: 12 },

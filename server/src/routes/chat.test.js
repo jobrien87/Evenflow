@@ -303,3 +303,80 @@ test('mentioning a real participant records a MessageMention and fires a chat.me
   const foundDropped = messages2.find((m) => m.id === droppedMessage.id);
   assert.equal(foundDropped.mentions.length, 0, 'a fake id and the author\'s own id must both be dropped, never stored as a mention');
 });
+
+test('"@team" in a LEAD thread notifies every active agency member and makes them real participants, not just whoever was already in the thread', async () => {
+  const entityRes = await fetch(`${baseUrl}/api/chat/conversations/entity/LEAD/${leadId}`, { headers: { Cookie: ownerCookie } });
+  const { conversation } = await entityRes.json();
+
+  // The producer is a real, active agency member but was never added to
+  // this LEAD thread (its participants are only the lead's assignedToId/
+  // createdById/opener, per routes/chat.js — all ownerId here).
+  const beforeRow = await prisma.conversationParticipant.findUnique({
+    where: { conversationId_userId: { conversationId: conversation.id, userId: producerId } },
+  });
+  assert.equal(beforeRow, null, 'the producer must not already be a participant of this lead thread');
+
+  const postRes = await fetch(`${baseUrl}/api/chat/conversations/${conversation.id}/messages`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ content: 'Heads up @team, need eyes on this one.' }),
+  });
+  assert.equal(postRes.status, 201);
+  const { message } = await postRes.json();
+
+  const getRes = await fetch(`${baseUrl}/api/chat/conversations/${conversation.id}/messages`, { headers: { Cookie: ownerCookie } });
+  const { messages } = await getRes.json();
+  const found = messages.find((m) => m.id === message.id);
+  assert.ok(found.mentions.some((m) => m.userId === producerId), 'every active agency member must be recorded as mentioned, not just real participants of this thread');
+
+  const afterRow = await prisma.conversationParticipant.findUnique({
+    where: { conversationId_userId: { conversationId: conversation.id, userId: producerId } },
+  });
+  assert.ok(afterRow, 'the producer must become a real participant so the notification actually leads somewhere they can read');
+
+  const notification = await prisma.notification.findFirst({
+    where: { userId: producerId, type: 'chat.mention', relatedEntityId: conversation.relatedEntityId },
+    orderBy: { createdAt: 'desc' },
+  });
+  assert.ok(notification, 'every active agency member must get a chat.mention notification from "@team"');
+  assert.match(notification.title, /mentioned @team/);
+});
+
+test('"@team" never sweeps in a deactivated agency member — only the active roster', async () => {
+  const deactivated = await prisma.user.create({
+    data: { email: `chat-deactivated-${suffix}@test.local`, passwordHash: 'x', firstName: 'Former', lastName: 'Rep', role: 'PRODUCER', agencyId, status: 'DEACTIVATED' },
+  });
+
+  const entityRes = await fetch(`${baseUrl}/api/chat/conversations/entity/LEAD/${leadId}`, { headers: { Cookie: ownerCookie } });
+  const { conversation } = await entityRes.json();
+
+  const postRes = await fetch(`${baseUrl}/api/chat/conversations/${conversation.id}/messages`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ content: '@team another real team mention.' }),
+  });
+  assert.equal(postRes.status, 201);
+  const { message } = await postRes.json();
+
+  const getRes = await fetch(`${baseUrl}/api/chat/conversations/${conversation.id}/messages`, { headers: { Cookie: ownerCookie } });
+  const { messages } = await getRes.json();
+  const found = messages.find((m) => m.id === message.id);
+  assert.ok(!found.mentions.some((m) => m.userId === deactivated.id), '@team means "everyone active," not everyone who ever existed');
+
+  await prisma.user.delete({ where: { id: deactivated.id } });
+});
+
+test('"@teammate" and "@teams" are never mistaken for "@team" — no mass notification on a plain word that happens to start with it', async () => {
+  const entityRes = await fetch(`${baseUrl}/api/chat/conversations/entity/AGENCY/${agencyId}`, { headers: { Cookie: ownerCookie } });
+  const { conversation } = await entityRes.json();
+
+  const postRes = await fetch(`${baseUrl}/api/chat/conversations/${conversation.id}/messages`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ content: 'Ask your @teammate, or check the @teams channel — not a real team mention either way.' }),
+  });
+  assert.equal(postRes.status, 201);
+  const { message } = await postRes.json();
+
+  const getRes = await fetch(`${baseUrl}/api/chat/conversations/${conversation.id}/messages`, { headers: { Cookie: ownerCookie } });
+  const { messages } = await getRes.json();
+  const found = messages.find((m) => m.id === message.id);
+  assert.equal(found.mentions.length, 0, 'neither "@teammate" nor "@teams" is a real "@team" mention');
+});
