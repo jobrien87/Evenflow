@@ -15,19 +15,24 @@ function centsToDollars(cents) {
 // varies by product: the Delivery step only appears for Live Call (IPR)
 // templates, matching the master spec's "exact step count can change
 // slightly based on product."
-export default function RecordStoreWizard({ template, agency, user, onClose, onDone }) {
+// initialSubscription: when provided (the Custom Builder's "Accept Quote"
+// flow — a subscription already exists and is already provisioned by the
+// time this wizard opens), skip straight to Fund Account instead of
+// starting over at Agency Info. Omitted, behavior is unchanged from the
+// normal fixed-template purchase flow.
+export default function RecordStoreWizard({ template, agency, user, onClose, onDone, initialSubscription }) {
   const isIpr = template.isIpr;
   const steps = isIpr ? ['Agency Info', 'Delivery', 'Volume', 'Review', 'Fund Account'] : ['Agency Info', 'Volume', 'Review', 'Fund Account'];
-  const [stepIndex, setStepIndex] = useState(0);
+  const [stepIndex, setStepIndex] = useState(initialSubscription ? steps.length - 1 : 0);
   const [agencyForm, setAgencyForm] = useState({
     address: agency.address || '', city: agency.city || '', state: agency.state || '', zip: agency.zip || '',
   });
   const [ringToPhone, setRingToPhone] = useState('');
   const [maxConcurrentCalls, setMaxConcurrentCalls] = useState(1);
-  const [dailyVolume, setDailyVolume] = useState(template.defaultDailyVolume);
+  const [dailyVolume, setDailyVolume] = useState(initialSubscription ? initialSubscription.dailyVolume : template.defaultDailyVolume);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [subscription, setSubscription] = useState(null);
+  const [subscription, setSubscription] = useState(initialSubscription || null);
   const [fundingSatisfied, setFundingSatisfied] = useState(false);
   const [startingCheckout, setStartingCheckout] = useState(false);
 

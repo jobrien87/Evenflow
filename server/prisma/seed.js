@@ -94,6 +94,10 @@ async function main() {
     { slug: 'HOME_PREFERRED', displayName: 'Home Preferred', description: 'Our higher-quality home insurance lead tier.', productCategory: 'HOME', leadType: 'INTERNET', sortOrder: 3 },
     { slug: 'AUTO_PREFERRED', displayName: 'Auto Preferred', description: 'Our higher-quality auto insurance lead tier.', productCategory: 'AUTO', leadType: 'INTERNET', sortOrder: 4 },
     { slug: 'LIVE_CALL_SETUP', displayName: 'Live Call Setup', description: 'Real-time inbound phone transfers — a live caller on the line, ready to talk.', productCategory: 'AUTO', leadType: 'LIVE_CALL', filterSetType: 'IPR', isIpr: true, sortOrder: 5, minimumDailyVolume: 1, maximumDailyVolume: 50, defaultDailyVolume: 5 },
+    // "Build Your Own" — the one row flagged isCustomBuilder: true. Never
+    // priced here (wholesalePriceCents stays null forever); a custom
+    // order is priced per-request via RecordStoreCustomRequest instead.
+    { slug: 'CUSTOM_BUILDER', displayName: 'Build Your Own', description: 'Choose your own lead type, sources, and daily cap — we quote it, you approve it.', productCategory: 'CUSTOM', leadType: 'INTERNET', isCustomBuilder: true, sortOrder: 6 },
   ];
   for (const t of recordStoreTemplates) {
     const existing = await prisma.recordStoreTemplate.findUnique({ where: { slug: t.slug } });

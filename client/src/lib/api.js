@@ -172,6 +172,15 @@ export const api = {
   changeRecordStoreVolume: (id, dailyVolume) => request(`/record-store/subscriptions/${id}/volume`, { method: 'POST', body: { dailyVolume } }),
   pauseRecordStoreAccount: (params = '') => request(`/record-store/account/pause-all${params}`, { method: 'POST' }),
   resumeRecordStoreAccount: (params = '') => request(`/record-store/account/resume-all${params}`, { method: 'POST' }),
+  // Custom Builder — "Build Your Own," manual-quote flow.
+  recordStoreLeadTypes: () => request('/record-store/lead-types'),
+  recordStoreSources: (leadTypeLabel) => request(`/record-store/sources?leadType=${encodeURIComponent(leadTypeLabel)}`),
+  createCustomRequest: (payload) => request('/record-store/custom-requests', { method: 'POST', body: payload }),
+  myCustomRequests: () => request('/record-store/custom-requests'),
+  acceptCustomRequest: (id) => request(`/record-store/custom-requests/${id}/accept`, { method: 'POST' }),
+  adminCustomRequests: (params = '') => request(`/record-store/admin/custom-requests${params}`),
+  quoteCustomRequest: (id, payload) => request(`/record-store/admin/custom-requests/${id}/quote`, { method: 'PATCH', body: payload }),
+  declineCustomRequest: (id, decisionNotes) => request(`/record-store/admin/custom-requests/${id}/decline`, { method: 'PATCH', body: { decisionNotes } }),
   // Super Admin control center.
   adminRecordStoreTemplates: () => request('/record-store/admin/templates'),
   updateRecordStoreTemplate: (id, patch) => request(`/record-store/admin/templates/${id}`, { method: 'PATCH', body: patch }),

@@ -4,7 +4,15 @@ import { useAuth } from '../lib/AuthContext';
 import { useIsMobile } from '../lib/useViewport';
 import { Card, Badge, Button, StatTile, Icon, EmptyState } from '../ui';
 import RecordStoreWizard from './RecordStoreWizard';
+import RecordStoreCustomWizard from './RecordStoreCustomWizard';
 import { RECORD_STORE_PREVIEW_MODE } from '../lib/recordStorePreview';
+
+function customRequestStatus(r) {
+  if (r.status === 'QUOTED') return { label: 'QUOTED — READY TO ACCEPT', tone: 'accent' };
+  if (r.status === 'DECLINED') return { label: 'DECLINED', tone: 'danger' };
+  if (r.status === 'CONVERTED') return { label: 'CONVERTED', tone: 'neutral' };
+  return { label: 'PENDING REVIEW', tone: 'warning' };
+}
 
 function centsToDollars(cents) {
   if (cents === null || cents === undefined) return '—';
@@ -32,6 +40,10 @@ export default function RecordStorePanel() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [wizardTemplate, setWizardTemplate] = useState(null);
+  const [customWizardOpen, setCustomWizardOpen] = useState(false);
+  const [customRequests, setCustomRequests] = useState([]);
+  const [fundingWizard, setFundingWizard] = useState(null); // { template, subscription } — resumes RecordStoreWizard at Fund Account
+  const [acceptingRequestId, setAcceptingRequestId] = useState(null);
   const [volumeEdit, setVolumeEdit] = useState(null); // { subscription, value }
   const [fundingModal, setFundingModal] = useState(null); // { amount, busy }
   const [confirmingPauseAll, setConfirmingPauseAll] = useState(false);
@@ -51,20 +63,38 @@ export default function RecordStorePanel() {
   async function load() {
     setLoadError('');
     try {
-      const [templatesRes, subsRes, agenciesRes, balanceRes] = await Promise.all([
+      const [templatesRes, subsRes, agenciesRes, balanceRes, customRes] = await Promise.all([
         api.recordStoreTemplates(),
         api.recordStoreSubscriptions(),
         api.agencies(),
         api.recordStoreBalance().catch(() => ({ balanceCents: null, lastUpdatedAt: null })),
+        api.myCustomRequests().catch(() => ({ requests: [] })),
       ]);
       setTemplates(templatesRes.templates);
       setSubscriptions(subsRes.subscriptions);
       setAgency(agenciesRes.agencies[0] || null);
       setBalance(balanceRes);
+      setCustomRequests(customRes.requests);
     } catch (err) {
       setLoadError(err.data?.message || 'Could not load the Record Store. Try refreshing.');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function acceptQuote(request) {
+    setAcceptingRequestId(request.id);
+    setStatus('');
+    try {
+      const customTemplate = templates.find((t) => t.isCustomBuilder);
+      const acceptRes = await api.acceptCustomRequest(request.id);
+      const provisionRes = await api.provisionRecordStoreOrder(acceptRes.subscription.id);
+      setFundingWizard({ template: customTemplate, subscription: provisionRes.subscription });
+      await load();
+    } catch (err) {
+      setStatus(err.data?.message || 'Could not accept this quote. Please try again.');
+    } finally {
+      setAcceptingRequestId(null);
     }
   }
 
@@ -248,12 +278,65 @@ export default function RecordStorePanel() {
         </section>
       )}
 
+      {customRequests.length > 0 && (
+        <section style={s.section}>
+          <div style={s.sectionTitle}>MY CUSTOM REQUESTS</div>
+          <div style={s.programsGrid}>
+            {customRequests.map((r) => {
+              const cs = customRequestStatus(r);
+              return (
+                <Card key={r.id} style={s.programCard}>
+                  <div style={s.programHeaderRow}>
+                    <div style={s.programName}>{r.leadTypeLabel} (Custom)</div>
+                    <Badge tone={cs.tone}>{cs.label}</Badge>
+                  </div>
+                  <div style={s.productMeta}>Sources: {r.sources.join(', ') || '—'}</div>
+                  <div style={s.productMeta}>Daily cap: {r.dailyLimit || '—'}/day</div>
+                  {r.status === 'QUOTED' && (
+                    <>
+                      <div style={s.productPrice}>{centsToDollars(r.quotedPriceCents)} / lead</div>
+                      {r.decisionNotes && <div style={s.helpText}>{r.decisionNotes}</div>}
+                      <Button
+                        variant="primary"
+                        style={{ width: '100%', marginTop: 10 }}
+                        disabled={acceptingRequestId === r.id || RECORD_STORE_PREVIEW_MODE}
+                        onClick={() => acceptQuote(r)}
+                      >
+                        {acceptingRequestId === r.id ? 'Setting up…' : 'ACCEPT QUOTE & FUND'}
+                      </Button>
+                    </>
+                  )}
+                  {r.status === 'DECLINED' && r.decisionNotes && <div style={s.syncError}>{r.decisionNotes}</div>}
+                </Card>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       <section style={s.section}>
         <div style={s.sectionTitle}>{hasPrograms ? 'BROWSE MORE PRODUCTS' : 'SHOP'}</div>
         <div style={isMobile ? s.productsGridMobile : s.productsGrid}>
           {templates.map((t) => {
             const owned = ownedTemplateIds.has(t.id);
-            const unpriced = !t.wholesalePriceCents;
+            // CUSTOM_BUILDER is always unpriced by design (per-order manual
+            // quote, not a fixed catalog price) — never disabled for that
+            // reason the way a not-yet-configured fixed template is.
+            const unpriced = !t.isCustomBuilder && !t.wholesalePriceCents;
+            if (t.isCustomBuilder) {
+              return (
+                <Card key={t.id} style={s.productCard}>
+                  <div style={s.productHeaderRow}>
+                    <Icon name="sparkle" size={22} style={{ color: 'var(--accent)' }} />
+                  </div>
+                  <div style={s.productName}>{t.displayName}</div>
+                  <div style={s.productCategory}>CUSTOM</div>
+                  <div style={s.productDescription}>{t.description}</div>
+                  <div style={s.productMeta}>We quote it, you approve it — no fixed price.</div>
+                  <Button variant="primary" style={{ width: '100%', marginTop: 10 }} onClick={() => setCustomWizardOpen(true)}>REQUEST A QUOTE</Button>
+                </Card>
+              );
+            }
             return (
               <Card key={t.id} style={t.isIpr ? { ...s.productCard, ...s.productCardLive } : s.productCard}>
                 <div style={s.productHeaderRow}>
@@ -287,6 +370,24 @@ export default function RecordStorePanel() {
           agency={agency}
           user={user}
           onClose={() => setWizardTemplate(null)}
+          onDone={load}
+        />
+      )}
+
+      {customWizardOpen && (
+        <RecordStoreCustomWizard
+          onClose={() => setCustomWizardOpen(false)}
+          onSubmitted={load}
+        />
+      )}
+
+      {fundingWizard && agency && (
+        <RecordStoreWizard
+          template={fundingWizard.template}
+          agency={agency}
+          user={user}
+          initialSubscription={fundingWizard.subscription}
+          onClose={() => setFundingWizard(null)}
           onDone={load}
         />
       )}

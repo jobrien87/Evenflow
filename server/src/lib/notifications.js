@@ -50,4 +50,16 @@ async function notifyAgencyOwners(agencyId, payload) {
   return notifyUsers(ownerIds, { ...payload, agencyId });
 }
 
-module.exports = { notifyUser, notifyUsers, notifyAgencyOwners, getAgencyOwnerIds };
+// agencyId here is context (which agency this is ABOUT — e.g. who
+// submitted a Record Store custom request), not a scope restriction —
+// every active Platform Owner gets it regardless of agency, same query
+// chat.js's activePlatformOwners() uses.
+async function notifyPlatformOwners(agencyId, payload) {
+  const owners = await prisma.user.findMany({
+    where: { role: 'PLATFORM_OWNER', status: 'ACTIVE' },
+    select: { id: true },
+  });
+  return notifyUsers(owners.map((o) => o.id), { ...payload, agencyId });
+}
+
+module.exports = { notifyUser, notifyUsers, notifyAgencyOwners, notifyPlatformOwners, getAgencyOwnerIds };

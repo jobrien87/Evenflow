@@ -211,6 +211,29 @@ async function getIprFilterSets(partnerId) {
   return callAction('iprGetFilterSets', { Partner_ID: partnerId });
 }
 
+// ---- Vendors / sources (upstream lead origin) --------------------------
+// getVendorsAndSources — docs §3 "Vendors / sources". Lists vendors and
+// each vendor's sources[] (name, cost) for one lead type — the "who am I
+// willing to accept leads from" list the Custom Builder's sources picker
+// needs. NOTE: confirmed against the real account this app currently has
+// a key for (2026-10-22) that this specific action returns "Authentication
+// failed" even though Partner/Filter-Set actions on the same key work
+// fine — a real permission-scope limit on that key, not a bug here. The
+// caller (routes/recordStore.js) is the one place that decides what to
+// show the customer when this fails; this function never fabricates a
+// source list of its own.
+async function getVendorsAndSources(leadTypeId) {
+  const result = await callAction('getVendorsAndSources', { TYPE: leadTypeId });
+  if (!result.success) return result;
+  const rawVendors = result.data.vendors?.vendor;
+  const vendors = (Array.isArray(rawVendors) ? rawVendors : rawVendors ? [rawVendors] : []).map((v) => {
+    const rawSources = v.sources?.source;
+    const sources = Array.isArray(rawSources) ? rawSources : rawSources ? [rawSources] : [];
+    return { name: v.name || v.company_name, sources: sources.map((s) => ({ name: s.name, cost: s.cost })) };
+  });
+  return { ...result, vendors };
+}
+
 // submitPayment — docs §3/§4 "Partners". Credits (or charges) a Partner's
 // balance directly; it has no concept of a card or a payment page at all.
 // Real money is collected by EvenFlow's own Stripe integration first (see
@@ -242,6 +265,7 @@ module.exports = {
   setFilterSetStatus,
   updateFilterSetDailyVolume,
   createIprFilterSet,
+  getVendorsAndSources,
   updateIprFilterSet,
   updateIprDailyVolume,
   getIprFilterSets,

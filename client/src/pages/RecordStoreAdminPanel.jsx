@@ -10,13 +10,24 @@ function centsToDollars(cents) {
 
 const PARTNER_STATUS_LABEL = { 0: 'Not Active', 1: 'Temporarily Stopped', 2: 'Active' };
 
+// Mirrors routes/recordStore.js's own CUSTOM_LEAD_TYPES constant — the
+// only 3 lead types with a confirmed-real Boberdoo TYPE id. Used only to
+// prefill the quote form; the server is the real source of truth and
+// validates independently.
+const CUSTOM_LEAD_TYPE_IDS = { 'Auto Insurance': '23', 'Home Insurance': '21', 'Life Insurance': '19' };
+
+const CUSTOM_REQUEST_STATUS_TONE = { PENDING_REVIEW: 'warning', QUOTED: 'accent', DECLINED: 'danger', CONVERTED: 'neutral' };
+
 export default function RecordStoreAdminPanel() {
   const [agencies, setAgencies] = useState([]);
   const [templates, setTemplates] = useState([]);
+  const [customRequests, setCustomRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [expandedId, setExpandedId] = useState(null);
   const [editingTemplate, setEditingTemplate] = useState(null);
+  const [quotingRequest, setQuotingRequest] = useState(null);
+  const [decliningRequest, setDecliningRequest] = useState(null);
   const [linkForm, setLinkForm] = useState(null); // { agencyId, partnerId }
   const [status, setStatus] = useState('');
   const [busyId, setBusyId] = useState(null);
@@ -28,16 +39,44 @@ export default function RecordStoreAdminPanel() {
   async function load() {
     setLoadError('');
     try {
-      const [customersRes, templatesRes] = await Promise.all([
+      const [customersRes, templatesRes, customRequestsRes] = await Promise.all([
         api.adminRecordStoreCustomers(),
         api.adminRecordStoreTemplates(),
+        api.adminCustomRequests(),
       ]);
       setAgencies(customersRes.agencies);
       setTemplates(templatesRes.templates);
+      setCustomRequests(customRequestsRes.requests);
     } catch (err) {
       setLoadError(err.data?.message || 'Could not load Record Store admin data.');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function submitQuote(patch) {
+    setBusyId(quotingRequest.id);
+    try {
+      await api.quoteCustomRequest(quotingRequest.id, patch);
+      setQuotingRequest(null);
+      await load();
+    } catch (err) {
+      setStatus(err.data?.message || 'Could not save that quote.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function submitDecline(decisionNotes) {
+    setBusyId(decliningRequest.id);
+    try {
+      await api.declineCustomRequest(decliningRequest.id, decisionNotes);
+      setDecliningRequest(null);
+      await load();
+    } catch (err) {
+      setStatus(err.data?.message || 'Could not decline that request.');
+    } finally {
+      setBusyId(null);
     }
   }
 
@@ -233,6 +272,40 @@ export default function RecordStoreAdminPanel() {
       </section>
 
       <section style={s.section}>
+        <SectionHeader>CUSTOM REQUESTS</SectionHeader>
+        {customRequests.length === 0 ? (
+          <EmptyState title="No custom requests yet" description="Build Your Own submissions from agencies show up here for a quote." />
+        ) : (
+          <Card style={s.tableCard}>
+            <div style={s.customHeaderRow}>
+              <span style={s.colAgency}>AGENCY / LEAD TYPE</span>
+              <span style={s.col}>SOURCES</span>
+              <span style={s.col}>DAILY CAP</span>
+              <span style={s.col}>STATUS</span>
+              <span style={s.colActions}>ACTIONS</span>
+            </div>
+            {customRequests.map((r) => (
+              <div key={r.id} style={s.customRow}>
+                <span style={s.colAgency}>{r.agency?.name || '—'}<div style={s.subLine}>{r.leadTypeLabel}</div></span>
+                <span style={s.col}>{(r.sources || []).join(', ') || '—'}</span>
+                <span style={s.col}>{r.dailyLimit || '—'}/day</span>
+                <span style={s.col}><Badge tone={CUSTOM_REQUEST_STATUS_TONE[r.status]}>{r.status.replace('_', ' ')}</Badge></span>
+                <span style={s.colActions}>
+                  {r.status === 'PENDING_REVIEW' && (
+                    <>
+                      <Button variant="primary" size="sm" onClick={() => setQuotingRequest(r)}>QUOTE</Button>
+                      <Button variant="ghost" size="sm" onClick={() => setDecliningRequest(r)}>DECLINE</Button>
+                    </>
+                  )}
+                  {r.status === 'QUOTED' && <span style={s.subLine}>{centsToDollars(r.quotedPriceCents)}/lead — awaiting customer</span>}
+                </span>
+              </div>
+            ))}
+          </Card>
+        )}
+      </section>
+
+      <section style={s.section}>
         <SectionHeader>PRODUCT TEMPLATES</SectionHeader>
         <Card style={s.tableCard}>
           <div style={s.templateHeaderRow}>
@@ -263,6 +336,86 @@ export default function RecordStoreAdminPanel() {
       {editingTemplate && (
         <TemplateEditModal template={editingTemplate} onClose={() => setEditingTemplate(null)} onSave={saveTemplate} busy={busyId === editingTemplate.id} />
       )}
+
+      {quotingRequest && (
+        <QuoteRequestModal request={quotingRequest} onClose={() => setQuotingRequest(null)} onSave={submitQuote} busy={busyId === quotingRequest.id} />
+      )}
+
+      {decliningRequest && (
+        <DeclineRequestModal request={decliningRequest} onClose={() => setDecliningRequest(null)} onSave={submitDecline} busy={busyId === decliningRequest.id} />
+      )}
+    </div>
+  );
+}
+
+function QuoteRequestModal({ request, onClose, onSave, busy }) {
+  const [priceDollars, setPriceDollars] = useState('');
+  const [boberdooTypeId, setBoberdooTypeId] = useState(CUSTOM_LEAD_TYPE_IDS[request.leadTypeLabel] || '');
+  const [decisionNotes, setDecisionNotes] = useState('');
+  const [err, setErr] = useState('');
+
+  function submit(e) {
+    e.preventDefault();
+    const cents = dollarsToCents(priceDollars);
+    if (!cents || cents <= 0) {
+      setErr('Enter a price greater than zero.');
+      return;
+    }
+    if (!boberdooTypeId.trim()) {
+      setErr('Enter the real Boberdoo TYPE id for this lead type before quoting.');
+      return;
+    }
+    onSave({ quotedPriceCents: cents, boberdooTypeId: boberdooTypeId.trim(), decisionNotes: decisionNotes.trim() || undefined });
+  }
+
+  return (
+    <div style={s.modalBackdrop} onClick={onClose}>
+      <Card style={s.modal} onClick={(e) => e.stopPropagation()}>
+        <SectionHeader>QUOTE — {request.agency?.name} ({request.leadTypeLabel})</SectionHeader>
+        <form onSubmit={submit} style={s.form}>
+          <div style={s.subLine}>Sources: {(request.sources || []).join(', ') || '—'}</div>
+          <div style={s.subLine}>Daily cap: {request.dailyLimit || '—'}/day{request.weeklyLimit ? ` · Weekly: ${request.weeklyLimit}` : ''}{request.monthlyLimit ? ` · Monthly: ${request.monthlyLimit}` : ''}</div>
+          {request.notes && <div style={s.subLine}>Notes: {request.notes}</div>}
+          <label style={s.fieldLabel}>Price ($ per lead)<input style={s.input} type="number" step="0.01" min="0" value={priceDollars} onChange={(e) => setPriceDollars(e.target.value)} autoFocus /></label>
+          <label style={s.fieldLabel}>Boberdoo TYPE id<input style={s.input} value={boberdooTypeId} onChange={(e) => setBoberdooTypeId(e.target.value)} placeholder="e.g. 23" /></label>
+          <label style={s.fieldLabel}>Note to the agency (optional)<textarea style={{ ...s.input, minHeight: 60 }} value={decisionNotes} onChange={(e) => setDecisionNotes(e.target.value)} /></label>
+          {err && <div style={s.error}>{err}</div>}
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <Button variant="primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'SEND QUOTE'}</Button>
+            <Button variant="secondary" type="button" onClick={onClose}>CANCEL</Button>
+          </div>
+        </form>
+      </Card>
+    </div>
+  );
+}
+
+function DeclineRequestModal({ request, onClose, onSave, busy }) {
+  const [decisionNotes, setDecisionNotes] = useState('');
+  const [err, setErr] = useState('');
+
+  function submit(e) {
+    e.preventDefault();
+    if (!decisionNotes.trim()) {
+      setErr('Enter a reason — the agency will see this.');
+      return;
+    }
+    onSave(decisionNotes.trim());
+  }
+
+  return (
+    <div style={s.modalBackdrop} onClick={onClose}>
+      <Card style={s.modal} onClick={(e) => e.stopPropagation()}>
+        <SectionHeader>DECLINE — {request.agency?.name} ({request.leadTypeLabel})</SectionHeader>
+        <form onSubmit={submit} style={s.form}>
+          <label style={s.fieldLabel}>Reason (the agency will see this)<textarea style={{ ...s.input, minHeight: 60 }} value={decisionNotes} onChange={(e) => setDecisionNotes(e.target.value)} autoFocus /></label>
+          {err && <div style={s.error}>{err}</div>}
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <Button variant="danger" type="submit" disabled={busy}>{busy ? 'Saving…' : 'CONFIRM DECLINE'}</Button>
+            <Button variant="secondary" type="button" onClick={onClose}>CANCEL</Button>
+          </div>
+        </form>
+      </Card>
     </div>
   );
 }
@@ -343,6 +496,8 @@ const s = {
   tableCard: { padding: 0, overflow: 'hidden' },
   tableHeaderRow: { display: 'grid', gridTemplateColumns: '2fr 1.2fr 0.8fr 0.8fr 1fr 1.2fr 2fr', padding: '10px 16px', fontSize: 10, letterSpacing: 1, color: 'var(--text-muted)', fontWeight: 700, borderBottom: '1px solid var(--border-hairline)' },
   templateHeaderRow: { display: 'grid', gridTemplateColumns: '2fr 1fr 1.2fr 1fr 1fr 0.8fr 1fr', padding: '10px 16px', fontSize: 10, letterSpacing: 1, color: 'var(--text-muted)', fontWeight: 700, borderBottom: '1px solid var(--border-hairline)' },
+  customHeaderRow: { display: 'grid', gridTemplateColumns: '2fr 1.5fr 1fr 1fr 1.5fr', padding: '10px 16px', fontSize: 10, letterSpacing: 1, color: 'var(--text-muted)', fontWeight: 700, borderBottom: '1px solid var(--border-hairline)' },
+  customRow: { display: 'grid', gridTemplateColumns: '2fr 1.5fr 1fr 1fr 1.5fr', padding: '10px 16px', fontSize: 12, color: 'var(--text-primary)', borderBottom: '1px solid var(--border-hairline)', alignItems: 'center' },
   tableRow: { display: 'grid', gridTemplateColumns: '2fr 1.2fr 0.8fr 0.8fr 1fr 1.2fr 2fr', padding: '10px 16px', fontSize: 12, color: 'var(--text-primary)', borderBottom: '1px solid var(--border-hairline)', alignItems: 'center' },
   colAgency: { fontWeight: 600 },
   col: { color: 'var(--text-secondary)' },

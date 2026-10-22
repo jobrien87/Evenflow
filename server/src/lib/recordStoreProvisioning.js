@@ -44,6 +44,25 @@ function isIprTemplate(template) {
 // abort one of the two transactions with a serialization failure, which
 // is retried here rather than surfaced as an error — the caller always
 // gets back the one real row, never a duplicate.
+// Confirmed-real source names (used by all 4 existing fixed templates'
+// Accepted_Sources) — the only fallback when getVendorsAndSources itself
+// fails. Confirmed 2026-10-22: this account's API key can set
+// Accepted_Sources on a filter set but doesn't have permission to call
+// getVendorsAndSources (or getPartnerList) to list valid values — a real
+// scope limit on the key, not a bug. Never presented as live data; every
+// caller also gets back `live: false` alongside this list.
+const FALLBACK_SOURCES = ['Fidadto', 'Quoting_Fast', 'Visiqua'];
+
+// ---- Custom Builder: list available lead sources for a lead type -------
+async function listSources(boberdooTypeId) {
+  const result = await boberdoo.getVendorsAndSources(boberdooTypeId);
+  if (result.success) {
+    const sources = [...new Set((result.vendors || []).flatMap((v) => (v.sources || []).map((s) => s.name)))];
+    return { success: true, sources, live: true };
+  }
+  return { success: true, sources: FALLBACK_SOURCES, live: false };
+}
+
 async function createOrder({ agencyId, template, dailyVolume, userId, ringToPhone, maxConcurrentCalls }) {
   const volume = Math.max(template.minimumDailyVolume, Math.min(template.maximumDailyVolume, Math.round(dailyVolume)));
 
@@ -105,6 +124,67 @@ async function createOrder({ agencyId, template, dailyVolume, userId, ringToPhon
   }
 
   return result;
+}
+
+// ---- Custom Builder: convert an accepted quote into a real subscription --
+// Deliberately NOT a call to createOrder() above — its dedup check is
+// scoped by recordStoreTemplateId, and every custom subscription shares
+// the one CUSTOM_BUILDER template row, so reusing it would wrongly block
+// an agency from ever having two custom programs (e.g. one Auto, one
+// Home) at once. Uniqueness here is enforced by the request's own
+// recordStoreSubscriptionId (@unique) instead — one accepted quote, one
+// subscription, ever.
+async function createSubscriptionFromQuote(request, template, userId) {
+  const dailyVolume = request.dailyLimit && request.dailyLimit > 0 ? request.dailyLimit : template.defaultDailyVolume;
+  // The Boberdoo-side Filter_Set_Price is derived directly from the
+  // quote — no separate markup is modeled yet (nothing in this request
+  // collects one), so the price a Platform Owner quotes the agency is
+  // exactly the per-lead price sent to Boberdoo. A real markup layer can
+  // be added later without touching anything downstream of this.
+  const filterSetPrice = Math.round(request.quotedPriceCents) / 100;
+
+  const subscription = await prisma.recordStoreSubscription.create({
+    data: {
+      agencyId: request.agencyId,
+      recordStoreTemplateId: template.id,
+      productNameSnapshot: `${template.displayName} — ${request.leadTypeLabel}`,
+      leadType: template.leadType,
+      filterSetType: template.filterSetType,
+      isIpr: template.isIpr,
+      priceSnapshotCents: request.quotedPriceCents,
+      dailyVolume,
+      status: 'DRAFT',
+      provisioningStatus: 'EVENFLOW_ORDER_CREATED',
+      createdById: userId,
+      customConfigurationJson: {
+        TYPE: Number(request.boberdooTypeId),
+        Filter_Set_Name: `${request.leadTypeLabel} (Custom)`,
+        Filter_Set_Price: filterSetPrice,
+        Accepted_Sources: (request.sources || []).join(','),
+        Match_Priority: 0,
+        Daily_Limit: dailyVolume,
+        Weekly_Limit: request.weeklyLimit && request.weeklyLimit > 0 ? request.weeklyLimit : 0,
+        Monthly_Limit: request.monthlyLimit && request.monthlyLimit > 0 ? request.monthlyLimit : 0,
+        Accept_Only_Reprocessed_Leads: 'No',
+      },
+    },
+  });
+
+  await prisma.recordStoreCustomRequest.update({
+    where: { id: request.id },
+    data: { status: 'CONVERTED', recordStoreSubscriptionId: subscription.id },
+  });
+
+  await recordAudit({
+    actorId: userId,
+    agencyId: request.agencyId,
+    action: 'RECORD_STORE_CUSTOM_REQUEST_CONVERTED',
+    entityType: 'RecordStoreSubscription',
+    entityId: subscription.id,
+    after: { recordStoreCustomRequestId: request.id, priceCents: request.quotedPriceCents },
+  });
+
+  return { subscription };
 }
 
 // ---- Step 1: Partner (one per Agency, never one per product) ----------
@@ -170,7 +250,11 @@ async function provisionFilterSet(subscription, template, partnerId, correlation
     return { success: false, errorCode: 'NOT_CONFIGURED', errorMessage: 'Boberdoo is not configured.' };
   }
 
-  const config = template.configurationJson || {};
+  // customConfigurationJson overrides the template's own config — null on
+  // every subscription bought from one of the fixed templates (so their
+  // behavior is unchanged), populated only on a subscription created from
+  // an accepted RecordStoreCustomRequest quote (see createSubscriptionFromQuote).
+  const config = { ...(template.configurationJson || {}), ...(subscription.customConfigurationJson || {}) };
   let result;
   if (isIprTemplate(template)) {
     result = await boberdoo.createIprFilterSet(partnerId, {
@@ -657,7 +741,9 @@ async function submitPendingFundingPayments(correlationId) {
 module.exports = {
   FRIENDLY_ERROR,
   refreshAgencyBalance,
+  listSources,
   createOrder,
+  createSubscriptionFromQuote,
   provisionSubscription,
   refreshFundingStatus,
   isInitialDepositSatisfied,

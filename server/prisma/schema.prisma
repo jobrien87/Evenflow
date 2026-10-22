@@ -2596,8 +2596,17 @@ model RecordStoreTemplate {
   boberdooTemplateReference String?
   filterSetType             String   @default("STANDARD") // "STANDARD" | "IPR"
   isIpr                     Boolean  @default(false)
+  // The one "Build Your Own" row — flags it for different storefront
+  // rendering (a builder wizard instead of a buy button) rather than a
+  // slug === 'CUSTOM_BUILDER' string check anywhere in route/provisioning
+  // code, matching this model's own data-driven-not-hardcoded design.
+  // Seeded once, never admin-editable (left out of the PATCH route's
+  // schema on purpose, like slug itself isn't patchable either).
+  isCustomBuilder           Boolean  @default(false)
   // Null = not priced yet; the storefront must never show a fabricated
   // price (see ui — StatTile/product cards read this straight from here).
+  // Always null for the CUSTOM_BUILDER row — it's never directly priced;
+  // see RecordStoreCustomRequest for how a custom order gets its price.
   wholesalePriceCents       Int?
   minimumDailyVolume        Int      @default(1)
   maximumDailyVolume        Int      @default(200)
@@ -2715,7 +2724,71 @@ model RecordStoreSubscription {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  // Per-order override merged on top of the owning template's own
+  // configurationJson at provisioning time (see
+  // recordStoreProvisioning.js's provisionFilterSet) — null on every
+  // subscription bought from one of the 4 fixed templates, so their
+  // behavior is unchanged. Populated only when this subscription was
+  // created from an accepted RecordStoreCustomRequest quote: the
+  // customer's own chosen TYPE/Accepted_Sources/Daily_Limit/Weekly_Limit/
+  // Monthly_Limit.
+  customConfigurationJson Json?
+
   fundingPayments RecordStoreFundingPayment[]
+  customRequest   RecordStoreCustomRequest?
+
+  @@index([agencyId])
+  @@index([status])
+}
+
+// A customer-submitted "Build Your Own" request — the pre-price
+// negotiation phase for a custom filter set, deliberately kept OUT of
+// RecordStoreSubscription (whose priceSnapshotCents is non-nullable and
+// trusted unconditionally by most of recordStoreProvisioning.js) rather
+// than threading a "no price yet" state through that whole state machine.
+// Converts into a real RecordStoreSubscription (via recordStoreSubscription
+// below) only once a Platform Owner sets quotedPriceCents and the
+// customer accepts — from that point on, the existing provisioning/
+// funding/activation/pause/resume machinery takes over unchanged.
+enum RecordStoreCustomRequestStatus {
+  PENDING_REVIEW
+  QUOTED
+  DECLINED
+  CONVERTED
+}
+
+model RecordStoreCustomRequest {
+  id            String @id @default(uuid())
+  agencyId      String
+  requestedById String
+
+  // Customer picks from a short, Super-Admin-curated label list (today:
+  // Auto/Home/Life Insurance, the only lead types with a confirmed real
+  // boberdooTypeId) — never a raw Boberdoo TYPE id from the customer.
+  leadTypeLabel String
+  // Confirmed/set by the Platform Owner at quote time, not the customer —
+  // same "never fabricate a Boberdoo id" discipline as
+  // RecordStoreTemplate.boberdooTypeId.
+  boberdooTypeId String?
+  sources        String[] @default([])
+  dailyLimit     Int?
+  weeklyLimit    Int?
+  monthlyLimit   Int?
+  notes          String?
+
+  status           RecordStoreCustomRequestStatus @default(PENDING_REVIEW)
+  quotedPriceCents Int?
+  decidedById      String?
+  decidedAt        DateTime?
+  // Quote context when QUOTED, or the reason when DECLINED — one field,
+  // same convention as CreditRequest's decisionNotes.
+  decisionNotes String?
+
+  recordStoreSubscriptionId String?                 @unique
+  recordStoreSubscription   RecordStoreSubscription? @relation(fields: [recordStoreSubscriptionId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([agencyId])
   @@index([status])

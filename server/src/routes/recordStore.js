@@ -18,6 +18,7 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const provisioning = require('../lib/recordStoreProvisioning');
 const stripeLib = require('../lib/stripe');
+const { notifyAgencyOwners, notifyPlatformOwners } = require('../lib/notifications');
 
 const APP_URL = process.env.APP_URL || 'http://localhost:5173';
 
@@ -44,12 +45,111 @@ router.get('/templates', requireRole(...AGENCY_ROLES), async (req, res, next) =>
       orderBy: { sortOrder: 'asc' },
       select: {
         id: true, slug: true, displayName: true, description: true, productCategory: true,
-        leadType: true, isIpr: true, wholesalePriceCents: true, minimumDailyVolume: true,
+        leadType: true, isIpr: true, isCustomBuilder: true, wholesalePriceCents: true, minimumDailyVolume: true,
         maximumDailyVolume: true, defaultDailyVolume: true, minimumDepositCents: true,
         // Never leak Boberdoo IDs/config to the storefront.
       },
     });
     return res.json({ success: true, templates });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---- Custom Builder (customer) -----------------------------------------
+// The 3 lead types with a confirmed-real Boberdoo TYPE id (pulled from a
+// live account via getPartnerSettings, 2026-10-22) — not a freeform field,
+// never a customer-supplied raw TYPE id. The admin confirms/sets the real
+// boberdooTypeId again at quote time (see admin quote route below), same
+// "never fabricate a Boberdoo id" discipline as RecordStoreTemplate's own
+// boberdooTypeId field.
+const CUSTOM_LEAD_TYPES = [
+  { label: 'Auto Insurance', boberdooTypeId: '23' },
+  { label: 'Home Insurance', boberdooTypeId: '21' },
+  { label: 'Life Insurance', boberdooTypeId: '19' },
+];
+
+router.get('/lead-types', requireRole(...AGENCY_ROLES), async (req, res) => {
+  return res.json({ success: true, leadTypes: CUSTOM_LEAD_TYPES.map((t) => ({ label: t.label })) });
+});
+
+router.get('/sources', requireRole(...AGENCY_ROLES), async (req, res, next) => {
+  try {
+    const leadType = CUSTOM_LEAD_TYPES.find((t) => t.label === req.query.leadType);
+    if (!leadType) return res.status(400).json({ success: false, error: 'INVALID_LEAD_TYPE' });
+    const result = await provisioning.listSources(leadType.boberdooTypeId);
+    return res.json({ success: true, sources: result.sources, live: result.live });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const createCustomRequestSchema = z.object({
+  leadTypeLabel: z.enum(CUSTOM_LEAD_TYPES.map((t) => t.label)),
+  sources: z.array(z.string().trim().min(1)).max(20).default([]),
+  dailyLimit: z.number().int().positive().max(1000).optional(),
+  weeklyLimit: z.number().int().positive().max(5000).optional(),
+  monthlyLimit: z.number().int().positive().max(20000).optional(),
+  notes: z.string().trim().max(2000).optional(),
+});
+
+router.post('/custom-requests', mutationLimiter, requireRole(...AGENCY_ROLES), async (req, res, next) => {
+  try {
+    const parsed = createCustomRequestSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    const agencyId = req.user.role === 'PLATFORM_OWNER' ? (req.body.agencyId || req.user.agencyId) : req.user.agencyId;
+    if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+
+    const request = await prisma.recordStoreCustomRequest.create({
+      data: { agencyId, requestedById: req.user.id, ...parsed.data },
+    });
+
+    await recordAudit({
+      actorId: req.user.id, agencyId, action: 'RECORD_STORE_CUSTOM_REQUEST_SUBMITTED',
+      entityType: 'RecordStoreCustomRequest', entityId: request.id,
+      after: { leadTypeLabel: request.leadTypeLabel }, correlationId: req.correlationId,
+    });
+    await notifyPlatformOwners(agencyId, {
+      type: 'record_store.custom_request_submitted',
+      severity: 'ACTION',
+      title: 'New Record Store custom request needs a quote',
+      body: `${req.user.firstName} ${req.user.lastName} requested a custom ${request.leadTypeLabel} lead program.`,
+      relatedEntityType: 'RecordStoreCustomRequest', relatedEntityId: request.id,
+    });
+
+    return res.status(201).json({ success: true, request });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/custom-requests', requireRole(...AGENCY_ROLES), async (req, res, next) => {
+  try {
+    const agencyId = scopedAgencyId(req);
+    if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+    const requests = await prisma.recordStoreCustomRequest.findMany({ where: { agencyId }, orderBy: { createdAt: 'desc' } });
+    return res.json({ success: true, requests });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/custom-requests/:id/accept', mutationLimiter, requireRole(...AGENCY_ROLES), async (req, res, next) => {
+  try {
+    const request = await prisma.recordStoreCustomRequest.findUnique({ where: { id: req.params.id } });
+    if (!request) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (req.user.role !== 'PLATFORM_OWNER' && request.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    if (request.status !== 'QUOTED') {
+      return res.status(409).json({ success: false, error: 'NOT_QUOTED', message: 'This request has not been quoted yet.' });
+    }
+
+    const template = await prisma.recordStoreTemplate.findFirst({ where: { isCustomBuilder: true } });
+    if (!template) return res.status(500).json({ success: false, error: 'NO_CUSTOM_TEMPLATE' });
+
+    const { subscription } = await provisioning.createSubscriptionFromQuote(request, template, req.user.id);
+    return res.status(201).json({ success: true, subscription });
   } catch (err) {
     next(err);
   }
@@ -456,6 +556,110 @@ router.post('/admin/agencies/:agencyId/resume-account', requireRole('PLATFORM_OW
     const result = await provisioning.resumeAccount(req.params.agencyId, req.user.id, req.correlationId);
     if (!result.success) return res.status(409).json({ success: false, error: result.errorCode, message: result.errorMessage });
     return res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---- Custom Builder (admin) ---------------------------------------------
+
+router.get('/admin/custom-requests', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const where = req.query.status ? { status: req.query.status } : {};
+    const requests = await prisma.recordStoreCustomRequest.findMany({ where, orderBy: { createdAt: 'desc' } });
+    // agencyId is a plain scalar FK on this model (no Prisma relation, by
+    // design — matches CreditRequest's minimal style), so the agency name
+    // is resolved with a separate batch lookup rather than an include.
+    const agencies = await prisma.agency.findMany({
+      where: { id: { in: [...new Set(requests.map((r) => r.agencyId))] } },
+      select: { id: true, name: true },
+    });
+    const agencyNameById = new Map(agencies.map((a) => [a.id, a.name]));
+    const withAgency = requests.map((r) => ({ ...r, agency: { name: agencyNameById.get(r.agencyId) || '—' } }));
+    return res.json({ success: true, requests: withAgency });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const quoteCustomRequestSchema = z.object({
+  quotedPriceCents: z.number().int().positive(),
+  boberdooTypeId: z.string().min(1),
+  decisionNotes: z.string().trim().max(2000).optional(),
+});
+
+router.patch('/admin/custom-requests/:id/quote', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const parsed = quoteCustomRequestSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    const request = await prisma.recordStoreCustomRequest.findUnique({ where: { id: req.params.id } });
+    if (!request) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (request.status !== 'PENDING_REVIEW') {
+      return res.status(409).json({ success: false, error: 'ALREADY_DECIDED', message: 'This request has already been quoted or declined.' });
+    }
+
+    const updated = await prisma.recordStoreCustomRequest.update({
+      where: { id: request.id },
+      data: {
+        status: 'QUOTED',
+        quotedPriceCents: parsed.data.quotedPriceCents,
+        boberdooTypeId: parsed.data.boberdooTypeId,
+        decisionNotes: parsed.data.decisionNotes,
+        decidedById: req.user.id,
+        decidedAt: new Date(),
+      },
+    });
+
+    await recordAudit({
+      actorId: req.user.id, agencyId: request.agencyId, action: 'RECORD_STORE_CUSTOM_REQUEST_QUOTED',
+      entityType: 'RecordStoreCustomRequest', entityId: request.id,
+      after: { quotedPriceCents: parsed.data.quotedPriceCents }, correlationId: req.correlationId,
+    });
+    await notifyAgencyOwners(request.agencyId, {
+      type: 'record_store.custom_request_quoted',
+      severity: 'ACTION',
+      title: 'Your custom Record Store quote is ready',
+      body: `Your ${request.leadTypeLabel} lead program was quoted at $${(parsed.data.quotedPriceCents / 100).toFixed(2)}/lead — review and accept to continue.`,
+      relatedEntityType: 'RecordStoreCustomRequest', relatedEntityId: request.id,
+    });
+
+    return res.json({ success: true, request: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const declineCustomRequestSchema = z.object({ decisionNotes: z.string().trim().min(1).max(2000) });
+
+router.patch('/admin/custom-requests/:id/decline', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const parsed = declineCustomRequestSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    const request = await prisma.recordStoreCustomRequest.findUnique({ where: { id: req.params.id } });
+    if (!request) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (request.status !== 'PENDING_REVIEW') {
+      return res.status(409).json({ success: false, error: 'ALREADY_DECIDED', message: 'This request has already been quoted or declined.' });
+    }
+
+    const updated = await prisma.recordStoreCustomRequest.update({
+      where: { id: request.id },
+      data: { status: 'DECLINED', decisionNotes: parsed.data.decisionNotes, decidedById: req.user.id, decidedAt: new Date() },
+    });
+
+    await recordAudit({
+      actorId: req.user.id, agencyId: request.agencyId, action: 'RECORD_STORE_CUSTOM_REQUEST_DECLINED',
+      entityType: 'RecordStoreCustomRequest', entityId: request.id,
+      after: { decisionNotes: parsed.data.decisionNotes }, correlationId: req.correlationId,
+    });
+    await notifyAgencyOwners(request.agencyId, {
+      type: 'record_store.custom_request_declined',
+      severity: 'INFO',
+      title: 'Your custom Record Store request was declined',
+      body: parsed.data.decisionNotes,
+      relatedEntityType: 'RecordStoreCustomRequest', relatedEntityId: request.id,
+    });
+
+    return res.json({ success: true, request: updated });
   } catch (err) {
     next(err);
   }

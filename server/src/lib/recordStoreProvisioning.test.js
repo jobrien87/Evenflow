@@ -455,3 +455,77 @@ test('submitPendingFundingPayments processes every PENDING_SUBMIT/FAILED row, re
 
   await prisma.recordStoreFundingPayment.deleteMany({ where: { id: { in: [pending.id, failed.id, alreadyDone.id] } } });
 });
+
+// ---- Custom Builder -------------------------------------------------
+
+test('customConfigurationJson overrides template.configurationJson at filter-set creation time, never touching a fixed template', async () => {
+  fakeHappyBoberdoo();
+  let sentFields;
+  boberdoo.createFilterSet = async (partnerId, fields) => { sentFields = fields; return { success: true, filterSetId: `F-${++filterSetCounter}` }; };
+
+  await prisma.recordStoreTemplate.update({ where: { id: templateId }, data: { configurationJson: { TYPE: 23, Filter_Set_Price: 5 } } });
+  const template = await loadTemplate(templateId);
+  const { subscription } = await provisioning.createOrder({ agencyId, template, dailyVolume: 20, userId: ownerId });
+  await prisma.recordStoreSubscription.update({ where: { id: subscription.id }, data: { customConfigurationJson: { Filter_Set_Price: 9, Accepted_Sources: 'Fidadto' } } });
+
+  await provisioning.provisionSubscription(subscription.id);
+
+  assert.equal(sentFields.TYPE, 23, 'fields the override does not touch still come from the template');
+  assert.equal(sentFields.Filter_Set_Price, 9, 'the override wins over the template default');
+  assert.equal(sentFields.Accepted_Sources, 'Fidadto');
+
+  await prisma.recordStoreTemplate.update({ where: { id: templateId }, data: { configurationJson: null } });
+});
+
+test('createSubscriptionFromQuote creates a priced, provisionable subscription from an accepted custom request and marks it CONVERTED', async () => {
+  const customTemplate = await prisma.recordStoreTemplate.create({
+    data: { slug: `TEST_CUSTOM_BUILDER_${suffix}`, displayName: 'Build Your Own', productCategory: 'CUSTOM', leadType: 'INTERNET', isCustomBuilder: true },
+  });
+  const request = await prisma.recordStoreCustomRequest.create({
+    data: {
+      agencyId, requestedById: ownerId, leadTypeLabel: 'Auto Insurance', boberdooTypeId: '23',
+      sources: ['Fidadto', 'Quoting_Fast'], dailyLimit: 12, status: 'QUOTED', quotedPriceCents: 700,
+    },
+  });
+
+  const { subscription } = await provisioning.createSubscriptionFromQuote(request, customTemplate, ownerId);
+
+  assert.equal(subscription.priceSnapshotCents, 700);
+  assert.equal(subscription.dailyVolume, 12);
+  assert.equal(subscription.recordStoreTemplateId, customTemplate.id);
+  assert.equal(subscription.customConfigurationJson.TYPE, 23);
+  assert.equal(subscription.customConfigurationJson.Filter_Set_Price, 7);
+  assert.equal(subscription.customConfigurationJson.Accepted_Sources, 'Fidadto,Quoting_Fast');
+  assert.equal(subscription.customConfigurationJson.Daily_Limit, 12);
+
+  const updatedRequest = await prisma.recordStoreCustomRequest.findUnique({ where: { id: request.id } });
+  assert.equal(updatedRequest.status, 'CONVERTED');
+  assert.equal(updatedRequest.recordStoreSubscriptionId, subscription.id);
+
+  fakeHappyBoberdoo();
+  let sentFields;
+  boberdoo.createFilterSet = async (partnerId, fields) => { sentFields = fields; return { success: true, filterSetId: `F-${++filterSetCounter}` }; };
+  const result = await provisioning.provisionSubscription(subscription.id);
+  assert.equal(result.success, true);
+  assert.equal(result.subscription.status, 'PENDING_FUNDING');
+  assert.equal(sentFields.TYPE, 23, 'the real request-derived config is what actually reaches Boberdoo');
+
+  await prisma.recordStoreSubscription.deleteMany({ where: { id: subscription.id } });
+  await prisma.recordStoreCustomRequest.delete({ where: { id: request.id } });
+  await prisma.recordStoreTemplate.delete({ where: { id: customTemplate.id } });
+});
+
+test('listSources returns the real list when Boberdoo succeeds, and an honest fallback (live: false) when it fails', async () => {
+  boberdoo.getVendorsAndSources = async () => ({
+    success: true,
+    vendors: [{ name: 'Vendor A', sources: [{ name: 'SourceOne' }, { name: 'SourceTwo' }] }, { name: 'Vendor B', sources: [{ name: 'SourceOne' }] }],
+  });
+  const live = await provisioning.listSources('23');
+  assert.equal(live.live, true);
+  assert.deepEqual([...live.sources].sort(), ['SourceOne', 'SourceTwo']);
+
+  boberdoo.getVendorsAndSources = async () => ({ success: false, errorCode: 'PROVIDER_ERROR', errorMessage: 'Authentication failed' });
+  const fallback = await provisioning.listSources('23');
+  assert.equal(fallback.live, false);
+  assert.ok(fallback.sources.length > 0, 'a real, non-empty fallback list is still returned so the builder stays usable');
+});
