@@ -2,7 +2,78 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { vendorProductOptions } from '../lib/vendorProducts';
-import { StatTile, BarRow, SectionHeader, Badge } from '../ui';
+import { StatTile, BarRow, SectionHeader, Badge, Button, Modal, DateRangeFilter } from '../ui';
+import { resolveDateRange } from '../lib/dateRange';
+
+const REPORT_PERIODS = [
+  { key: 'month', label: 'This month', from: () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); } },
+  { key: 'quarter', label: 'This quarter', from: () => { const d = new Date(); return new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3, 1); } },
+  { key: 'week', label: 'This week', from: () => { const d = new Date(); const day = d.getDay(); return new Date(d.getFullYear(), d.getMonth(), d.getDate() - day); } },
+];
+
+// Mirrors ZipCodeBox.jsx's EmailZipReportModal exactly — same date-range
+// -> email -> POST .../report/email flow, just scoped to one vendor's
+// own stats + full lead disposition detail instead of an agency-wide zip
+// breakdown. Recipient defaults to the vendor's own contact email (the
+// natural "who wants this report" default) but stays editable, same as
+// the zip report's own free-text recipient field.
+function EmailVendorReportModal({ vendor, onClose }) {
+  const [periodKey, setPeriodKey] = useState('month');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const [email, setEmail] = useState(vendor.email || '');
+  const [status, setStatus] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function send(e) {
+    e.preventDefault();
+    const range = resolveDateRange(periodKey, REPORT_PERIODS, customFrom, customTo);
+    if (!range) {
+      setStatus('Pick both a start and end date first.');
+      return;
+    }
+    setBusy(true);
+    setStatus('');
+    try {
+      const res = await api.emailVendorReport(vendor.id, email, `?from=${range.from}&to=${range.to}`);
+      setStatus(`Email status: ${res.emailStatus}`);
+    } catch (err) {
+      setStatus(err.data?.message || 'Failed to send report.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title={`SEND REPORT — ${vendor.name}`} onClose={onClose}>
+      <form onSubmit={send} style={s.form}>
+        <DateRangeFilter
+          presets={REPORT_PERIODS.map((p) => ({ key: p.key, label: p.label.toUpperCase() }))}
+          periodKey={periodKey}
+          onSelectPreset={setPeriodKey}
+          customFrom={customFrom}
+          customTo={customTo}
+          onCustomFromChange={setCustomFrom}
+          onCustomToChange={setCustomTo}
+        />
+        <label style={s.fieldLabel}>
+          Send to
+          <input
+            style={s.input}
+            type="email"
+            placeholder="vendor@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+        </label>
+        <div style={s.reportHint}>Includes this vendor's stats (leads, quote rate, close rate, cost/lead, CPA, revenue) and a full disposition line for every lead worked from them in this timeframe.</div>
+        <Button variant="primary" type="submit" disabled={busy}>{busy ? 'SENDING…' : 'SEND REPORT'}</Button>
+        {status && <div style={s.status}>{status}</div>}
+      </form>
+    </Modal>
+  );
+}
 
 const VENDOR_CATEGORIES = [
   { value: 'PAID_AD', label: 'Paid Ad' },
@@ -67,6 +138,7 @@ export default function VendorsPanel() {
   const [selectedVendor, setSelectedVendor] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [instructionsVendor, setInstructionsVendor] = useState(null);
+  const [reportVendor, setReportVendor] = useState(null);
   const [expandedCredentialsId, setExpandedCredentialsId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
@@ -336,6 +408,7 @@ export default function VendorsPanel() {
             <button style={s.smallButtonOutline} onClick={() => viewInstructions(v.id)}>VIEW INSTRUCTIONS</button>
             <button style={s.smallButtonOutline} onClick={() => revoke(v.id)}>REVOKE</button>
             <button style={s.smallButtonOutline} onClick={() => viewDetail(v)}>LOGS</button>
+            <button style={s.smallButtonOutline} onClick={() => setReportVendor(v)}>SEND REPORT</button>
             <button style={s.smallButtonOutline} onClick={() => setExpandedCredentialsId(expandedCredentialsId === v.id ? null : v.id)} data-tour="vendors-credentials-logs">
               CREDENTIALS ({v.credentials?.length || 0})
             </button>
@@ -423,6 +496,10 @@ export default function VendorsPanel() {
         </div>
       )}
 
+      {reportVendor && (
+        <EmailVendorReportModal vendor={reportVendor} onClose={() => setReportVendor(null)} />
+      )}
+
       {instructionsVendor && (
         <div style={s.modalOverlay} onClick={() => setInstructionsVendor(null)}>
           <div style={s.modal} onClick={(e) => e.stopPropagation()}>
@@ -496,4 +573,7 @@ const s = {
   pickerBox: { display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 160, overflowY: 'auto', marginTop: 4, padding: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 6 },
   pickerRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-primary)', cursor: 'pointer' },
   pickerEmpty: { color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 12, marginTop: 4 },
+  fieldLabel: { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: 'var(--text-muted)' },
+  reportHint: { color: 'var(--text-muted)', fontSize: 11, lineHeight: 1.5 },
+  status: { color: 'var(--text-secondary)', fontSize: 13 },
 };

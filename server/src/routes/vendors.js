@@ -5,8 +5,9 @@ const { requireAuth, requireRole } = require('../middleware/auth');
 const { recordAudit } = require('../lib/audit');
 const { generateCredential } = require('../lib/vendorAuth');
 const { buildPostingInstructions, buildAppointmentWebhookInstructions } = require('../lib/postingInstructions');
-const { sendVendorPostingEmail } = require('../lib/email');
+const { sendVendorPostingEmail, sendVendorReportEmail } = require('../lib/email');
 const { notifyAgencyOwners } = require('../lib/notifications');
+const { computeVendorReport } = require('../lib/vendorReport');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -385,6 +386,63 @@ router.patch('/:id/status', requireRole('AGENCY_OWNER', 'PLATFORM_OWNER'), async
     }
 
     return res.json({ success: true, vendor: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Vendor performance + full lead disposition report for a chosen
+// timeframe — same "view, then optionally email" pattern as
+// leads.js's /zip-report + /zip-report/email.
+router.get('/:id/report', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const vendor = await prisma.vendor.findUnique({ where: { id: req.params.id } });
+    if (!vendor) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (req.user.role !== 'PLATFORM_OWNER' && vendor.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+
+    const to = req.query.to ? new Date(req.query.to) : new Date();
+    const from = req.query.from ? new Date(req.query.from) : new Date(to.getFullYear(), to.getMonth(), 1);
+    const report = await computeVendorReport({ agencyId: vendor.agencyId, vendorId: vendor.id, from, to });
+
+    return res.json({ success: true, period: { from: from.toISOString(), to: to.toISOString() }, report });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const emailVendorReportSchema = z.object({ to: z.string().email() });
+
+router.post('/:id/report/email', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const vendor = await prisma.vendor.findUnique({ where: { id: req.params.id } });
+    if (!vendor) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (req.user.role !== 'PLATFORM_OWNER' && vendor.agencyId !== req.user.agencyId) {
+      return res.status(403).json({ success: false, error: 'FORBIDDEN' });
+    }
+    const parsed = emailVendorReportSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', message: 'Enter a valid email address.', fieldErrors: parsed.error.flatten() });
+    }
+
+    const agency = await prisma.agency.findUnique({ where: { id: vendor.agencyId }, select: { name: true } });
+    if (!agency) return res.status(404).json({ success: false, error: 'AGENCY_NOT_FOUND' });
+
+    const to = req.query.to ? new Date(req.query.to) : new Date();
+    const from = req.query.from ? new Date(req.query.from) : new Date(to.getFullYear(), to.getMonth(), 1);
+    const period = { from, to };
+    const report = await computeVendorReport({ agencyId: vendor.agencyId, vendorId: vendor.id, from, to });
+
+    const emailResult = await sendVendorReportEmail({ to: parsed.data.to, agencyName: agency.name, period, report });
+
+    await recordAudit({
+      actorId: req.user.id, actorRole: req.user.role, agencyId: vendor.agencyId,
+      action: 'vendor.report_emailed', entityType: 'Vendor', entityId: vendor.id,
+      after: { to: parsed.data.to, leadCount: report.dispositions.length }, correlationId: req.correlationId,
+    });
+
+    return res.json({ success: true, emailStatus: emailResult.status });
   } catch (err) {
     next(err);
   }

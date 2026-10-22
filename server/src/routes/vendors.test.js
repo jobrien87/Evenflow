@@ -213,3 +213,76 @@ test('vendorBrand round-trips through create and update, and falls back to null 
   const patched = await patchRes.json();
   assert.equal(patched.vendor.vendorBrand, 'BizIQ Updated');
 });
+
+test('GET /:id/report returns real per-vendor stats and a full lead disposition list, scoped to this vendor and timeframe only', async () => {
+  const createRes = await fetch(`${baseUrl}/api/vendors`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ name: 'Report Test Vendor', email: `report-vendor-${suffix}@test.local`, product: 'Auto', deferCredential: true }),
+  });
+  const vendor = (await createRes.json()).vendor;
+
+  // A second vendor's lead must never bleed into the first vendor's report.
+  const otherVendorRes = await fetch(`${baseUrl}/api/vendors`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ name: 'Other Vendor', email: `other-vendor-${suffix}@test.local`, product: 'Auto', deferCredential: true }),
+  });
+  const otherVendor = (await otherVendorRes.json()).vendor;
+
+  const customer = await prisma.customer.create({ data: { firstName: 'Report', lastName: 'Customer', zip: '90210', state: 'CA' } });
+  const inRangeLead = await prisma.lead.create({
+    data: { agencyId, vendorId: vendor.id, customerId: customer.id, status: 'QUOTED', zip: '90210', state: 'CA', product: 'Auto', receivedAt: new Date() },
+  });
+  await prisma.lead.create({
+    data: { agencyId, vendorId: otherVendor.id, status: 'QUOTED', receivedAt: new Date() },
+  });
+
+  const to = new Date().toISOString();
+  const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const res = await fetch(`${baseUrl}/api/vendors/${vendor.id}/report?from=${from}&to=${to}`, { headers: { Cookie: ownerCookie } });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.success, true);
+  assert.equal(body.report.vendor.id, vendor.id);
+  assert.equal(body.report.stats.totalLeads, 1);
+  assert.equal(body.report.stats.quotedCount, 1, 'QUOTED counts toward quoted-or-beyond');
+  assert.equal(body.report.stats.quoteRate, 100);
+  assert.equal(body.report.dispositions.length, 1);
+  assert.equal(body.report.dispositions[0].leadId, inRangeLead.id);
+  assert.equal(body.report.dispositions[0].customerName, 'Report Customer');
+  assert.equal(body.report.dispositions[0].status, 'QUOTED');
+
+  await prisma.lead.deleteMany({ where: { agencyId, OR: [{ vendorId: vendor.id }, { vendorId: otherVendor.id }] } });
+  await prisma.customer.delete({ where: { id: customer.id } });
+});
+
+test('POST /:id/report/email honestly reports NOT_CONFIGURED when Brevo is unset, never a false SENT', async () => {
+  const createRes = await fetch(`${baseUrl}/api/vendors`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ name: 'Email Report Vendor', email: `email-report-${suffix}@test.local`, product: 'Auto', deferCredential: true }),
+  });
+  const vendor = (await createRes.json()).vendor;
+
+  const res = await fetch(`${baseUrl}/api/vendors/${vendor.id}/report/email`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ to: 'vendor-recipient@test.local' }),
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.success, true);
+  assert.equal(body.emailStatus, 'NOT_CONFIGURED');
+});
+
+test('a vendor report cannot be read across agencies by a non-Platform-Owner', async () => {
+  const otherAgency = await prisma.agency.create({ data: { name: `Other Agency ${suffix}` } });
+  const otherVendor = await prisma.vendor.create({ data: { name: 'Cross Agency Vendor', email: `cross-${suffix}@test.local`, agencyId: otherAgency.id, product: 'Auto' } });
+
+  const res = await fetch(`${baseUrl}/api/vendors/${otherVendor.id}/report`, { headers: { Cookie: ownerCookie } });
+  assert.equal(res.status, 403);
+
+  await prisma.vendor.delete({ where: { id: otherVendor.id } });
+  await prisma.agency.delete({ where: { id: otherAgency.id } });
+});

@@ -244,6 +244,8 @@ export const api = {
   setVendorStatus: (id, status) => request(`/vendors/${id}/status`, { method: 'PATCH', body: { status } }),
   updateVendor: (id, payload) => request(`/vendors/${id}`, { method: 'PATCH', body: payload }),
   vendorTransactions: (id) => request(`/vendors/${id}/transactions`),
+  vendorReport: (id, params = '') => request(`/vendors/${id}/report${params}`),
+  emailVendorReport: (id, to, params = '') => request(`/vendors/${id}/report/email${params}`, { method: 'POST', body: { to } }),
 
   offices: (params = '') => request(`/offices${params}`),
   createOffice: (payload) => request('/offices', { method: 'POST', body: payload }),

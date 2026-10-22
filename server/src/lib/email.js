@@ -169,4 +169,60 @@ async function sendZipReportEmail({ to, agencyName, rows }) {
   }
 }
 
-module.exports = { isConfigured, sendEmail, sendInvitationEmail, sendPasswordResetEmail, sendVendorPostingEmail, sendZipReportEmail };
+// report comes from lib/vendorReport.js's computeVendorReport() — stats
+// (real aggregate rates, same formulas as sendZipReportEmail) plus a
+// full per-lead disposition table. Customer names/zips are free-text
+// intake data, escaped like zip is above before landing in an email sent
+// to an external (vendor) address.
+async function sendVendorReportEmail({ to, agencyName, period, report }) {
+  if (!isConfigured()) {
+    console.warn(`[email:NOT_CONFIGURED] Would send vendor report for "${report.vendor.name}" to ${to} (${report.dispositions.length} leads).`);
+    return { status: 'NOT_CONFIGURED' };
+  }
+  try {
+    const { stats, dispositions, vendor } = report;
+    const statsHtml = `
+      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-family:sans-serif;font-size:13px;margin-bottom:20px;">
+        <tbody>
+          <tr><td><strong>Total Leads</strong></td><td>${stats.totalLeads}</td></tr>
+          <tr><td><strong>Quoted</strong></td><td>${stats.quotedCount} (${stats.quoteRate === null ? '—' : `${stats.quoteRate}%`})</td></tr>
+          <tr><td><strong>Sold</strong></td><td>${stats.soldCount} (${stats.closeRate === null ? '—' : `${stats.closeRate}%`})</td></tr>
+          <tr><td><strong>Cost Per Lead</strong></td><td>${stats.costPerLead === null ? '—' : `$${stats.costPerLead.toFixed(2)}`}</td></tr>
+          <tr><td><strong>CPA</strong></td><td>${stats.cpa === null ? '—' : `$${stats.cpa.toFixed(2)}`}</td></tr>
+          <tr><td><strong>Revenue</strong></td><td>$${stats.revenue.toFixed(2)}</td></tr>
+        </tbody>
+      </table>
+    `;
+    const dispositionRows = dispositions
+      .map(
+        (d) => `<tr>
+          <td>${escapeHtml(d.customerName)}</td>
+          <td>${new Date(d.receivedAt).toLocaleDateString()}</td>
+          <td>${escapeHtml(d.status)}</td>
+          <td>${escapeHtml(d.product)}</td>
+          <td>${escapeHtml(d.zip)}, ${escapeHtml(d.state)}</td>
+          <td>${escapeHtml(d.assignedTo)}</td>
+        </tr>`
+      )
+      .join('');
+    const html = `
+      <h2>${escapeHtml(agencyName)} — ${escapeHtml(vendor.vendorBrand || vendor.name)} Vendor Report</h2>
+      <p>${new Date(period.from).toLocaleDateString()} – ${new Date(period.to).toLocaleDateString()}</p>
+      ${statsHtml}
+      <h3>Lead Disposition Detail</h3>
+      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-family:sans-serif;font-size:13px;">
+        <thead><tr>
+          <th>Customer</th><th>Received</th><th>Disposition</th><th>Product</th><th>Location</th><th>Assigned To</th>
+        </tr></thead>
+        <tbody>${dispositionRows || '<tr><td colspan="6">No leads in this period.</td></tr>'}</tbody>
+      </table>
+    `;
+    await sendEmail({ to, subject: `${agencyName} — ${vendor.vendorBrand || vendor.name} Vendor Report`, html });
+    return { status: 'SENT' };
+  } catch (err) {
+    console.error('[email:FAILED]', err.message);
+    return { status: 'FAILED' };
+  }
+}
+
+module.exports = { isConfigured, sendEmail, sendInvitationEmail, sendPasswordResetEmail, sendVendorPostingEmail, sendZipReportEmail, sendVendorReportEmail };
