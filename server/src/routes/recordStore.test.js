@@ -352,3 +352,41 @@ test('GET /admin/source-optimizations is Platform-Owner-only and returns decoded
   await prisma.recordStoreSourceOptimization.delete({ where: { id: run.id } });
   await prisma.recordStoreSubscription.delete({ where: { id: sub.id } });
 });
+
+// ---- Import an existing (pre-EvenFlow) Boberdoo filter set --------------
+
+test('POST /admin/agencies/:id/import-filter-set is Platform-Owner-only and pulls the real filter set config', async () => {
+  const importAgency = await prisma.agency.create({ data: { name: `Import Route Test Agency ${suffix}`, boberdooPartnerId: `P-route-import-${suffix}` } });
+  try {
+    const forbiddenRes = await fetch(`${baseUrl}/api/record-store/admin/agencies/${importAgency.id}/import-filter-set`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+      body: JSON.stringify({ boberdooFilterSetId: `FS-route-${suffix}` }),
+    });
+    assert.equal(forbiddenRes.status, 403);
+
+    boberdoo.getFilterSet = async (filterSetId) => ({
+      success: true,
+      data: { Filter_Set_ID: filterSetId, Filter_Set_Name: 'Route Test Filter', Filter_Set_Price: 6, Daily_Limit: 20, TYPE: 21, Accepted_Sources: 'Fidadto' },
+    });
+
+    const res = await fetch(`${baseUrl}/api/record-store/admin/agencies/${importAgency.id}/import-filter-set`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: platformOwnerCookie },
+      body: JSON.stringify({ boberdooFilterSetId: `FS-route-${suffix}` }),
+    });
+    assert.equal(res.status, 201);
+    const created = (await res.json()).subscription;
+    assert.equal(created.priceSnapshotCents, 600);
+    assert.equal(created.status, 'ACTIVE');
+
+    const dupRes = await fetch(`${baseUrl}/api/record-store/admin/agencies/${importAgency.id}/import-filter-set`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: platformOwnerCookie },
+      body: JSON.stringify({ boberdooFilterSetId: `FS-route-${suffix}` }),
+    });
+    assert.equal(dupRes.status, 409);
+    assert.equal((await dupRes.json()).error, 'ALREADY_IMPORTED');
+
+    await prisma.recordStoreSubscription.delete({ where: { id: created.id } });
+  } finally {
+    await prisma.agency.delete({ where: { id: importAgency.id } });
+  }
+});

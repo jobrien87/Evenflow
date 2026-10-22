@@ -34,6 +34,7 @@ export default function RecordStoreAdminPanel() {
   const [quotingRequest, setQuotingRequest] = useState(null);
   const [decliningRequest, setDecliningRequest] = useState(null);
   const [linkForm, setLinkForm] = useState(null); // { agencyId, partnerId }
+  const [importForm, setImportForm] = useState(null); // { agencyId, filterSetId }
   const [status, setStatus] = useState('');
   const [busyId, setBusyId] = useState(null);
 
@@ -168,6 +169,19 @@ export default function RecordStoreAdminPanel() {
       await load();
     } catch (err) {
       setStatus(err.data?.message || 'Could not link that Partner ID.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function submitImport() {
+    setBusyId(importForm.agencyId);
+    try {
+      await api.importExistingFilterSet(importForm.agencyId, importForm.filterSetId);
+      setImportForm(null);
+      await load();
+    } catch (err) {
+      setStatus(err.data?.message || 'Could not import that filter set.');
     } finally {
       setBusyId(null);
     }
@@ -314,6 +328,17 @@ export default function RecordStoreAdminPanel() {
                           </div>
                         ) : (
                           <Button variant="secondary" size="sm" onClick={() => setLinkForm({ agencyId: a.id, partnerId: '' })}>LINK EXISTING RECORD STORE PARTNER</Button>
+                        )
+                      )}
+                      {a.boberdooPartnerId && (
+                        importForm?.agencyId === a.id ? (
+                          <div style={s.linkRow}>
+                            <input style={s.input} placeholder="Existing Filter Set ID" value={importForm.filterSetId} onChange={(e) => setImportForm({ ...importForm, filterSetId: e.target.value })} />
+                            <Button variant="primary" size="sm" disabled={busyId === a.id} onClick={submitImport}>IMPORT</Button>
+                            <Button variant="secondary" size="sm" onClick={() => setImportForm(null)}>CANCEL</Button>
+                          </div>
+                        ) : (
+                          <Button variant="secondary" size="sm" onClick={() => setImportForm({ agencyId: a.id, filterSetId: '' })}>IMPORT EXISTING FILTER SET</Button>
                         )
                       )}
                     </div>

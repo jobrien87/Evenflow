@@ -588,3 +588,82 @@ test('listSources returns the real list when Boberdoo succeeds, and an honest fa
   assert.ok(fallback.sources.length > 0, 'a real, non-empty fallback list is still returned so the builder stays usable');
   assert.ok(fallback.sources.every((s) => s.value && s.label));
 });
+
+// ---- importExistingFilterSet (real Partner, pre-existing Boberdoo filter set) ----
+
+test('importExistingFilterSet refuses an agency with no linked Partner yet', async () => {
+  const unlinkedAgency = await prisma.agency.create({ data: { name: `Unlinked Import Test Agency ${suffix}` } });
+  try {
+    const result = await provisioning.importExistingFilterSet(unlinkedAgency.id, 'FS-WHATEVER', ownerId);
+    assert.equal(result.success, false);
+    assert.equal(result.errorCode, 'NOT_LINKED');
+  } finally {
+    await prisma.agency.delete({ where: { id: unlinkedAgency.id } });
+  }
+});
+
+test('importExistingFilterSet pulls the real price/caps/sources from Boberdoo (never hand-typed) and creates an ACTIVE subscription', async () => {
+  const linkedAgency = await prisma.agency.create({ data: { name: `Linked Import Test Agency ${suffix}`, boberdooPartnerId: `P-import-${suffix}` } });
+  try {
+    boberdoo.getFilterSet = async (filterSetId) => ({
+      success: true,
+      data: {
+        Filter_Set_ID: filterSetId,
+        Filter_Set_Name: 'Tom\'s Existing Auto Filter',
+        Filter_Set_Price: 8.5,
+        Daily_Limit: 15,
+        TYPE: 23,
+        Accepted_Sources: 'Fidadto,Quoting_Fast',
+      },
+    });
+
+    const result = await provisioning.importExistingFilterSet(linkedAgency.id, `FS-import-${suffix}`, ownerId);
+    assert.equal(result.success, true);
+    const { subscription } = result;
+    assert.equal(subscription.agencyId, linkedAgency.id);
+    assert.equal(subscription.boberdooFilterSetId, `FS-import-${suffix}`);
+    assert.equal(subscription.boberdooPartnerId, `P-import-${suffix}`);
+    assert.equal(subscription.priceSnapshotCents, 850, 'price comes from the real Boberdoo response, in cents, never hand-typed');
+    assert.equal(subscription.dailyVolume, 15);
+    assert.equal(subscription.status, 'ACTIVE');
+    assert.equal(subscription.provisioningStatus, 'ACTIVE');
+    assert.equal(subscription.fundingStatus, 'CONFIRMED');
+    assert.equal(subscription.customConfigurationJson.Accepted_Sources, 'Fidadto,Quoting_Fast');
+
+    const template = await prisma.recordStoreTemplate.findUnique({ where: { id: subscription.recordStoreTemplateId } });
+    assert.equal(template.isCustomBuilder, true, 'an imported filter set is always filed under the custom-builder template, never a guessed fixed SKU');
+
+    await prisma.recordStoreSubscription.delete({ where: { id: subscription.id } });
+  } finally {
+    await prisma.agency.delete({ where: { id: linkedAgency.id } });
+  }
+});
+
+test('importExistingFilterSet refuses to import the same filter set twice', async () => {
+  const agency = await prisma.agency.create({ data: { name: `Dup Import Test Agency ${suffix}`, boberdooPartnerId: `P-dup-${suffix}` } });
+  try {
+    boberdoo.getFilterSet = async (filterSetId) => ({ success: true, data: { Filter_Set_ID: filterSetId, Filter_Set_Price: 5, Daily_Limit: 10, TYPE: 21 } });
+    const first = await provisioning.importExistingFilterSet(agency.id, `FS-dup-${suffix}`, ownerId);
+    assert.equal(first.success, true);
+
+    const second = await provisioning.importExistingFilterSet(agency.id, `FS-dup-${suffix}`, ownerId);
+    assert.equal(second.success, false);
+    assert.equal(second.errorCode, 'ALREADY_IMPORTED');
+
+    await prisma.recordStoreSubscription.delete({ where: { id: first.subscription.id } });
+  } finally {
+    await prisma.agency.delete({ where: { id: agency.id } });
+  }
+});
+
+test('importExistingFilterSet surfaces an honest error when Boberdoo cannot find that filter set', async () => {
+  const agency = await prisma.agency.create({ data: { name: `Bad Import Test Agency ${suffix}`, boberdooPartnerId: `P-bad-${suffix}` } });
+  try {
+    boberdoo.getFilterSet = async () => ({ success: false, errorCode: 'PROVIDER_ERROR', errorMessage: 'Filter set not found' });
+    const result = await provisioning.importExistingFilterSet(agency.id, `FS-bad-${suffix}`, ownerId);
+    assert.equal(result.success, false);
+    assert.equal(result.errorCode, 'PROVIDER_ERROR');
+  } finally {
+    await prisma.agency.delete({ where: { id: agency.id } });
+  }
+});

@@ -3,6 +3,7 @@ const { computeProfitability, computeROI } = require('./financialCalc');
 const { computeGoalActual, assembleAgencyReport } = require('./runningReport');
 const { computeVendorBreakdown, computeTelemarketerPerformance } = require('./performanceBreakdown');
 const { ACTIVE_LEAD_STATUSES } = require('./leadStatusGroups');
+const { getRecentForRole } = require('./productUpdates');
 
 // Everything in here is plain arithmetic against real rows — per spec,
 // "ED should use deterministic database calculations for goals, pace,
@@ -145,10 +146,15 @@ async function buildPlatformOwnerContext() {
 }
 
 async function buildContextForUser(user) {
-  if (user.role === 'PRODUCER') return buildProducerContext(user);
-  if (user.role === 'AGENCY_OWNER' || user.role === 'AGENCY_MANAGER') return buildAgencyOwnerContext(user.agencyId);
-  if (user.role === 'PLATFORM_OWNER') return buildPlatformOwnerContext();
-  return { role: user.role };
+  const base = user.role === 'PRODUCER' ? await buildProducerContext(user)
+    : user.role === 'AGENCY_OWNER' || user.role === 'AGENCY_MANAGER' ? await buildAgencyOwnerContext(user.agencyId)
+    : user.role === 'PLATFORM_OWNER' ? await buildPlatformOwnerContext()
+    : { role: user.role };
+  // Real, Platform-Owner-published "what's new" items ED can mention when
+  // relevant (see lib/productUpdates.js) — merged in for every role so
+  // every context builder above stays untouched.
+  const recentProductUpdates = await getRecentForRole(user.role, { limit: 5 });
+  return { ...base, recentProductUpdates };
 }
 
 // Real deltas since this user's last briefing (or the last 24h, the first
@@ -158,6 +164,10 @@ async function buildBriefingContext(user) {
   const since = user.lastBriefingAt || new Date(Date.now() - 24 * 60 * 60 * 1000);
   const now = new Date();
   const sinceHours = Math.max(1, Math.round((now - since) / (60 * 60 * 1000)));
+  // Real "what's new since your last briefing" items (lib/productUpdates.js)
+  // — the one channel this app has for proactively telling someone about a
+  // feature that shipped, rather than only answering when asked.
+  const recentProductUpdates = await getRecentForRole(user.role, { sinceDate: since, limit: 5 });
 
   if (user.role === 'PRODUCER') {
     const [newLeads, newSales, currentSnapshot, priorSnapshot, goal] = await Promise.all([
@@ -188,6 +198,7 @@ async function buildBriefingContext(user) {
       flowScoreNow: currentSnapshot ? currentSnapshot.score : null,
       flowScoreDelta: currentSnapshot && priorSnapshot ? currentSnapshot.score - priorSnapshot.score : null,
       goalPace,
+      recentProductUpdates,
     };
   }
 
@@ -212,6 +223,7 @@ async function buildBriefingContext(user) {
       newSales,
       flowScoreNow: currentSnapshot ? currentSnapshot.score : null,
       flowScoreDelta: currentSnapshot && priorSnapshot ? currentSnapshot.score - priorSnapshot.score : null,
+      recentProductUpdates,
     };
   }
 
@@ -222,10 +234,10 @@ async function buildBriefingContext(user) {
       prisma.transfer.count({ where: { status: 'MISSED', createdAt: { gte: since } } }),
     ]);
 
-    return { role: 'PLATFORM_OWNER', sinceHours, newAgencies, newTransfers, missedTransfers };
+    return { role: 'PLATFORM_OWNER', sinceHours, newAgencies, newTransfers, missedTransfers, recentProductUpdates };
   }
 
-  return { role: user.role, sinceHours };
+  return { role: user.role, sinceHours, recentProductUpdates };
 }
 
 module.exports = { buildContextForUser, buildProducerContext, buildAgencyOwnerContext, buildPlatformOwnerContext, buildBriefingContext };

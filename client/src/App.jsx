@@ -51,6 +51,7 @@ import SecurityPage from './pages/SecurityPage';
 import BreakRoomPanel from './pages/BreakRoomPanel';
 import BreakRoomPlayPage from './pages/BreakRoomPlayPage';
 import BreakRoomAdminPanel from './pages/BreakRoomAdminPanel';
+import ProductUpdatesAdminPanel from './pages/ProductUpdatesAdminPanel';
 
 function RequireAuth() {
   const { user, loading } = useAuth();
@@ -170,6 +171,7 @@ export default function App() {
           <Route path="platform/training" element={<RedirectToSalesStudio tab="training" />} />
           <Route path="platform/record-store" element={<RecordStoreAdminPanel />} />
           <Route path="platform/break-room-admin" element={<BreakRoomAdminPanel />} />
+          <Route path="platform/product-updates" element={<ProductUpdatesAdminPanel />} />
         </Route>
 
         <Route element={<RoleGate allow={['TELEMARKETER']} />}>

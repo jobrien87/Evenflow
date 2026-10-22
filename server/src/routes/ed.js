@@ -72,7 +72,19 @@ function deterministicSummary(context) {
   return 'No summary available for this role yet.';
 }
 
+// Real, Platform-Owner-published update titles, honestly prefixed — used
+// by the deterministic fallback below whenever ED's language layer is
+// unavailable, so "what's new" visibility never depends on the LLM being
+// up. Never more than the single most recent one here; the full list is
+// still in context for a client that wants to show more.
+function productUpdateLine(context) {
+  const updates = context.recentProductUpdates || [];
+  if (updates.length === 0) return '';
+  return ` New: ${updates[0].title}.`;
+}
+
 function deterministicBriefing(context) {
+  const updateLine = productUpdateLine(context);
   if (context.role === 'PRODUCER') {
     const scoreLine = context.flowScoreDelta !== null && context.flowScoreDelta !== undefined
       ? ` Flow Score moved ${context.flowScoreDelta >= 0 ? '+' : ''}${context.flowScoreDelta} to ${context.flowScoreNow}.`
@@ -80,16 +92,16 @@ function deterministicBriefing(context) {
     const paceLine = context.goalPace
       ? ` You're at ${context.goalPace.actual}/${context.goalPace.target} on your sales goal.`
       : '';
-    return `Since your last briefing: ${context.newLeads} new lead(s), ${context.newSales} sale(s).${scoreLine}${paceLine}`;
+    return `Since your last briefing: ${context.newLeads} new lead(s), ${context.newSales} sale(s).${scoreLine}${paceLine}${updateLine}`;
   }
   if (context.role === 'AGENCY_OWNER') {
     const scoreLine = context.flowScoreDelta !== null && context.flowScoreDelta !== undefined
       ? ` Agency Flow Score moved ${context.flowScoreDelta >= 0 ? '+' : ''}${context.flowScoreDelta} to ${context.flowScoreNow}.`
       : '';
-    return `Since your last briefing: ${context.newLeads} new lead(s), ${context.newTransfers} new transfer(s), ${context.newSales} sale(s).${scoreLine}`;
+    return `Since your last briefing: ${context.newLeads} new lead(s), ${context.newTransfers} new transfer(s), ${context.newSales} sale(s).${scoreLine}${updateLine}`;
   }
   if (context.role === 'PLATFORM_OWNER') {
-    return `Since your last briefing: ${context.newAgencies} new agenc${context.newAgencies === 1 ? 'y' : 'ies'}, ${context.newTransfers} new transfer(s), ${context.missedTransfers} missed.`;
+    return `Since your last briefing: ${context.newAgencies} new agenc${context.newAgencies === 1 ? 'y' : 'ies'}, ${context.newTransfers} new transfer(s), ${context.missedTransfers} missed.${updateLine}`;
   }
   return 'No briefing available for this role yet.';
 }

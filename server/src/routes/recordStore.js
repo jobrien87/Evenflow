@@ -646,6 +646,24 @@ router.post('/admin/agencies/:agencyId/link-partner', requireRole('PLATFORM_OWNE
   }
 });
 
+const importFilterSetSchema = z.object({ boberdooFilterSetId: z.string().min(1) });
+
+// For a Partner who was already live in Boberdoo before being linked into
+// EvenFlow (see link-partner above) — mirrors one of their real, existing
+// Filter Sets into a real RecordStoreSubscription, pulling price/caps/
+// sources straight from Boberdoo's own getFilterSet response.
+router.post('/admin/agencies/:agencyId/import-filter-set', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const parsed = importFilterSetSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    const result = await provisioning.importExistingFilterSet(req.params.agencyId, parsed.data.boberdooFilterSetId, req.user.id, req.correlationId);
+    if (!result.success) return res.status(409).json({ success: false, error: result.errorCode, message: result.errorMessage });
+    return res.status(201).json({ success: true, subscription: result.subscription });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/admin/agencies/:agencyId/sync', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
   try {
     const result = await provisioning.refreshAgencyBalance(req.params.agencyId);

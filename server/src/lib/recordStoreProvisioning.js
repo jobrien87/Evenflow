@@ -720,6 +720,87 @@ async function linkExistingPartner(agencyId, partnerId, actorId, correlationId) 
   return { success: true, partnerInfo: info.data };
 }
 
+// Boberdoo Lead_Type IDs confirmed against the real account this
+// integration targets -> the RecordStoreTemplate.productCategory an
+// imported filter set is filed under for reporting. Mirrors
+// routes/boberdooDelivery.js's own LEAD_TYPE_TO_PRODUCT map (kept
+// separate rather than shared — one maps to a display product string for
+// a created Lead, this one to a template's productCategory enum-like
+// string; conflating them would couple two independent call sites for no
+// real benefit).
+const LEAD_TYPE_TO_PRODUCT_CATEGORY = { 23: 'AUTO', 21: 'HOME', 19: 'LIFE' };
+
+// ---- Admin: import an already-live Boberdoo Filter Set --------------------
+// For a real-world Partner who was already receiving leads through
+// Boberdoo before being linked into EvenFlow (see linkExistingPartner
+// above) — mirrors their one existing, real Filter Set into EvenFlow's own
+// RecordStoreSubscription model, so it shows up in "My Lead Programs" and
+// is covered by source-performance tracking/the 30-day optimizer exactly
+// like one bought through EvenFlow's own storefront. Every number
+// (price, daily cap, sources) is read directly from Boberdoo's own
+// getFilterSet response — never hand-typed — because this is a live,
+// real, already-billing business record, not a fresh order this module
+// gets to define the terms of. Always filed under the CUSTOM_BUILDER
+// template (never guesses which fixed-catalog SKU it "most resembles") —
+// its own customConfigurationJson snapshot is what actually governs it.
+async function importExistingFilterSet(agencyId, boberdooFilterSetId, actorId, correlationId) {
+  const agency = await prisma.agency.findUnique({ where: { id: agencyId } });
+  if (!agency) return { success: false, errorCode: 'NOT_FOUND', errorMessage: 'Agency not found.' };
+  if (!agency.boberdooPartnerId) {
+    return { success: false, errorCode: 'NOT_LINKED', errorMessage: 'Link this agency to its real Record Store Partner first.' };
+  }
+
+  const alreadyImported = await prisma.recordStoreSubscription.findFirst({ where: { boberdooFilterSetId } });
+  if (alreadyImported) {
+    return { success: false, errorCode: 'ALREADY_IMPORTED', errorMessage: 'This filter set has already been imported.' };
+  }
+
+  const result = await boberdoo.getFilterSet(boberdooFilterSetId);
+  if (!result.success) {
+    return { success: false, errorCode: result.errorCode || 'FILTER_SET_NOT_FOUND', errorMessage: result.errorMessage || 'Could not read that filter set from the lead exchange.' };
+  }
+
+  const data = result.data || {};
+  const priceCents = Math.round(Number(data.Filter_Set_Price ?? data.filter_set_price ?? 0) * 100);
+  const dailyVolume = Math.max(1, Number(data.Daily_Limit ?? data.daily_limit ?? 1) || 1);
+  const leadTypeId = Number(data.TYPE ?? data.Lead_Type ?? data.lead_type);
+  const filterSetName = data.Filter_Set_Name ?? data.filter_set_name ?? `Imported Filter Set ${boberdooFilterSetId}`;
+  const productCategory = LEAD_TYPE_TO_PRODUCT_CATEGORY[leadTypeId] || null;
+
+  const customBuilderTemplate = await prisma.recordStoreTemplate.findFirst({ where: { isCustomBuilder: true } });
+  if (!customBuilderTemplate) return { success: false, errorCode: 'NO_CUSTOM_TEMPLATE', errorMessage: 'No custom-builder template exists to file this under.' };
+
+  const subscription = await prisma.recordStoreSubscription.create({
+    data: {
+      agencyId,
+      recordStoreTemplateId: customBuilderTemplate.id,
+      productNameSnapshot: productCategory ? `${filterSetName} (${productCategory})` : filterSetName,
+      leadType: customBuilderTemplate.leadType,
+      filterSetType: 'STANDARD',
+      priceSnapshotCents: priceCents,
+      dailyVolume,
+      status: 'ACTIVE',
+      provisioningStatus: 'ACTIVE',
+      fundingStatus: 'CONFIRMED',
+      boberdooPartnerId: agency.boberdooPartnerId,
+      boberdooFilterSetId,
+      // The full real response, verbatim — this is what provisionFilterSet's
+      // merge logic (template config + this) and the 30-day optimizer's
+      // Accepted_Sources read/write both operate on going forward.
+      customConfigurationJson: data,
+      startedAt: new Date(),
+      createdById: actorId,
+    },
+  });
+
+  await recordAudit({
+    actorId, agencyId, action: 'RECORD_STORE_FILTER_SET_IMPORTED', entityType: 'RecordStoreSubscription',
+    entityId: subscription.id, after: { boberdooFilterSetId, priceCents, dailyVolume }, correlationId,
+  });
+
+  return { success: true, subscription };
+}
+
 // ---- Balance refresh (the "REFRESH BALANCE" button) ----------------------
 
 async function refreshAgencyBalance(agencyId) {
@@ -829,6 +910,7 @@ module.exports = {
   changeDailyVolume,
   updateAcceptedSources,
   linkExistingPartner,
+  importExistingFilterSet,
   submitFundingPayment,
   submitPendingFundingPayments,
 };

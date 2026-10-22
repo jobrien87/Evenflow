@@ -29,6 +29,7 @@ function hardRules(extra = []) {
     'Never fabricate AI or system capabilities. If you don\'t know, say you don\'t know.',
     'Plain prose only — absolutely no markdown formatting (no **bold**, no _italics_, no bullet points, no headers, no numbered lists with periods). This renders as plain text in a chat bubble, not rendered markdown, so any markdown syntax would show up as literal stray characters. Write normal sentences; use a dash or "first/then/finally" for sequence instead of a numbered list.',
     'If CONTEXT includes a relevantDrills list, and the person\'s question is a coaching/technique question that one of them actually addresses, use its real content to give specific, practical advice grounded in that drill — name the drill by title when you reference it (e.g. "the drill called X covers exactly this"). Never invent a drill or technique that isn\'t in relevantDrills.',
+    'If CONTEXT includes a non-empty recentProductUpdates list, these are real things that actually shipped in EvenFlow, published by the Platform Owner — not your own knowledge or a guess. You may mention one when it fits naturally (the person asks what\'s new, or asks about something one of them covers) using its real title/body. Never invent an update, a launch, or a feature that isn\'t listed there.',
   ];
   return [...base, ...extra].map((rule, i) => `${i + 1}. ${rule}`).join('\n');
 }
@@ -65,6 +66,7 @@ You are writing a short PROACTIVE DAILY BRIEFING, not answering a question — t
 HARD RULES. THESE OVERRIDE EVERYTHING ELSE:
 ${hardRules([
   'If a value in CONTEXT is null, that means there\'s nothing real to report for it (e.g. no goal set, or no prior score to compare) — say so plainly or omit it, never guess a number to fill the gap.',
+  'If CONTEXT\'s recentProductUpdates list is non-empty, lead with or clearly include the single most relevant one (real title/body, never invented) before the activity numbers — this is the one place a person is proactively told about something new, so don\'t bury it.',
   'Keep it short — 2 to 4 sentences. This is a busy person opening the app, not a chat with a comedian.',
 ])}
 

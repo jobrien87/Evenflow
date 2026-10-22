@@ -2877,6 +2877,35 @@ model RecordStoreCustomRequest {
   @@index([status])
 }
 
+// A real, Platform-Owner-published "what's new in EvenFlow" entry — ED's
+// own proactive news feed (lib/productUpdates.js), surfaced in ED's daily
+// briefing and available for ED to mention in normal chat when relevant.
+// Deliberately NOT a draft/publish state machine: every row is live the
+// moment it's created (publishedAt defaults to now, backdatable if a
+// Platform Owner wants to note something that shipped slightly earlier) —
+// editing or deleting a row is how a mistake gets corrected, same minimal
+// philosophy as RecordStoreCustomRequest's own plain-scalar FK style.
+model ProductUpdate {
+  id String @id @default(uuid())
+
+  title String
+  body  String
+
+  // Empty = every role sees/hears about it. Non-empty = only these roles
+  // (e.g. ["AGENCY_OWNER", "AGENCY_MANAGER"] for something that only
+  // matters to agency owners) — same "empty means unrestricted" shape as
+  // RecordStoreCustomRequest.sources, never a magic "ALL" sentinel.
+  audienceRoles String[] @default([])
+
+  publishedAt DateTime @default(now())
+  createdById String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([publishedAt])
+}
+
 // A real Stripe payment collected from the Agency Owner to fund (or top
 // up) their Record Store lead-purchasing balance. EvenFlow never asks
 // Boberdoo to process a card directly — Boberdoo's documented API has no

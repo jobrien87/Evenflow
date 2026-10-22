@@ -46,6 +46,7 @@ const salesRoutes = require('./routes/sales');
 const hrRoutes = require('./routes/hr');
 const emailWebhookRoutes = require('./routes/emailWebhook');
 const boberdooDeliveryRoutes = require('./routes/boberdooDelivery');
+const productUpdatesRoutes = require('./routes/productUpdates');
 
 const app = express();
 
@@ -98,6 +99,7 @@ app.use('/api/appointments', appointmentRoutes);
 app.use('/api/offices', officeRoutes);
 app.use('/api/financials', financialRoutes);
 app.use('/api/ed', edRoutes);
+app.use('/api/product-updates', productUpdatesRoutes);
 app.use('/api/support', supportRoutes);
 app.use('/api/calls', callRoutes);
 app.use('/api/billing', billingRoutes);

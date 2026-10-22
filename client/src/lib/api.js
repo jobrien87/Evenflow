@@ -191,6 +191,7 @@ export const api = {
   updateRecordStoreTemplate: (id, patch) => request(`/record-store/admin/templates/${id}`, { method: 'PATCH', body: patch }),
   adminRecordStoreCustomers: () => request('/record-store/admin/customers'),
   linkBoberdooPartner: (agencyId, partnerId) => request(`/record-store/admin/agencies/${agencyId}/link-partner`, { method: 'POST', body: { partnerId } }),
+  importExistingFilterSet: (agencyId, boberdooFilterSetId) => request(`/record-store/admin/agencies/${agencyId}/import-filter-set`, { method: 'POST', body: { boberdooFilterSetId } }),
   syncRecordStoreAgency: (agencyId) => request(`/record-store/admin/agencies/${agencyId}/sync`, { method: 'POST' }),
   retryRecordStoreProvisioning: (id) => request(`/record-store/admin/subscriptions/${id}/retry`, { method: 'POST' }),
   adminPauseRecordStoreAccount: (agencyId) => request(`/record-store/admin/agencies/${agencyId}/pause-account`, { method: 'POST' }),
@@ -290,6 +291,11 @@ export const api = {
   edSuggest: (pageContext, humorLevel) => request('/ed/suggest', { method: 'POST', body: { pageContext, humorLevel } }),
   edEscalate: (subject, description) => request('/ed/escalate', { method: 'POST', body: { subject, description } }),
   edUsageSummary: () => request('/ed/usage-summary'),
+  // ED's "what's new" feed — Platform-Owner CRUD.
+  productUpdates: () => request('/product-updates'),
+  createProductUpdate: (payload) => request('/product-updates', { method: 'POST', body: payload }),
+  updateProductUpdate: (id, patch) => request(`/product-updates/${id}`, { method: 'PATCH', body: patch }),
+  deleteProductUpdate: (id) => request(`/product-updates/${id}`, { method: 'DELETE' }),
 
   supportTickets: (params = '') => request(`/support${params}`),
   createSupportTicket: (payload) => request('/support', { method: 'POST', body: payload }),
