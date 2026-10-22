@@ -528,14 +528,13 @@ async function changeDailyVolume(subscriptionId, newVolume, actorId, correlation
   const clamped = Math.max(subscription.template.minimumDailyVolume, Math.min(subscription.template.maximumDailyVolume, Math.round(newVolume)));
   if (!subscription.boberdooFilterSetId) return { success: false, errorCode: 'NOT_PROVISIONED', errorMessage: FRIENDLY_ERROR };
 
-  const config = subscription.template.configurationJson || {};
   const result = isIprTemplate(subscription.template)
     ? await boberdoo.updateIprDailyVolume(subscription.boberdooFilterSetId, clamped)
-    : await boberdoo.updateFilterSetDailyVolume(subscription.boberdooFilterSetId, clamped, { volumeField: config.volumeField });
+    : await boberdoo.updateFilterSetDailyVolume(subscription.boberdooFilterSetId, subscription.agency.boberdooPartnerId, clamped);
 
   if (!result.success) {
     await prisma.recordStoreSubscription.update({ where: { id: subscriptionId }, data: { boberdooSyncError: result.errorMessage, lastBoberdooSyncAt: new Date() } });
-    return { success: false, errorCode: result.errorCode, errorMessage: result.errorCode === 'VOLUME_FIELD_NOT_CONFIGURED' ? 'This product is not yet fully configured for volume changes. Our team has been notified.' : FRIENDLY_ERROR };
+    return { success: false, errorCode: result.errorCode, errorMessage: FRIENDLY_ERROR };
   }
 
   const before = subscription.dailyVolume;

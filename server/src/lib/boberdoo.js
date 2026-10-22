@@ -143,24 +143,31 @@ async function setPartnerStatus(partnerId, status, statusReason = '') {
 }
 
 // ---- Standard (non-IPR) filter sets -----------------------------------
-// insertUpdateFilterSet's full field list isn't fully documented (see
-// docs/lead-portal-api-reference.md §3's own note: "re-fetch the real
-// field list before building"). Rather than guess at field names, this
-// forwards exactly whatever a Super Admin has entered in the owning
-// template's configurationJson — never an invented field — plus the
-// handful of values every create/update genuinely needs (Partner_ID,
-// Filter_Set_ID for updates, and the one documented response field,
-// filter_set_ID).
+// insertUpdateFilterSet's full field list was NOT fully documented by the
+// docs page (see docs/lead-portal-api-reference.md §3's own note) — now
+// reverse-engineered against a real account (2026-10-22) by reading its
+// own validation errors: Mode ("insert"/"update", same convention as
+// insertUpdatePartner), Partner_ID, Client_ID (same value as Partner_ID
+// in every case tested), and the lead type as TYPE. Required for every
+// create: Filter_Set_Price (not "Lead_Price" — that's only the read-side
+// getFilterSet field name), Accepted_Sources (comma-separated string),
+// Match_Priority, Daily_Limit/Weekly_Limit/Monthly_Limit (0 = no limit),
+// Accept_Only_Reprocessed_Leads ("Yes"/"No"). Confirmed NOT to work this
+// way: per-lead-type qualifying criteria (e.g. driver history, home year
+// built) — guessing Title_Case versions of getFilterSet's response field
+// names for those was rejected outright, so templateFields/fields here
+// still only carries what a Super Admin has explicitly entered, never an
+// invented field, for anything beyond this confirmed core set.
 async function createFilterSet(partnerId, templateFields = {}) {
-  const result = await callAction('insertUpdateFilterSet', { Partner_ID: partnerId, ...templateFields });
+  const result = await callAction('insertUpdateFilterSet', { Mode: 'insert', Partner_ID: partnerId, Client_ID: partnerId, ...templateFields });
   if (!result.success) return result;
   const rawFilterSetId = result.data.filter_set_ID ?? result.data.Filter_Set_ID ?? result.data.id;
   const filterSetId = rawFilterSetId === undefined || rawFilterSetId === null ? null : String(rawFilterSetId);
   return { ...result, filterSetId };
 }
 
-async function updateFilterSet(filterSetId, fields = {}) {
-  return callAction('insertUpdateFilterSet', { Filter_Set_ID: filterSetId, ...fields });
+async function updateFilterSet(filterSetId, partnerId, fields = {}) {
+  return callAction('insertUpdateFilterSet', { Mode: 'update', Filter_Set_ID: filterSetId, Partner_ID: partnerId, Client_ID: partnerId, ...fields });
 }
 
 async function getFilterSet(filterSetId) {
@@ -172,19 +179,11 @@ async function setFilterSetStatus(partnerId, filterSetId, status) {
   return callAction('setFilterSetStatus', { Partner_ID: partnerId, Filter_Set_ID: filterSetId, Status: status });
 }
 
-// Standard filter sets expose no single documented "leads per day" field
-// (getFilterSet's response shows leads_per_week/leads_per_month/
-// total_delivery_limit, not a flat daily cap) — per the master spec's own
-// instruction, this is handled by letting the template's own
-// configurationJson.volumeField name the real field to set for that
-// specific template, rather than this client guessing one. Returns an
-// honest NOT_CONFIGURED result (never silently no-ops) if the template
-// hasn't been told which field to use yet.
-async function updateFilterSetDailyVolume(filterSetId, dailyVolume, { volumeField } = {}) {
-  if (!volumeField) {
-    return { success: false, configured: isConfigured(), errorCode: 'VOLUME_FIELD_NOT_CONFIGURED', errorMessage: 'This product has no configured Boberdoo volume field yet.' };
-  }
-  return callAction('insertUpdateFilterSet', { Filter_Set_ID: filterSetId, [volumeField]: dailyVolume });
+// Daily_Limit is the confirmed real field (verified against a real
+// account 2026-10-22, via updateFilterSet above) — getFilterSet's own
+// response just doesn't happen to echo it back under that name.
+async function updateFilterSetDailyVolume(filterSetId, partnerId, dailyVolume) {
+  return updateFilterSet(filterSetId, partnerId, { Daily_Limit: dailyVolume });
 }
 
 // ---- IPR (live call / inbound phone routing) filter sets --------------
