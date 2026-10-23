@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 import { useIsMobile } from '../lib/useViewport';
@@ -52,6 +52,7 @@ export default function RecordStorePanel() {
   const [phoneFix, setPhoneFix] = useState(null); // { subscriptionId, value }
   const [status, setStatus] = useState('');
   const [performanceSub, setPerformanceSub] = useState(null); // subscription whose performance modal is open
+  const statusRef = useRef(null);
   const fundingResult = new URLSearchParams(window.location.search).get('funding');
 
   useEffect(() => {
@@ -61,6 +62,17 @@ export default function RecordStorePanel() {
       setTimeout(() => { api.recordStoreBalance().then(setBalance).catch(() => {}); }, 2000);
     }
   }, []);
+
+  // This is the only status/error banner on the page, but actions that
+  // set it (pause/resume, accept a quote, retry a subscription, ...) can
+  // be triggered from sections well below it — without this, a message
+  // here is invisible unless the user happens to already be scrolled to
+  // the top, which looks exactly like "the button did nothing."
+  useEffect(() => {
+    if (status) {
+      statusRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [status]);
 
   async function load() {
     setLoadError('');
@@ -91,12 +103,26 @@ export default function RecordStorePanel() {
       const customTemplate = templates.find((t) => t.isCustomBuilder);
       const acceptRes = await api.acceptCustomRequest(request.id);
       const provisionRes = await api.provisionRecordStoreOrder(acceptRes.subscription.id);
-      setFundingWizard({ template: customTemplate, subscription: provisionRes.subscription });
-      await load();
+      // Only open the funding wizard when we actually have the custom
+      // template to show it with — RecordStoreWizard dereferences
+      // template.* unconditionally, so passing it undefined would crash
+      // the page instead of erroring. The new subscription (already
+      // provisioned above) still shows up in My Lead Programs below via
+      // the load() call that always runs in finally.
+      if (customTemplate) {
+        setFundingWizard({ template: customTemplate, subscription: provisionRes.subscription });
+      }
     } catch (err) {
       setStatus(err.data?.message || 'Could not accept this quote. Please try again.');
     } finally {
       setAcceptingRequestId(null);
+      // Resync regardless of outcome: the accept step already converts the
+      // request and creates a real subscription server-side even when the
+      // separate provisioning call right after it fails — without this,
+      // the row here would keep showing a stale, clickable "QUOTED" state
+      // while the real subscription (and its own actionable error, if any)
+      // sits unseen in My Lead Programs.
+      await load();
     }
   }
 
@@ -239,7 +265,7 @@ export default function RecordStorePanel() {
 
       {fundingResult === 'success' && <div style={s.status}>Payment received — crediting your lead balance now. It may take a few seconds to show above.</div>}
       {fundingResult === 'canceled' && <div style={s.status}>Checkout was canceled — no charge was made.</div>}
-      {status && <div style={s.status}>{status}</div>}
+      {status && <div ref={statusRef} style={s.status}>{status}</div>}
 
       {hasPrograms && (
         <section style={s.section}>
@@ -432,7 +458,7 @@ export default function RecordStorePanel() {
         />
       )}
 
-      {fundingWizard && agency && (
+      {fundingWizard && fundingWizard.template && agency && (
         <RecordStoreWizard
           template={fundingWizard.template}
           agency={agency}
