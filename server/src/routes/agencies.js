@@ -400,6 +400,17 @@ const updateAgencySchema = z.object({
   city: z.string().trim().min(1).max(100).optional(),
   state: z.string().trim().length(2).optional(),
   zip: z.string().trim().min(5).max(10).optional(),
+  // Not an Agency field — the CALLING user's own contact phone, collected
+  // the same way/place as the address fields above (Record Store's Agency
+  // Info step) because Boberdoo's createNewPartner requires one and
+  // User.phone is otherwise never collected anywhere in this app. Handled
+  // specially below: applied to req.user's own User row, never to the
+  // Agency itself, and only when the caller is an agency-role user acting
+  // on their own agency (the `req.user.agencyId !== req.params.agencyId`
+  // check above already guarantees that for AGENCY_OWNER/AGENCY_MANAGER —
+  // explicitly skipped for a PLATFORM_OWNER editing someone else's agency,
+  // who is never the Partner contact Boberdoo needs).
+  ownerPhone: z.string().trim().min(7).max(20).optional(),
 });
 
 // Edit an agency's own settings — didn't exist at all before this: an
@@ -417,13 +428,22 @@ router.patch('/:agencyId', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFO
     const before = await prisma.agency.findUnique({ where: { id: req.params.agencyId } });
     if (!before) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
 
-    const updated = await prisma.agency.update({ where: { id: before.id }, data: parsed.data });
+    // ownerPhone isn't a real Agency column — pull it out before the
+    // Agency update, and apply it to the calling user's own User row
+    // instead (see updateAgencySchema's comment for why, and why this is
+    // skipped for a Platform Owner editing someone else's agency).
+    const { ownerPhone, ...agencyData } = parsed.data;
+    if (ownerPhone && req.user.role !== 'PLATFORM_OWNER') {
+      await prisma.user.update({ where: { id: req.user.id }, data: { phone: ownerPhone } });
+    }
+
+    const updated = await prisma.agency.update({ where: { id: before.id }, data: agencyData });
 
     await recordAudit({
       actorId: req.user.id, actorRole: req.user.role, agencyId: before.id,
       action: 'agency.settings_updated', entityType: 'Agency', entityId: before.id,
       before: { name: before.name, timezone: before.timezone, officeHours: before.officeHours, products: before.products },
-      after: parsed.data, correlationId: req.correlationId,
+      after: agencyData, correlationId: req.correlationId,
     });
 
     return res.json({ success: true, agency: updated });

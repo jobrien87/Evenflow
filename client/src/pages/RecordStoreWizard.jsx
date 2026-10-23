@@ -27,6 +27,11 @@ export default function RecordStoreWizard({ template, agency, user, onClose, onD
   const [agencyForm, setAgencyForm] = useState({
     address: agency.address || '', city: agency.city || '', state: agency.state || '', zip: agency.zip || '',
   });
+  // Boberdoo's createNewPartner requires a contact phone — collected here
+  // (not at signup) because this is the one place it's actually needed,
+  // same reasoning as the address fields above. Only required when
+  // missing; an existing phone is never shown as editable here.
+  const [ownerPhone, setOwnerPhone] = useState('');
   const [ringToPhone, setRingToPhone] = useState('');
   const [maxConcurrentCalls, setMaxConcurrentCalls] = useState(1);
   const [dailyVolume, setDailyVolume] = useState(initialSubscription ? initialSubscription.dailyVolume : template.defaultDailyVolume);
@@ -35,6 +40,13 @@ export default function RecordStoreWizard({ template, agency, user, onClose, onD
   const [subscription, setSubscription] = useState(initialSubscription || null);
   const [fundingSatisfied, setFundingSatisfied] = useState(false);
   const [startingCheckout, setStartingCheckout] = useState(false);
+  // Set once an order is created but provisioning fails for a fixable
+  // reason (currently just a missing phone) — retrying resumes THIS exact
+  // subscription instead of calling createRecordStoreOrder again, which
+  // would otherwise create a real second, orphaned DRAFT for the same
+  // product (createOrder's own dedup only blocks a non-ERROR duplicate).
+  const [pendingSubscriptionId, setPendingSubscriptionId] = useState(null);
+  const [needsPhone, setNeedsPhone] = useState(false);
 
   const stepName = steps[stepIndex];
 
@@ -45,15 +57,20 @@ export default function RecordStoreWizard({ template, agency, user, onClose, onD
         setError('Please fill in a complete address with a valid 2-letter state.');
         return;
       }
-      const changed = agencyForm.address !== (agency.address || '') || agencyForm.city !== (agency.city || '')
+      if (!user.phone && ownerPhone.replace(/\D/g, '').length < 10) {
+        setError('Enter a valid contact phone number — the lead exchange requires one to set up your buyer account.');
+        return;
+      }
+      const addressChanged = agencyForm.address !== (agency.address || '') || agencyForm.city !== (agency.city || '')
         || agencyForm.state !== (agency.state || '') || agencyForm.zip !== (agency.zip || '');
-      if (changed && !RECORD_STORE_PREVIEW_MODE) {
+      const phoneToSave = !user.phone && ownerPhone ? ownerPhone : null;
+      if ((addressChanged || phoneToSave) && !RECORD_STORE_PREVIEW_MODE) {
         setBusy(true);
         try {
-          await api.updateAgency(agency.id, { ...agencyForm, state: agencyForm.state.toUpperCase() });
+          await api.updateAgency(agency.id, { ...agencyForm, state: agencyForm.state.toUpperCase(), ...(phoneToSave ? { ownerPhone: phoneToSave } : {}) });
         } catch (err) {
           setBusy(false);
-          setError(err.data?.message || 'Could not save your agency address.');
+          setError(err.data?.message || 'Could not save your contact information.');
           return;
         }
         setBusy(false);
@@ -79,17 +96,33 @@ export default function RecordStoreWizard({ template, agency, user, onClose, onD
         return;
       }
       setBusy(true);
+      setNeedsPhone(false);
+      // Resume the exact subscription a previous attempt already created
+      // if provisioning failed on it for a fixable reason — never call
+      // createRecordStoreOrder again on a retry, which would create a
+      // real second, orphaned order for the same product.
+      let subId = pendingSubscriptionId;
       try {
-        const orderRes = await api.createRecordStoreOrder({
-          templateSlug: template.slug,
-          dailyVolume,
-          ...(isIpr ? { ringToPhone, maxConcurrentCalls } : {}),
-        });
-        const provisionRes = await api.provisionRecordStoreOrder(orderRes.subscription.id);
+        if (!subId) {
+          const orderRes = await api.createRecordStoreOrder({
+            templateSlug: template.slug,
+            dailyVolume,
+            ...(isIpr ? { ringToPhone, maxConcurrentCalls } : {}),
+          });
+          subId = orderRes.subscription.id;
+        }
+        const provisionRes = await api.provisionRecordStoreOrder(subId);
         setSubscription(provisionRes.subscription);
+        setPendingSubscriptionId(null);
         setStepIndex((i) => i + 1);
       } catch (err) {
-        setError(err.data?.message || 'Could not start your lead program. Please try again.');
+        if (err.data?.error === 'MISSING_PHONE') {
+          setPendingSubscriptionId(subId);
+          setNeedsPhone(true);
+          setError('We need a contact phone number before we can set up your lead program — add one below and try again.');
+        } else {
+          setError(err.data?.message || 'Could not start your lead program. Please try again.');
+        }
       } finally {
         setBusy(false);
       }
@@ -100,6 +133,34 @@ export default function RecordStoreWizard({ template, agency, user, onClose, onD
   function goBack() {
     setError('');
     setStepIndex((i) => Math.max(0, i - 1));
+  }
+
+  // Saves the phone just added on the Review step, then retries the exact
+  // subscription that previously failed on it — never creates a second
+  // order (see pendingSubscriptionId's own comment above).
+  async function retryAfterMissingPhone() {
+    if (ownerPhone.replace(/\D/g, '').length < 10) {
+      setError('Enter a valid contact phone number.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await api.updateAgency(agency.id, { ownerPhone });
+      const provisionRes = await api.provisionRecordStoreOrder(pendingSubscriptionId);
+      setSubscription(provisionRes.subscription);
+      setPendingSubscriptionId(null);
+      setNeedsPhone(false);
+      setStepIndex((i) => i + 1);
+    } catch (err) {
+      if (err.data?.error === 'MISSING_PHONE') {
+        setError('That didn\'t save correctly — try again.');
+      } else {
+        setError(err.data?.message || 'Could not start your lead program. Please try again.');
+      }
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function startFundingCheckout() {
@@ -157,6 +218,9 @@ export default function RecordStoreWizard({ template, agency, user, onClose, onD
             <label style={s.fieldLabel}>State<input style={{ ...s.input, textTransform: 'uppercase' }} maxLength={2} value={agencyForm.state} onChange={(e) => setAgencyForm({ ...agencyForm, state: e.target.value })} /></label>
             <label style={s.fieldLabel}>Zip<input style={s.input} value={agencyForm.zip} onChange={(e) => setAgencyForm({ ...agencyForm, zip: e.target.value })} /></label>
           </div>
+          {!user.phone && (
+            <label style={s.fieldLabel}>Contact phone<input style={s.input} placeholder="(555) 123-4567" value={ownerPhone} onChange={(e) => setOwnerPhone(e.target.value)} /></label>
+          )}
         </div>
       )}
 
@@ -193,6 +257,9 @@ export default function RecordStoreWizard({ template, agency, user, onClose, onD
           <div style={s.helpText}>
             The ${centsToDollars(template.minimumDepositCents)} deposit is not a fee — it's added to your lead purchasing balance and used toward future leads. Actual lead volume can vary with real-time availability.
           </div>
+          {needsPhone && (
+            <label style={s.fieldLabel}>Contact phone<input style={s.input} placeholder="(555) 123-4567" value={ownerPhone} onChange={(e) => setOwnerPhone(e.target.value)} /></label>
+          )}
         </div>
       )}
 
@@ -228,11 +295,11 @@ export default function RecordStoreWizard({ template, agency, user, onClose, onD
         {stepName !== 'Fund Account' ? (
           <Button
             variant="primary"
-            onClick={goNext}
+            onClick={needsPhone ? retryAfterMissingPhone : goNext}
             disabled={busy}
             style={stepName === 'Review' && RECORD_STORE_PREVIEW_MODE ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
           >
-            {busy ? 'Working…' : stepName === 'Review' ? 'START MY LEAD PROGRAM' : 'CONTINUE'}
+            {busy ? 'Working…' : needsPhone ? 'SAVE & RETRY' : stepName === 'Review' ? 'START MY LEAD PROGRAM' : 'CONTINUE'}
           </Button>
         ) : fundingSatisfied ? (
           <Button variant="primary" onClick={() => { onDone(); onClose(); }}>DONE</Button>

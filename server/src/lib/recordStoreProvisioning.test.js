@@ -161,6 +161,39 @@ test('retrying a failed provision never creates a duplicate Partner or Filter Se
   assert.equal(partnerCounter, 1, 'retry must never call createPartner again');
 });
 
+test('owner with no phone on file is blocked before Boberdoo is ever called — actionable MISSING_PHONE', async () => {
+  fakeHappyBoberdoo();
+  await prisma.user.update({ where: { id: ownerId }, data: { phone: null } });
+  try {
+    const template = await loadTemplate(templateId);
+    const { subscription } = await provisioning.createOrder({ agencyId, template, dailyVolume: 10, userId: ownerId });
+    const result = await provisioning.provisionSubscription(subscription.id);
+
+    assert.equal(result.success, false);
+    assert.equal(result.errorCode, 'MISSING_PHONE');
+    assert.equal(result.errorMessage, provisioning.FRIENDLY_ERROR, 'the customer-facing message must still be the standard friendly copy');
+    assert.equal(partnerCounter, 0, 'Boberdoo must never be called when the owner has no phone on file');
+    const updated = await prisma.recordStoreSubscription.findUnique({ where: { id: subscription.id } });
+    assert.equal(updated.status, 'ERROR');
+    assert.equal(updated.errorCode, 'MISSING_PHONE');
+    assert.equal(updated.failedStep, 'BOBERDOO_PARTNER_CREATING');
+    const agency = await prisma.agency.findUnique({ where: { id: agencyId } });
+    assert.equal(agency.boberdooPartnerId, null);
+  } finally {
+    await prisma.user.update({ where: { id: ownerId }, data: { phone: '5125551234' } });
+  }
+});
+
+test('owner with a phone on file proceeds past the check normally — no regression', async () => {
+  fakeHappyBoberdoo();
+  const template = await loadTemplate(templateId);
+  const { subscription } = await provisioning.createOrder({ agencyId, template, dailyVolume: 10, userId: ownerId });
+  const result = await provisioning.provisionSubscription(subscription.id);
+
+  assert.equal(result.success, true);
+  assert.equal(partnerCounter, 1);
+});
+
 test('duplicate checkout clicks for the same product return the same order, never two', async () => {
   fakeHappyBoberdoo();
   const template = await loadTemplate(templateId);

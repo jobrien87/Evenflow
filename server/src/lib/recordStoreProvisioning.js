@@ -383,6 +383,19 @@ async function provisionSubscription(subscriptionId, correlationId) {
     await markError(subscriptionId, { failedStep: 'BOBERDOO_PARTNER_CREATING', errorCode: 'NO_OWNER', errorMessage: 'Agency has no Agency Owner to provision under.' });
     return { success: false, errorCode: 'NO_OWNER', errorMessage: FRIENDLY_ERROR };
   }
+  // Boberdoo's createNewPartner requires Phone, and callAction silently
+  // drops a null param rather than sending it empty — so a missing owner
+  // phone was previously only ever caught by Boberdoo itself, landing as
+  // an opaque PROVIDER_ERROR no customer could act on. Caught here first,
+  // before ever calling Boberdoo, with a named errorCode the UI can show
+  // an actionable "add your phone" message for instead (see
+  // RecordStoreWizard.jsx/RecordStorePanel.jsx) — this is the one
+  // provisioning failure a customer can actually fix themselves, unlike
+  // every other real provider error.
+  if (!owner.phone) {
+    await markError(subscriptionId, { failedStep: 'BOBERDOO_PARTNER_CREATING', errorCode: 'MISSING_PHONE', errorMessage: 'Agency owner has no phone number on file.' });
+    return { success: false, errorCode: 'MISSING_PHONE', errorMessage: FRIENDLY_ERROR };
+  }
 
   const partnerResult = await provisionPartner(subscription.agency, owner, correlationId);
   if (!partnerResult.success) {

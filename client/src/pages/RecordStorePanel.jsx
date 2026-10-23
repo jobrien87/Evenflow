@@ -49,6 +49,7 @@ export default function RecordStorePanel() {
   const [confirmingPauseAll, setConfirmingPauseAll] = useState(false);
   const [confirmingResumeAll, setConfirmingResumeAll] = useState(false);
   const [busyId, setBusyId] = useState(null);
+  const [phoneFix, setPhoneFix] = useState(null); // { subscriptionId, value }
   const [status, setStatus] = useState('');
   const [performanceSub, setPerformanceSub] = useState(null); // subscription whose performance modal is open
   const fundingResult = new URLSearchParams(window.location.search).get('funding');
@@ -117,6 +118,29 @@ export default function RecordStorePanel() {
       setSubscriptions((prev) => prev.map((s) => (s.id === sub.id ? res.subscription : s)));
     } catch (err) {
       setStatus(err.data?.message || 'Could not update this program.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  // A subscription stuck in ERROR specifically because the owner has no
+  // phone on file (Boberdoo's createNewPartner requires one) is the one
+  // provisioning failure an agency can actually fix themselves — saves
+  // the phone, then retries THIS exact subscription (never creates a
+  // second order for the same product).
+  async function fixPhoneAndRetry(sub) {
+    if (phoneFix.value.replace(/\D/g, '').length < 10) {
+      setStatus('Enter a valid contact phone number.');
+      return;
+    }
+    setBusyId(sub.id);
+    try {
+      await api.updateAgency(agency.id, { ownerPhone: phoneFix.value });
+      const res = await api.provisionRecordStoreOrder(sub.id);
+      setSubscriptions((prev) => prev.map((s) => (s.id === sub.id ? res.subscription : s)));
+      setPhoneFix(null);
+    } catch (err) {
+      setStatus(err.data?.message || 'Could not save that and retry — please try again.');
     } finally {
       setBusyId(null);
     }
@@ -264,7 +288,23 @@ export default function RecordStorePanel() {
                     <div style={s.productMeta}>Sources: {sub.acceptedSourceLabels.join(', ')}</div>
                   )}
                   {sub.boberdooSyncError && <div style={s.syncError}>We couldn't update your lead program. Your current settings have not been changed. Our team has been notified.</div>}
-                  {sub.errorMessage && sub.status === 'ERROR' && <div style={s.syncError}>Setup is still in progress — our team has been notified and will retry shortly.</div>}
+                  {sub.status === 'ERROR' && sub.errorCode === 'MISSING_PHONE' && (
+                    <div style={s.phoneFixBox}>
+                      <div style={s.syncError}>We need a contact phone number before we can set up this lead program.</div>
+                      <div style={s.linkRow}>
+                        <input
+                          style={s.input}
+                          placeholder="(555) 123-4567"
+                          value={phoneFix?.subscriptionId === sub.id ? phoneFix.value : ''}
+                          onChange={(e) => setPhoneFix({ subscriptionId: sub.id, value: e.target.value })}
+                        />
+                        <Button variant="primary" size="sm" disabled={busyId === sub.id || phoneFix?.subscriptionId !== sub.id || !phoneFix?.value} onClick={() => fixPhoneAndRetry(sub)}>
+                          {busyId === sub.id ? 'Working…' : 'SAVE & RETRY'}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  {sub.errorMessage && sub.status === 'ERROR' && sub.errorCode !== 'MISSING_PHONE' && <div style={s.syncError}>Setup is still in progress — our team has been notified and will retry shortly.</div>}
                   <div style={s.programActions}>
                     {sub.status === 'ACTIVE' || sub.status === 'PAUSED' ? (
                       <Button variant="secondary" size="sm" disabled={busyId === sub.id || accountPaused || RECORD_STORE_PREVIEW_MODE} onClick={() => togglePause(sub)}>
@@ -575,6 +615,8 @@ const s = {
   programName: { fontWeight: 700, fontSize: 14, color: 'var(--text-primary)' },
   programStatsRow: { display: 'flex', gap: 10, marginBottom: 10 },
   syncError: { color: 'var(--warning)', fontSize: 11, marginBottom: 10, lineHeight: 1.4 },
+  phoneFixBox: { marginBottom: 10 },
+  linkRow: { display: 'flex', gap: 8, alignItems: 'center' },
   programActions: { display: 'flex', gap: 8, flexWrap: 'wrap' },
   productsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 16 },
   productsGridMobile: { display: 'flex', flexDirection: 'column', gap: 16 },
