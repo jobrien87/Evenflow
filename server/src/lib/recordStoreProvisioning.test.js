@@ -534,6 +534,28 @@ test('customConfigurationJson overrides template.configurationJson at filter-set
   await prisma.recordStoreTemplate.update({ where: { id: templateId }, data: { configurationJson: null } });
 });
 
+test('a fixed template\'s own Daily_Limit never overrides the customer\'s actually-ordered dailyVolume', async () => {
+  // The template's configurationJson is Super-Admin-entered once and can
+  // easily drift from (or simply predate) what any individual customer
+  // picks in the wizard's Volume step — EvenFlow, not the template, must
+  // stay authoritative for desired daily volume (see this module's own
+  // header comment). A stale/mismatched Daily_Limit here must never
+  // reach Boberdoo instead of what the customer actually ordered.
+  fakeHappyBoberdoo();
+  let sentFields;
+  boberdoo.createFilterSet = async (partnerId, fields) => { sentFields = fields; return { success: true, filterSetId: `F-${++filterSetCounter}` }; };
+
+  await prisma.recordStoreTemplate.update({ where: { id: templateId }, data: { configurationJson: { TYPE: 21, Filter_Set_Price: 6, Daily_Limit: 20 } } });
+  const template = await loadTemplate(templateId);
+  const { subscription } = await provisioning.createOrder({ agencyId, template, dailyVolume: 12, userId: ownerId });
+
+  await provisioning.provisionSubscription(subscription.id);
+
+  assert.equal(sentFields.Daily_Limit, 12, 'the customer\'s own chosen dailyVolume must win, not the template\'s stale default');
+
+  await prisma.recordStoreTemplate.update({ where: { id: templateId }, data: { configurationJson: null } });
+});
+
 test('createSubscriptionFromQuote creates a priced, provisionable subscription from an accepted custom request and marks it CONVERTED', async () => {
   const customTemplate = await prisma.recordStoreTemplate.create({
     data: { slug: `TEST_CUSTOM_BUILDER_${suffix}`, displayName: 'Build Your Own', productCategory: 'CUSTOM', leadType: 'INTERNET', isCustomBuilder: true },

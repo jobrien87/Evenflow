@@ -315,7 +315,16 @@ async function provisionFilterSet(subscription, template, partnerId, correlation
       ...(subscription.maxConcurrentCalls ? { Max_Concurrent_Calls: subscription.maxConcurrentCalls } : {}),
     });
   } else {
-    result = await boberdoo.createFilterSet(partnerId, { ...config });
+    // Daily_Limit must come from the customer's own chosen dailyVolume,
+    // never silently fall back to whatever a Super Admin last typed into
+    // the template's own configurationJson — this module's own header
+    // comment states EvenFlow, not the template, is authoritative for
+    // desired daily volume. The IPR branch above already gets this right;
+    // this mirrors it. Safe for the Custom Builder path too, since
+    // createSubscriptionFromQuote already keeps customConfigurationJson's
+    // own Daily_Limit in sync with subscription.dailyVolume — this is
+    // never a conflicting value there, just an explicit restatement.
+    result = await boberdoo.createFilterSet(partnerId, { ...config, Daily_Limit: subscription.dailyVolume });
   }
   if (!result.success || !result.filterSetId) {
     return { success: false, errorCode: result.errorCode || 'FILTER_SET_CREATE_FAILED', errorMessage: result.errorMessage || 'Filter set creation did not return an ID.' };
