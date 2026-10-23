@@ -622,7 +622,15 @@ router.get('/admin/customers', requireRole('PLATFORM_OWNER'), async (req, res, n
         users: { where: { role: 'AGENCY_OWNER' }, select: { firstName: true, lastName: true, email: true }, take: 1 },
         recordStoreSubscriptions: {
           where: { status: { not: 'CANCELLED' } },
-          select: { id: true, productNameSnapshot: true, status: true, dailyVolume: true, priceSnapshotCents: true, boberdooFilterSetId: true },
+          select: {
+            id: true, productNameSnapshot: true, status: true, dailyVolume: true, priceSnapshotCents: true, boberdooFilterSetId: true,
+            // Raw internal error detail — fine to expose here since this
+            // whole route is PLATFORM_OWNER-only (unlike the customer-
+            // facing GET /subscriptions, which deliberately never sends
+            // these). Lets a Platform Owner self-diagnose a stuck ERROR
+            // subscription without needing a dev to read the DB directly.
+            failedStep: true, errorCode: true, errorMessage: true,
+          },
         },
       },
     });

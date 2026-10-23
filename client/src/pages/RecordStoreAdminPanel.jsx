@@ -322,9 +322,16 @@ export default function RecordStoreAdminPanel() {
                       <div style={s.debugRow}>Last sync: {a.boberdooLastSyncAt ? new Date(a.boberdooLastSyncAt).toLocaleString() : 'never'}</div>
                       {a.recordStoreSubscriptions.map((sub) => (
                         <div key={sub.id} style={s.subRow}>
-                          <span>{sub.productNameSnapshot} — {sub.status} — Filter Set: {sub.boberdooFilterSetId || 'none yet'}</span>
+                          <div style={s.subRowHeader}>
+                            <span>{sub.productNameSnapshot} — {sub.status} — Filter Set: {sub.boberdooFilterSetId || 'none yet'}</span>
+                            {sub.status === 'ERROR' && (
+                              <Button variant="secondary" size="sm" disabled={busyId === sub.id} onClick={() => retrySubscription(sub.id)}>RETRY PROVISIONING</Button>
+                            )}
+                          </div>
                           {sub.status === 'ERROR' && (
-                            <Button variant="secondary" size="sm" disabled={busyId === sub.id} onClick={() => retrySubscription(sub.id)}>RETRY PROVISIONING</Button>
+                            <div style={s.debugRow}>
+                              {sub.failedStep || '—'} / {sub.errorCode || '—'}: {sub.errorMessage || 'no error detail recorded'}
+                            </div>
                           )}
                         </div>
                       ))}
@@ -627,7 +634,8 @@ const s = {
   expandedBox: { padding: '12px 16px', background: 'var(--bg-sunken)', borderBottom: '1px solid var(--border-hairline)', fontSize: 11, color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: 6 },
   debugTitle: { fontSize: 10, letterSpacing: 1, color: 'var(--text-muted)', fontWeight: 700, marginBottom: 4 },
   debugRow: { fontFamily: 'monospace' },
-  subRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
+  subRow: { display: 'flex', flexDirection: 'column', gap: 4 },
+  subRowHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
   linkRow: { display: 'flex', gap: 8, marginTop: 6 },
   modalBackdrop: { position: 'fixed', inset: 0, background: 'rgba(6,7,9,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 'var(--z-modal)', padding: 20, overflowY: 'auto' },
   modal: { maxWidth: 520, width: '100%', maxHeight: '85vh', overflowY: 'auto' },
