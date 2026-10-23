@@ -16,6 +16,13 @@ let templateId;
 let template2Id;
 let ownerId;
 
+// A complete, valid configurationJson — every required field
+// insertUpdateFilterSet documents (see provisionFilterSet's own
+// REQUIRED_STANDARD_FILTER_SET_FIELDS) — used as the base templates'
+// default so the happy-path tests below exercise the real required-field
+// pre-check the same way a correctly-configured real template would.
+const VALID_CONFIG = { TYPE: 23, Filter_Set_Price: 5, Accepted_Sources: 'Fidadto', Match_Priority: 0, Weekly_Limit: 0, Monthly_Limit: 0, Accept_Only_Reprocessed_Leads: 'No' };
+
 const originalBoberdoo = { ...boberdoo };
 function resetBoberdoo() {
   Object.assign(boberdoo, originalBoberdoo);
@@ -33,12 +40,12 @@ before(async () => {
   ownerId = owner.id;
 
   const template = await prisma.recordStoreTemplate.create({
-    data: { slug: `TEST_AUTO_BASIC_${suffix}`, displayName: 'Test Auto Basic', productCategory: 'AUTO', leadType: 'INTERNET', wholesalePriceCents: 2500, minimumDailyVolume: 1, maximumDailyVolume: 100, defaultDailyVolume: 10, minimumDepositCents: 150000 },
+    data: { slug: `TEST_AUTO_BASIC_${suffix}`, displayName: 'Test Auto Basic', productCategory: 'AUTO', leadType: 'INTERNET', wholesalePriceCents: 2500, minimumDailyVolume: 1, maximumDailyVolume: 100, defaultDailyVolume: 10, minimumDepositCents: 150000, configurationJson: VALID_CONFIG },
   });
   templateId = template.id;
 
   const template2 = await prisma.recordStoreTemplate.create({
-    data: { slug: `TEST_HOME_BASIC_${suffix}`, displayName: 'Test Home Basic', productCategory: 'HOME', leadType: 'INTERNET', wholesalePriceCents: 3000, minimumDailyVolume: 1, maximumDailyVolume: 100, defaultDailyVolume: 10, minimumDepositCents: 150000 },
+    data: { slug: `TEST_HOME_BASIC_${suffix}`, displayName: 'Test Home Basic', productCategory: 'HOME', leadType: 'INTERNET', wholesalePriceCents: 3000, minimumDailyVolume: 1, maximumDailyVolume: 100, defaultDailyVolume: 10, minimumDepositCents: 150000, configurationJson: { ...VALID_CONFIG, TYPE: 21 } },
   });
   template2Id = template2.id;
 });
@@ -520,7 +527,10 @@ test('customConfigurationJson overrides template.configurationJson at filter-set
   let sentFields;
   boberdoo.createFilterSet = async (partnerId, fields) => { sentFields = fields; return { success: true, filterSetId: `F-${++filterSetCounter}` }; };
 
-  await prisma.recordStoreTemplate.update({ where: { id: templateId }, data: { configurationJson: { TYPE: 23, Filter_Set_Price: 5 } } });
+  await prisma.recordStoreTemplate.update({
+    where: { id: templateId },
+    data: { configurationJson: { TYPE: 23, Filter_Set_Price: 5, Accepted_Sources: 'Quoting_Fast', Match_Priority: 0, Weekly_Limit: 0, Monthly_Limit: 0, Accept_Only_Reprocessed_Leads: 'No' } },
+  });
   const template = await loadTemplate(templateId);
   const { subscription } = await provisioning.createOrder({ agencyId, template, dailyVolume: 20, userId: ownerId });
   await prisma.recordStoreSubscription.update({ where: { id: subscription.id }, data: { customConfigurationJson: { Filter_Set_Price: 9, Accepted_Sources: 'Fidadto' } } });
@@ -531,7 +541,7 @@ test('customConfigurationJson overrides template.configurationJson at filter-set
   assert.equal(sentFields.Filter_Set_Price, 9, 'the override wins over the template default');
   assert.equal(sentFields.Accepted_Sources, 'Fidadto');
 
-  await prisma.recordStoreTemplate.update({ where: { id: templateId }, data: { configurationJson: null } });
+  await prisma.recordStoreTemplate.update({ where: { id: templateId }, data: { configurationJson: VALID_CONFIG } });
 });
 
 test('a fixed template\'s own Daily_Limit never overrides the customer\'s actually-ordered dailyVolume', async () => {
@@ -545,15 +555,56 @@ test('a fixed template\'s own Daily_Limit never overrides the customer\'s actual
   let sentFields;
   boberdoo.createFilterSet = async (partnerId, fields) => { sentFields = fields; return { success: true, filterSetId: `F-${++filterSetCounter}` }; };
 
-  await prisma.recordStoreTemplate.update({ where: { id: templateId }, data: { configurationJson: { TYPE: 21, Filter_Set_Price: 6, Daily_Limit: 20 } } });
+  await prisma.recordStoreTemplate.update({
+    where: { id: templateId },
+    data: { configurationJson: { TYPE: 21, Filter_Set_Price: 6, Daily_Limit: 20, Accepted_Sources: 'Fidadto', Match_Priority: 0, Weekly_Limit: 0, Monthly_Limit: 0, Accept_Only_Reprocessed_Leads: 'No' } },
+  });
   const template = await loadTemplate(templateId);
   const { subscription } = await provisioning.createOrder({ agencyId, template, dailyVolume: 12, userId: ownerId });
 
-  await provisioning.provisionSubscription(subscription.id);
+  const result = await provisioning.provisionSubscription(subscription.id);
 
+  assert.equal(result.success, true);
   assert.equal(sentFields.Daily_Limit, 12, 'the customer\'s own chosen dailyVolume must win, not the template\'s stale default');
 
-  await prisma.recordStoreTemplate.update({ where: { id: templateId }, data: { configurationJson: null } });
+  await prisma.recordStoreTemplate.update({ where: { id: templateId }, data: { configurationJson: VALID_CONFIG } });
+});
+
+test('a template missing a required Boberdoo field is caught before ever calling Boberdoo, naming the exact missing field', async () => {
+  // Confirmed live in production: a template whose configurationJson is
+  // incomplete (e.g. no TYPE key) reaches Boberdoo and comes back with an
+  // opaque "Lead type invalid" — this makes that failure self-diagnosing
+  // instead, naming the actual missing field, before wasting a real call.
+  fakeHappyBoberdoo();
+  let createFilterSetCalled = false;
+  boberdoo.createFilterSet = async () => { createFilterSetCalled = true; return { success: true, filterSetId: `F-${++filterSetCounter}` }; };
+
+  const { TYPE, ...configMissingType } = VALID_CONFIG;
+  await prisma.recordStoreTemplate.update({ where: { id: templateId }, data: { configurationJson: configMissingType } });
+  const template = await loadTemplate(templateId);
+  const { subscription } = await provisioning.createOrder({ agencyId, template, dailyVolume: 10, userId: ownerId });
+
+  const result = await provisioning.provisionSubscription(subscription.id);
+
+  assert.equal(result.success, false);
+  assert.equal(result.errorCode, 'TEMPLATE_MISCONFIGURED');
+  assert.equal(createFilterSetCalled, false, 'Boberdoo must never be called for a template missing a required field');
+  const updated = await prisma.recordStoreSubscription.findUnique({ where: { id: subscription.id } });
+  assert.equal(updated.failedStep, 'FILTER_SET_CREATING');
+  assert.equal(updated.errorCode, 'TEMPLATE_MISCONFIGURED');
+  assert.match(updated.errorMessage, /TYPE/, 'the real stored error must name the exact missing field for a Platform Owner to see');
+
+  await prisma.recordStoreTemplate.update({ where: { id: templateId }, data: { configurationJson: VALID_CONFIG } });
+});
+
+test('a complete template config still provisions normally — the required-field check never false-positives', async () => {
+  fakeHappyBoberdoo();
+  const template = await loadTemplate(templateId);
+  const { subscription } = await provisioning.createOrder({ agencyId, template, dailyVolume: 10, userId: ownerId });
+
+  const result = await provisioning.provisionSubscription(subscription.id);
+
+  assert.equal(result.success, true);
 });
 
 test('createSubscriptionFromQuote creates a priced, provisionable subscription from an accepted custom request and marks it CONVERTED', async () => {

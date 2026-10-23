@@ -293,6 +293,13 @@ async function provisionPartner(agency, owner, correlationId) {
 
 // ---- Step 2: Filter Set (one per subscription) -------------------------
 
+// Every field insertUpdateFilterSet treats as required on create (see
+// docs/lead-portal-api-reference.md's "Filter sets" table) that is NOT
+// guaranteed by this module's own code — Daily_Limit is excluded here
+// since it's always set explicitly from subscription.dailyVolume below,
+// never left to the template config alone.
+const REQUIRED_STANDARD_FILTER_SET_FIELDS = ['TYPE', 'Filter_Set_Price', 'Accepted_Sources', 'Match_Priority', 'Weekly_Limit', 'Monthly_Limit', 'Accept_Only_Reprocessed_Leads'];
+
 async function provisionFilterSet(subscription, template, partnerId, correlationId) {
   if (subscription.boberdooFilterSetId) {
     return { success: true, filterSetId: subscription.boberdooFilterSetId, alreadyExisted: true };
@@ -315,6 +322,25 @@ async function provisionFilterSet(subscription, template, partnerId, correlation
       ...(subscription.maxConcurrentCalls ? { Max_Concurrent_Calls: subscription.maxConcurrentCalls } : {}),
     });
   } else {
+    // Catch an incomplete template config here, before ever calling
+    // Boberdoo — configurationJson is Super-Admin-entered once into a raw
+    // JSON textarea with no shape validation (see routes/recordStore.js's
+    // admin template PATCH schema, z.record(z.any())), and callAction
+    // silently drops any field that's simply absent rather than erroring.
+    // A missing TYPE, for instance, surfaces only as Boberdoo's own
+    // opaque "Lead type invalid" — this gives the Platform Owner the
+    // exact field name instead, in the same errorCode/errorMessage the
+    // Admin Panel's debug view already shows (never shown to a customer,
+    // who still only ever sees FRIENDLY_ERROR).
+    const missingFields = REQUIRED_STANDARD_FILTER_SET_FIELDS.filter((field) => config[field] === undefined || config[field] === null);
+    if (missingFields.length > 0) {
+      return {
+        success: false,
+        errorCode: 'TEMPLATE_MISCONFIGURED',
+        errorMessage: `Template is missing required configuration field(s): ${missingFields.join(', ')}`,
+      };
+    }
+
     // Daily_Limit must come from the customer's own chosen dailyVolume,
     // never silently fall back to whatever a Super Admin last typed into
     // the template's own configurationJson — this module's own header
