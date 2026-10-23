@@ -239,8 +239,22 @@ async function provisionPartner(agency, owner, correlationId) {
   // EvenFlow ever logs into Boberdoo's portal as this Partner — every real
   // interaction goes through the API key — so this is generated fresh and
   // immediately discarded, never stored or logged.
+  //
+  // Login is a synthetic, agency-scoped value, deliberately never the
+  // owner's real email. Confirmed live against the real account
+  // (2026-10-23): a second createNewPartner with a Login already in use
+  // fails outright ("Login name X is taken by another Client!"), and an
+  // owner's email can easily collide with an earlier attempt for this
+  // exact agency that created a real Partner in Boberdoo but never
+  // managed to persist agency.boberdooPartnerId locally (a crash/timeout
+  // between the two) — every retry after that point would hit this same
+  // wall forever, since owner.email never changes. Lead_Email below still
+  // carries the real owner email — that field is what actually matters
+  // functionally (where Boberdoo would send lead notifications); Login is
+  // purely an internal bookkeeping key nothing in EvenFlow ever reads
+  // back, so it can safely be something guaranteed unique instead.
   const result = await boberdoo.createPartner({
-    login: owner.email,
+    login: `agency-${agency.id}@record-store.yield-marketing.com`,
     password: crypto.randomBytes(18).toString('base64'),
     companyName: agency.name,
     firstName: owner.firstName,

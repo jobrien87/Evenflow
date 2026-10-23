@@ -95,6 +95,30 @@ test('a new agency buying a product creates a Partner + Filter Set, leaves it pa
   assert.equal(events.length, 1);
 });
 
+test('Boberdoo Login is a synthetic, agency-scoped value — never the owner\'s real email', async () => {
+  // Confirmed live against the real account (2026-10-23): a second
+  // createNewPartner call reusing an already-taken Login is rejected
+  // outright ("Login name X is taken by another Client!"). Since
+  // owner.email never changes, using it as Login meant any agency whose
+  // Partner got created in Boberdoo but never persisted locally (a crash/
+  // timeout between the two) would be permanently stuck re-failing every
+  // retry. Login must be something guaranteed unique per agency instead.
+  fakeHappyBoberdoo();
+  let capturedLogin;
+  boberdoo.createPartner = async (args) => {
+    capturedLogin = args.login;
+    return { success: true, partnerId: `P-${++partnerCounter}` };
+  };
+  const template = await loadTemplate(templateId);
+  const { subscription } = await provisioning.createOrder({ agencyId, template, dailyVolume: 10, userId: ownerId });
+  const result = await provisioning.provisionSubscription(subscription.id);
+
+  assert.equal(result.success, true);
+  assert.ok(capturedLogin, 'createPartner must have been called with a login');
+  assert.notEqual(capturedLogin, `rs-owner-${suffix}@test.local`, 'Login must never be the owner\'s real email');
+  assert.ok(capturedLogin.includes(agencyId), 'Login should be scoped to this exact agency so a retry can never collide with an unrelated earlier attempt');
+});
+
 test('a second product under the same agency reuses the existing Partner — never creates a second one', async () => {
   fakeHappyBoberdoo();
   const t1 = await loadTemplate(templateId);
