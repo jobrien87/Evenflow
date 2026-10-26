@@ -30,6 +30,7 @@ before(async () => {
 after(async () => {
   await prisma.revenueEvent.deleteMany({ where: { agencyId } });
   await prisma.sale.deleteMany({ where: { agencyId } });
+  await prisma.leadProductQuote.deleteMany({ where: { lead: { agencyId } } });
   await prisma.lead.deleteMany({ where: { agencyId } });
   await prisma.user.deleteMany({ where: { agencyId } });
   await prisma.agency.delete({ where: { id: agencyId } });
@@ -100,4 +101,16 @@ test('backfillMissingSales: a SOLD lead that already has a real linked Sale is l
   await backfillMissingSales({ agencyId });
   const countAfter = await prisma.sale.count({ where: { agencyId } });
   assert.equal(countAfter, countBefore, 'a second run must be a true no-op once the backlog is closed');
+});
+
+test('backfillMissingSales: a SOLD lead with 2 SOLD product quotes gets a Sale with items=2, not the bare default of 1', async () => {
+  const lead = await makeSoldLead({});
+  await prisma.leadProductQuote.create({ data: { leadId: lead.id, product: 'AUTO', status: 'SOLD' } });
+  await prisma.leadProductQuote.create({ data: { leadId: lead.id, product: 'HOME', status: 'SOLD' } });
+
+  await backfillMissingSales({ agencyId });
+
+  const sale = await prisma.sale.findFirst({ where: { leadId: lead.id } });
+  assert.ok(sale, 'a Sale must be created for this lead');
+  assert.equal(sale.items, 2, 'items must reflect the real count of SOLD product quotes, not default to 1');
 });

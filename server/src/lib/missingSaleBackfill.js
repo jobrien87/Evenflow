@@ -31,6 +31,11 @@ function resolveProductFamily(lead) {
   return UNKNOWN;
 }
 
+function resolveItems(lead) {
+  const soldQuotes = (lead.productQuotes || []).filter((q) => q.status === 'SOLD');
+  return soldQuotes.length > 0 ? soldQuotes.length : 1;
+}
+
 // agencyId is optional — omitted (the real index.js call) runs platform-
 // wide; passed (test-only) scopes the run to one agency, so an automated
 // test can exercise this against its own fixture without touching any
@@ -81,6 +86,7 @@ async function backfillMissingSales({ agencyId } = {}) {
         carrier: lead.saleCarrier || UNKNOWN,
         policyType: lead.salePolicyTypeDetail || UNKNOWN,
         productFamily: resolveProductFamily(lead),
+        items: resolveItems(lead),
         premiumCents: lead.salePremiumCents != null ? lead.salePremiumCents : null,
         assignedToId: lead.assignedToId,
         createdById: lead.assignedToId,

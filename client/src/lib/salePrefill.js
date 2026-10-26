@@ -20,6 +20,7 @@ export function buildSalePrefillFromLead(lead) {
     zip: lead.zip || c.zip || '',
     state: lead.state || c.state || '',
     ...(singleSoldProduct && PRODUCTS.includes(singleSoldProduct) ? { productFamily: singleSoldProduct } : {}),
+    ...(soldQuotes.length > 0 ? { items: String(soldQuotes.length) } : {}),
     premiumCents: lead.salePremiumCents != null ? (lead.salePremiumCents / 100).toFixed(2) : '',
     assignedToId: lead.assignedToId || '',
   };
