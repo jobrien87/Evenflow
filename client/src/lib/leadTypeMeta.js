@@ -4,7 +4,7 @@
 // single source of truth instead of each page reinventing its own label
 // map (AgencySettingsModal.jsx used to keep a private copy of this).
 export const LEAD_TYPE_META = {
-  TRANSFER: { label: 'Transfer', icon: 'transfer', tone: 'warning' },
+  TRANSFER: { label: 'Transfer', icon: 'phone', tone: 'warning' },
   REFERRAL: { label: 'Referral', icon: 'handshake', tone: 'accent' },
   PAID_AD: { label: 'Paid Ad', icon: 'megaphone', tone: 'neutral' },
   META_AD: { label: 'Meta Ad', icon: 'megaphone', tone: 'neutral' },
