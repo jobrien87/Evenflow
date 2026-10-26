@@ -9,8 +9,34 @@ const HUMOR_DESCRIPTIONS = {
   SPICY: 'Big energy — rapid-fire wisecracks, never at the expense of the point.',
 };
 
+const FAB_SIZE = 56;
+const DRAG_THRESHOLD = 4; // px of movement before a press counts as a drag, not a click
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function pointerXY(e) {
+  const point = e.touches ? e.touches[0] : e;
+  return { x: point.clientX, y: point.clientY };
+}
+
 export default function EdWidget() {
   const [open, setOpen] = useState(false);
+  // null = no custom position yet — the FAB/panel keep today's CSS
+  // default (bottom-right). Once dragged, this is a real {right, bottom}
+  // pixel pair, persisted so it stays put across reloads (same per-viewer
+  // "convenience only, fine if storage is unavailable" convention
+  // selectHumorLevel below already uses).
+  const [pos, setPos] = useState(() => {
+    try {
+      const saved = localStorage.getItem('ed_widget_position');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const dragRef = useRef(null); // { startX, startY, startRight, startBottom, moved }
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -126,14 +152,75 @@ export default function EdWidget() {
     }
   }
 
+  // Dragging the FAB — mouse and touch share the same pointer-delta math
+  // (pointerXY reads from e.touches[0] for a touch event). Movement is
+  // tracked in a ref during the drag (no re-render per pixel); the final
+  // position only hits state — and localStorage — on release. A press
+  // that never moves past DRAG_THRESHOLD is treated as a plain click
+  // (today's open/close toggle), not a drag.
+  function startDrag(e) {
+    const { x, y } = pointerXY(e);
+    const current = pos || { right: 24, bottom: 24 };
+    dragRef.current = { startX: x, startY: y, startRight: current.right, startBottom: current.bottom, moved: false };
+    window.addEventListener('mousemove', onDragMove);
+    window.addEventListener('mouseup', endDrag);
+    window.addEventListener('touchmove', onDragMove, { passive: false });
+    window.addEventListener('touchend', endDrag);
+  }
+
+  function onDragMove(e) {
+    const drag = dragRef.current;
+    if (!drag) return;
+    if (e.touches) e.preventDefault(); // stop the page scrolling while dragging on touch
+    const { x, y } = pointerXY(e);
+    const dx = x - drag.startX;
+    const dy = y - drag.startY;
+    if (!drag.moved && Math.hypot(dx, dy) > DRAG_THRESHOLD) drag.moved = true;
+    const nextRight = clamp(drag.startRight - dx, 0, window.innerWidth - FAB_SIZE);
+    const nextBottom = clamp(drag.startBottom - dy, 0, window.innerHeight - FAB_SIZE);
+    setPos({ right: nextRight, bottom: nextBottom });
+  }
+
+  function endDrag() {
+    window.removeEventListener('mousemove', onDragMove);
+    window.removeEventListener('mouseup', endDrag);
+    window.removeEventListener('touchmove', onDragMove);
+    window.removeEventListener('touchend', endDrag);
+    if (dragRef.current?.moved) {
+      setPos((current) => {
+        try {
+          localStorage.setItem('ed_widget_position', JSON.stringify(current));
+        } catch {
+          // per-viewer convenience only — fine if storage is unavailable
+        }
+        return current;
+      });
+    }
+  }
+
+  function handleFabClick() {
+    if (dragRef.current?.moved) {
+      dragRef.current = null; // swallow the click that follows a real drag
+      return;
+    }
+    dragRef.current = null;
+    setOpen((o) => !o);
+  }
+
   return (
     <>
-      <button style={s.fab} onClick={() => setOpen(!open)} data-tour="ed-widget">
+      <button
+        style={pos ? { ...s.fab, right: pos.right, bottom: pos.bottom } : s.fab}
+        onMouseDown={startDrag}
+        onTouchStart={startDrag}
+        onClick={handleFabClick}
+        data-tour="ed-widget"
+      >
         {open ? '✕' : '⚡'}
       </button>
 
       {open && (
-        <div style={s.panel}>
+        <div style={pos ? { ...s.panel, right: pos.right, bottom: pos.bottom + FAB_SIZE + 12 } : s.panel}>
           <div style={s.header}>
             <span style={s.headerTitle}>ED</span>
             {!aiConfigured && <span style={s.degradedBadge}>Language layer not configured</span>}
@@ -232,8 +319,8 @@ export default function EdWidget() {
 const s = {
   fab: {
     position: 'fixed', bottom: 'var(--ed-bottom, 24px)', right: 24, width: 56, height: 56, borderRadius: '50%',
-    background: 'var(--accent-gradient)', color: 'var(--accent-on)', border: 'none', fontSize: 22, cursor: 'pointer', zIndex: 'var(--z-drawer)',
-    boxShadow: 'var(--shadow-glow-accent)',
+    background: 'var(--accent-gradient)', color: 'var(--accent-on)', border: 'none', fontSize: 22, cursor: 'grab', zIndex: 'var(--z-drawer)',
+    boxShadow: 'var(--shadow-glow-accent)', touchAction: 'none',
   },
   panel: {
     position: 'fixed', bottom: 'calc(var(--ed-bottom, 24px) + 68px)', right: 24, width: 340, height: 460, background: 'var(--bg-elevated)',
