@@ -53,6 +53,8 @@ import BreakRoomPlayPage from './pages/BreakRoomPlayPage';
 import BreakRoomAdminPanel from './pages/BreakRoomAdminPanel';
 import ProductUpdatesAdminPanel from './pages/ProductUpdatesAdminPanel';
 import SaleItemsReviewPanel from './pages/SaleItemsReviewPanel';
+import EvenFlow101Panel from './pages/EvenFlow101Panel';
+import EvenFlow101DetailPage from './pages/EvenFlow101DetailPage';
 
 function RequireAuth() {
   const { user, loading } = useAuth();
@@ -136,6 +138,8 @@ export default function App() {
           <Route path="agency/offices/:officeId" element={<OfficesPanel />} />
           <Route path="agency/back-catalog" element={<BackCatalogPanel />} />
           <Route path="agency/support" element={<SupportPanel />} />
+          <Route path="agency/evenflow-101" element={<EvenFlow101Panel />} />
+          <Route path="agency/evenflow-101/:topicId" element={<EvenFlow101DetailPage />} />
           <Route path="agency/coaching" element={<RedirectToSalesStudio tab="diagnostics" />} />
           <Route path="agency/roster-settings" element={<RosterSettingsPanel />} />
           <Route path="agency/billing" element={<AgencyBillingPanel />} />

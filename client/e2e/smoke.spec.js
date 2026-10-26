@@ -69,6 +69,15 @@ test('Agency Owner: dashboard, billing, record store, back catalog, roster setti
   await page.goto('/agency/billboard');
   await expect(page.locator('body')).not.toContainText('Something went wrong');
 
+  // EvenFlow 101 — the static training guide must list its real topics,
+  // and clicking into one must render its module cards with no error.
+  await page.goto('/agency/evenflow-101');
+  await expect(page.getByText(/EvenFlow 101/i).first()).toBeVisible({ timeout: 10000 });
+  await expect(page.locator('body')).not.toContainText('Something went wrong');
+  await page.getByText('Lead Priority Rules', { exact: true }).click();
+  await expect(page.getByText('WHAT IT IS', { exact: true })).toBeVisible({ timeout: 10000 });
+  await expect(page.locator('body')).not.toContainText('Something went wrong');
+
   expect(errors, `uncaught page errors: ${errors.join(' | ')}`).toHaveLength(0);
 });
 

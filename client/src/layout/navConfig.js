@@ -55,6 +55,7 @@ export const NAV_BY_ROLE = {
     { label: 'Roster Settings', to: '/agency/roster-settings', icon: 'handshake', secondary: true, dataTour: 'nav-roster-settings' },
     { label: 'Billing', to: '/agency/billing', icon: 'card', secondary: true, dataTour: 'nav-billing' },
     { label: 'Support', to: '/agency/support', icon: 'support', secondary: true, dataTour: 'nav-support' },
+    { label: 'EvenFlow 101', to: '/agency/evenflow-101', icon: 'book', secondary: true, dataTour: 'nav-evenflow-101' },
   ],
   PLATFORM_OWNER: [
     { label: 'Agencies', to: '/platform', icon: 'agencies', primary: true, dataTour: 'nav-home' },
