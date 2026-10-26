@@ -227,7 +227,10 @@ export default function BillboardPanel() {
         <StatTile
           label="Premium Total"
           value={money(data.totals.premiumCents)}
-          sub={data.totals.unknownPremiumCount > 0 ? `${data.totals.unknownPremiumCount} missing premium — needs reconciliation` : undefined}
+          sub={[
+            data.historicalRecordsIncluded > 0 ? `includes ${data.historicalRecordsIncluded} historical` : null,
+            data.totals.unknownPremiumCount > 0 ? `${data.totals.unknownPremiumCount} missing premium — needs reconciliation` : null,
+          ].filter(Boolean).join(' · ') || undefined}
         />
       </div>
 

@@ -172,6 +172,12 @@ async function historicalLeadLikeRows({ agencyId, from, to, timeZone }) {
       vendor: { select: { id: true, name: true } },
       zip: true,
       items: true,
+      // Customer name — not used by any aggregation/grouping below, only
+      // by billboard.js's cross-table duplicate check (a Back Catalog
+      // import and a live Add Closed Sale entry can both exist for the
+      // same real policy; nothing here enforces they can't).
+      firstName: true,
+      lastName: true,
     },
   });
   return rows.map((r) => ({
@@ -184,6 +190,8 @@ async function historicalLeadLikeRows({ agencyId, from, to, timeZone }) {
     vendor: r.vendor,
     zip: r.zip,
     items: r.items,
+    firstName: r.firstName,
+    lastName: r.lastName,
   }));
 }
 

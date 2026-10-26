@@ -162,6 +162,11 @@ async function saleLeadLikeRows({ agencyId, from, to, timeZone }) {
       zip: true,
       items: true,
       lead: { select: { vendorId: true, vendor: { select: { id: true, name: true } } } },
+      // Customer name — not used by any aggregation/grouping below, only
+      // by billboard.js's cross-table duplicate check against
+      // HistoricalRecord (see historicalLeadLikeRows' own comment).
+      firstName: true,
+      lastName: true,
     },
   });
   return rows.map((r) => ({
@@ -174,6 +179,8 @@ async function saleLeadLikeRows({ agencyId, from, to, timeZone }) {
     vendor: r.lead?.vendor || null,
     zip: r.zip,
     items: r.items,
+    firstName: r.firstName,
+    lastName: r.lastName,
   }));
 }
 

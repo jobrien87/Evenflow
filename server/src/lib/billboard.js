@@ -218,6 +218,30 @@ function aggregateSoldRows(soldLeads, producers) {
   };
 }
 
+// A Back Catalog import has no automatic check against existing Sale rows
+// (only the reverse direction — findPossibleDuplicates in routes/sales.js
+// — warns when creating a NEW Sale that might duplicate an existing
+// HistoricalRecord, and even that is a soft, overridable warning, not a
+// block). Without this, the same real policy can exist in both tables and
+// get counted twice here — the one place that reads Sale and
+// HistoricalRecord together. Excludes a historical row only when it
+// matches a live Sale by the same case-insensitive customer name within
+// the agency's own configured saleDuplicateWindowDays — the identical
+// judgment call already trusted in production for this exact decision,
+// not a new or looser heuristic.
+function excludeDuplicateHistoricalRows(historicalRows, manualSaleRows, windowDays) {
+  const windowMs = windowDays * 24 * 60 * 60 * 1000;
+  const saleNames = manualSaleRows
+    .filter((s) => s.firstName && s.lastName)
+    .map((s) => ({ name: `${s.firstName}|${s.lastName}`.toLowerCase(), time: s.updatedAt.getTime() }));
+  return historicalRows.filter((h) => {
+    if (!h.firstName || !h.lastName) return true;
+    const hName = `${h.firstName}|${h.lastName}`.toLowerCase();
+    const hTime = h.updatedAt.getTime();
+    return !saleNames.some((s) => s.name === hName && Math.abs(s.time - hTime) <= windowMs);
+  });
+}
+
 // Same real active-producer-and-manager roster query financials.js's
 // /by-agent already uses — every active producer or selling manager must
 // appear on the leaderboard even with zero sales in range, not just
@@ -230,7 +254,7 @@ async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
   const g = GRANULARITIES.includes(granularity) ? granularity : 'month';
   const range = from && to ? { from: new Date(from), to: new Date(to) } : defaultRange(g);
 
-  const [historicalRows, manualSaleRows, producers] = await Promise.all([
+  const [historicalRows, manualSaleRows, producers, agency] = await Promise.all([
     // Historical Data (Back Catalog) rows — concatenated in so every
     // grouping/series below reuses this one aggregation pass rather than
     // a second copy of it.
@@ -239,8 +263,10 @@ async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
     // or linked back to a Lead via Sale.leadId) — same reshape pattern.
     saleLeadLikeRows({ agencyId, from: range.from, to: range.to }),
     activeProducersQuery(agencyId),
+    prisma.agency.findUnique({ where: { id: agencyId }, select: { saleDuplicateWindowDays: true } }),
   ]);
-  const soldLeads = [...historicalRows, ...manualSaleRows];
+  const dedupedHistoricalRows = excludeDuplicateHistoricalRows(historicalRows, manualSaleRows, agency?.saleDuplicateWindowDays ?? 3);
+  const soldLeads = [...dedupedHistoricalRows, ...manualSaleRows];
   const aggregated = aggregateSoldRows(soldLeads, producers);
   const series = buildSeries(soldLeads, g, range.from, range.to);
 
@@ -251,8 +277,10 @@ async function computeBillboard({ agencyId, granularity = 'month', from, to }) {
     series,
     // Historical Data (Back Catalog) rows folded into the totals above —
     // surfaced so the client can show a small "(includes N historical
-    // records)" caption without a second, parallel report surface.
-    historicalRecordsIncluded: historicalRows.length,
+    // records)" caption without a second, parallel report surface. Counts
+    // only what's actually included (post-duplicate-exclusion), not the
+    // raw import count.
+    historicalRecordsIncluded: dedupedHistoricalRows.length,
   };
 }
 
@@ -303,7 +331,7 @@ function bucketBySpans(soldLeads, spans, timeZone) {
 async function computeBillboardPeriod({ agencyId, period, month, year, now = new Date() }) {
   const p = BILLBOARD_PERIODS.includes(period) ? period : 'month';
 
-  const agency = await prisma.agency.findUnique({ where: { id: agencyId }, select: { timezone: true } });
+  const agency = await prisma.agency.findUnique({ where: { id: agencyId }, select: { timezone: true, saleDuplicateWindowDays: true } });
   const timeZone = agency?.timezone || 'America/New_York';
 
   let range;
@@ -356,7 +384,8 @@ async function computeBillboardPeriod({ agencyId, period, month, year, now = new
     saleLeadLikeRows({ agencyId, from: range.from, to: range.to, timeZone }),
     activeProducersQuery(agencyId),
   ]);
-  const soldLeads = [...historicalRows, ...manualSaleRows];
+  const dedupedHistoricalRows = excludeDuplicateHistoricalRows(historicalRows, manualSaleRows, agency?.saleDuplicateWindowDays ?? 3);
+  const soldLeads = [...dedupedHistoricalRows, ...manualSaleRows];
   const aggregated = aggregateSoldRows(soldLeads, producers);
 
   if (p === 'week') {
@@ -378,7 +407,7 @@ async function computeBillboardPeriod({ agencyId, period, month, year, now = new
     ...(p === 'year' ? { selectedYear: extra.selectedYear } : {}),
     ...aggregated,
     series,
-    historicalRecordsIncluded: historicalRows.length,
+    historicalRecordsIncluded: dedupedHistoricalRows.length,
   };
 }
 

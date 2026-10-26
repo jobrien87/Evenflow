@@ -435,3 +435,61 @@ test('computeBillboardPeriod: a past month with only Historical Data (Back Catal
   assert.equal(current.totals.soldCount, 0, 'the current month has no data of its own');
   assert.ok(current.availableMonths.some((m) => m.year === 2026 && m.month === 1), 'the selector still reaches back to the historical-only month from the current month view');
 });
+
+test('computeBillboardPeriod: the same real policy imported as both a HistoricalRecord and a live Sale is counted once, not twice', async () => {
+  // Reproduces the reported "Premium Total off by ~$14,000" bug: a Back
+  // Catalog import has no overlap check against existing Sale rows, so
+  // the same real policy can land in both tables and get double-counted
+  // here — the one place that reads them together.
+  const agency = await prisma.agency.create({ data: { name: `Billboard Dedup Test Agency ${suffix}`, timezone: 'America/New_York' } });
+  const owner = await prisma.user.create({
+    data: { agencyId: agency.id, email: `billboard-dedup-owner-${suffix}@test.local`, passwordHash: 'x', firstName: 'Dedup', lastName: 'Owner', role: 'AGENCY_OWNER', status: 'ACTIVE' },
+  });
+  const producer = await prisma.user.create({
+    data: { agencyId: agency.id, email: `billboard-dedup-${suffix}@test.local`, passwordHash: 'x', firstName: 'Dedup', lastName: 'Prod', role: 'PRODUCER', status: 'ACTIVE' },
+  });
+
+  const customer = await prisma.customer.create({ data: { firstName: 'Dupe', lastName: 'Policy' } });
+  await prisma.sale.create({
+    data: {
+      agencyId: agency.id, customerId: customer.id, firstName: 'Dupe', lastName: 'Policy',
+      saleDate: new Date('2026-05-10'), carrier: 'Test', policyType: 'Standard', productFamily: 'AUTO',
+      premiumCents: 500000, assignedToId: producer.id, createdById: owner.id,
+    },
+  });
+  const batch = await prisma.leadImportBatch.create({
+    data: { agencyId: agency.id, uploadedById: owner.id, totalRows: 1, created: 1, skipped: 0, sourceSystem: 'OTHER', isHistorical: true },
+  });
+  // Same customer, same real policy, re-imported into HistoricalRecord a
+  // couple days later — well within the default ±3 day window.
+  await prisma.historicalRecord.create({
+    data: {
+      agencyId: agency.id, importBatchId: batch.id, recordDate: new Date('2026-05-12'),
+      firstName: 'Dupe', lastName: 'Policy', product: 'AUTO', assignedToId: producer.id,
+      isSold: true, premiumCents: 500000, items: 1, sourceSystem: 'OTHER',
+    },
+  });
+
+  // A genuinely different customer's HistoricalRecord in the same month —
+  // must NOT be excluded just because some other row shares the month.
+  const other = await prisma.customer.create({ data: { firstName: 'Real', lastName: 'Distinct' } });
+  await prisma.sale.create({
+    data: {
+      agencyId: agency.id, customerId: other.id, firstName: 'Real', lastName: 'Distinct',
+      saleDate: new Date('2026-05-10'), carrier: 'Test', policyType: 'Standard', productFamily: 'HOME',
+      premiumCents: 100000, assignedToId: producer.id, createdById: owner.id,
+    },
+  });
+  await prisma.historicalRecord.create({
+    data: {
+      agencyId: agency.id, importBatchId: batch.id, recordDate: new Date('2026-05-20'),
+      firstName: 'Another', lastName: 'Customer', product: 'HOME', assignedToId: producer.id,
+      isSold: true, premiumCents: 200000, items: 1, sourceSystem: 'OTHER',
+    },
+  });
+
+  const result = await computeBillboardPeriod({ agencyId: agency.id, period: 'month', month: '2026-05', now: PERIOD_NOW });
+  assert.equal(result.totals.soldCount, 3, 'the duplicate HistoricalRecord is excluded entirely; the 2 real Sales + 1 genuinely distinct HistoricalRecord count');
+  assert.equal(result.totals.premiumCents, 800000, '$5000 (Dupe Policy, counted once) + $1000 (Real Distinct) + $2000 (Another Customer) = $8000, never $14000');
+  assert.equal(result.historicalRecordsIncluded, 1, 'only the genuinely distinct historical row is included — the duplicate is not');
+});
