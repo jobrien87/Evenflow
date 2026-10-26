@@ -25,7 +25,7 @@ const { zonedYearMonthDay } = require('../lib/timezone');
 const app = require('../app');
 
 const suffix = Date.now();
-let agencyId, ownerId, producerId, producer2Id, managerId, manager2Id, ownerCookie, producerCookie, managerCookie, manager2Cookie, server, baseUrl;
+let agencyId, ownerId, producerId, producer2Id, managerId, manager2Id, platformOwnerId, ownerCookie, producerCookie, managerCookie, manager2Cookie, platformOwnerCookie, server, baseUrl;
 
 before(async () => {
   const agency = await prisma.agency.create({ data: { name: `Sales Test Agency ${suffix}` } });
@@ -67,6 +67,12 @@ before(async () => {
   managerCookie = `evenflow_session=${managerSession.rawToken}`;
   const manager2Session = await createSession(manager2Id);
   manager2Cookie = `evenflow_session=${manager2Session.rawToken}`;
+  const platformOwner = await prisma.user.create({
+    data: { email: `sales-platform-${suffix}@test.local`, passwordHash: hash, firstName: 'Sales', lastName: 'Platform', role: 'PLATFORM_OWNER', status: 'ACTIVE' },
+  });
+  platformOwnerId = platformOwner.id;
+  const platformOwnerSession = await createSession(platformOwnerId);
+  platformOwnerCookie = `evenflow_session=${platformOwnerSession.rawToken}`;
 
   await new Promise((resolve) => { server = http.createServer(app).listen(0, '127.0.0.1', resolve); });
   const port = server.address().port;
@@ -77,8 +83,9 @@ after(async () => {
   await prisma.sale.deleteMany({ where: { agencyId } });
   await prisma.revenueEvent.deleteMany({ where: { agencyId } });
   await prisma.auditEvent.deleteMany({ where: { agencyId } });
-  await prisma.session.deleteMany({ where: { userId: { in: [ownerId, producerId, producer2Id, managerId, manager2Id] } } });
+  await prisma.session.deleteMany({ where: { userId: { in: [ownerId, producerId, producer2Id, managerId, manager2Id, platformOwnerId] } } });
   await prisma.user.deleteMany({ where: { agencyId } });
+  await prisma.user.delete({ where: { id: platformOwnerId } }).catch(() => {});
   await prisma.agency.delete({ where: { id: agencyId } }).catch(() => {});
   await new Promise((resolve) => server.close(resolve));
   await prisma.$disconnect();
@@ -1060,6 +1067,88 @@ test('a voided Sale still linked to a lead leaves that lead counted as missing a
 
   await prisma.sale.delete({ where: { id: sale.id } });
   await prisma.revenueEvent.deleteMany({ where: { saleId: sale.id } });
+  await prisma.lead.delete({ where: { id: lead.id } });
+  await prisma.customer.delete({ where: { id: customer.id } });
+});
+
+// --- GET /sales/items-mismatch (Julie's "item count still off" report —
+// Sale.items silently defaulted to 1 before the prefill/backfill fixes) ---
+
+test('GET /sales/items-mismatch surfaces a Sale stuck at items=1 whose lead has 2+ SOLD product quotes, and ignores everything else', async () => {
+  const { lead: mismatchedLead, customer: mismatchedCustomer } = await createSoldLeadWithNoSale({ premiumCents: 80000 });
+  await prisma.leadProductQuote.create({ data: { leadId: mismatchedLead.id, product: 'AUTO', status: 'SOLD' } });
+  await prisma.leadProductQuote.create({ data: { leadId: mismatchedLead.id, product: 'HOME', status: 'SOLD' } });
+  const mismatchedSaleRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ lastName: `Mismatch${Date.now()}`, premiumCents: 80000, items: 1, leadId: mismatchedLead.id })),
+  });
+  const { sale: mismatchedSale } = await mismatchedSaleRes.json();
+
+  // Control 1: items already correctly reflects 2 sold quotes — not a mismatch.
+  const { lead: correctLead, customer: correctCustomer } = await createSoldLeadWithNoSale({ premiumCents: 80000 });
+  await prisma.leadProductQuote.create({ data: { leadId: correctLead.id, product: 'AUTO', status: 'SOLD' } });
+  await prisma.leadProductQuote.create({ data: { leadId: correctLead.id, product: 'HOME', status: 'SOLD' } });
+  const correctSaleRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ lastName: `Correct${Date.now()}`, premiumCents: 80000, items: 2, leadId: correctLead.id })),
+  });
+  const { sale: correctSale } = await correctSaleRes.json();
+
+  // Control 2: a genuine single-product sale at items=1 — not a mismatch.
+  const { lead: singleLead, customer: singleCustomer } = await createSoldLeadWithNoSale({ premiumCents: 50000 });
+  await prisma.leadProductQuote.create({ data: { leadId: singleLead.id, product: 'AUTO', status: 'SOLD' } });
+  const singleSaleRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ lastName: `Single${Date.now()}`, premiumCents: 50000, items: 1, leadId: singleLead.id })),
+  });
+  const { sale: singleSale } = await singleSaleRes.json();
+
+  const res = await fetch(`${baseUrl}/api/sales/items-mismatch`, { headers: { Cookie: platformOwnerCookie } });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+
+  const row = body.sales.find((s) => s.id === mismatchedSale.id);
+  assert.ok(row, 'a Sale stuck at items=1 with 2 SOLD product quotes must be surfaced');
+  assert.equal(row.soldQuoteCount, 2);
+  assert.equal(row.items, 1);
+  assert.equal(row.agencyId, agencyId);
+
+  assert.equal(body.sales.some((s) => s.id === correctSale.id), false, 'a Sale whose items already matches its sold-quote count must never be surfaced');
+  assert.equal(body.sales.some((s) => s.id === singleSale.id), false, 'a genuine single-product sale at items=1 must never be surfaced');
+
+  // Non-Platform-Owner roles must never see this cross-agency admin list.
+  const ownerAttempt = await fetch(`${baseUrl}/api/sales/items-mismatch`, { headers: { Cookie: ownerCookie } });
+  assert.equal(ownerAttempt.status, 403);
+
+  await prisma.sale.deleteMany({ where: { id: { in: [mismatchedSale.id, correctSale.id, singleSale.id] } } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: { in: [mismatchedSale.id, correctSale.id, singleSale.id] } } });
+  await prisma.leadProductQuote.deleteMany({ where: { leadId: { in: [mismatchedLead.id, correctLead.id, singleLead.id] } } });
+  await prisma.lead.deleteMany({ where: { id: { in: [mismatchedLead.id, correctLead.id, singleLead.id] } } });
+  await prisma.customer.deleteMany({ where: { id: { in: [mismatchedCustomer.id, correctCustomer.id, singleCustomer.id] } } });
+});
+
+test('GET /sales/items-mismatch never surfaces a voided Sale', async () => {
+  const { lead, customer } = await createSoldLeadWithNoSale({ premiumCents: 65000 });
+  await prisma.leadProductQuote.create({ data: { leadId: lead.id, product: 'AUTO', status: 'SOLD' } });
+  await prisma.leadProductQuote.create({ data: { leadId: lead.id, product: 'HOME', status: 'SOLD' } });
+  const saleRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ lastName: `Voided${Date.now()}`, premiumCents: 65000, items: 1, leadId: lead.id })),
+  });
+  const { sale } = await saleRes.json();
+
+  await fetch(`${baseUrl}/api/sales/${sale.id}/void`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ voidReason: 'test void' }),
+  });
+
+  const res = await fetch(`${baseUrl}/api/sales/items-mismatch`, { headers: { Cookie: platformOwnerCookie } });
+  const body = await res.json();
+  assert.equal(body.sales.some((s) => s.id === sale.id), false, 'a voided Sale must never appear in the review list');
+
+  await prisma.sale.delete({ where: { id: sale.id } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: sale.id } });
+  await prisma.leadProductQuote.deleteMany({ where: { leadId: lead.id } });
   await prisma.lead.delete({ where: { id: lead.id } });
   await prisma.customer.delete({ where: { id: customer.id } });
 });

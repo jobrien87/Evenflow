@@ -61,6 +61,7 @@ export const api = {
   sales: (params = '') => request(`/sales${params}`),
   updateSale: (id, payload) => request(`/sales/${id}`, { method: 'PATCH', body: payload }),
   voidSale: (id, voidReason) => request(`/sales/${id}/void`, { method: 'POST', body: { voidReason } }),
+  saleItemsMismatch: () => request('/sales/items-mismatch'),
 
   tasks: (params = '') => request(`/tasks${params}`),
   createTask: (payload) => request('/tasks', { method: 'POST', body: payload }),

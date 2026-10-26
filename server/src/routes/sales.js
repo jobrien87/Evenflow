@@ -321,6 +321,55 @@ router.get('/', requireRole(...CREATE_ROLES), async (req, res, next) => {
   }
 });
 
+// Admin reconciliation: Sale.items defaults to 1 whenever a value isn't
+// explicitly supplied (see lib/missingSaleBackfill.js, lib/salePrefill.js —
+// both fixed to pass a real count now, but a bundled/multi-product sale
+// logged before that fix can still be stuck showing items=1 even though
+// its lead actually reached SOLD on more than one product). Never auto-
+// corrected here — a producer may have legitimately logged items:1 on a
+// multi-quote lead where only one product actually closed — this is a
+// Platform-Owner-only review list; the actual fix goes through the
+// existing PATCH /:saleId route below, one row at a time.
+router.get('/items-mismatch', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const candidates = await prisma.sale.findMany({
+      where: {
+        voidedAt: null,
+        items: 1,
+        lead: { is: { productQuotes: { some: { status: 'SOLD' } } } },
+      },
+      select: {
+        id: true, agencyId: true, firstName: true, lastName: true, policyNumber: true,
+        saleDate: true, items: true, assignedToId: true,
+        agency: { select: { name: true } },
+        assignedTo: { select: { firstName: true, lastName: true } },
+        lead: { select: { productQuotes: { select: { status: true } } } },
+      },
+      orderBy: { saleDate: 'desc' },
+    });
+
+    const mismatches = candidates
+      .map((sale) => ({
+        id: sale.id,
+        agencyId: sale.agencyId,
+        agencyName: sale.agency?.name || '',
+        firstName: sale.firstName,
+        lastName: sale.lastName,
+        policyNumber: sale.policyNumber,
+        saleDate: sale.saleDate,
+        items: sale.items,
+        assignedToId: sale.assignedToId,
+        assignedToName: sale.assignedTo ? `${sale.assignedTo.firstName} ${sale.assignedTo.lastName}` : '(unassigned)',
+        soldQuoteCount: sale.lead?.productQuotes.filter((q) => q.status === 'SOLD').length || 0,
+      }))
+      .filter((sale) => sale.soldQuoteCount > 1);
+
+    return res.json({ success: true, sales: mismatches });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Only clientRequestId is stripped (a create-time idempotency key, not
 // relevant to an edit) — confirmDuplicate is kept so an edit can
 // explicitly confirm past the recheck below, same as POST.

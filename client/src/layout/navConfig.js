@@ -69,6 +69,7 @@ export const NAV_BY_ROLE = {
     { label: 'Record Store', to: '/platform/record-store', icon: 'vinyl', dataTour: 'nav-record-store' },
     { label: 'Break Room Admin', to: '/platform/break-room-admin', icon: 'gamepad', secondary: true, dataTour: 'nav-break-room-admin' },
     { label: "ED's What's New", to: '/platform/product-updates', icon: 'megaphone', secondary: true, dataTour: 'nav-product-updates' },
+    { label: 'Sale Items Review', to: '/platform/sale-items-review', icon: 'checklist', secondary: true, dataTour: 'nav-sale-items-review' },
   ],
 };
 
