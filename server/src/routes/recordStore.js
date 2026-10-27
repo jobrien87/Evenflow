@@ -735,6 +735,70 @@ router.post('/admin/agencies/:agencyId/resume-account', requireRole('PLATFORM_OW
   }
 });
 
+// ---- Admin: reset an agency's Record Store data to a never-purchased
+// state (e.g. Josh's own test account, reused to see the new-customer
+// experience). Real financial/CRM data (funding payments, delivered
+// leads) is never deleted — only detached. See recordStoreProvisioning.js's
+// resetAgencyRecordStore for the full real-Boberdoo-then-local-wipe
+// sequencing.
+router.get('/admin/agencies/:agencyId/reset-record-store-preview', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const agencyId = req.params.agencyId;
+    const agency = await prisma.agency.findUnique({ where: { id: agencyId }, select: { id: true, name: true, boberdooPartnerId: true, boberdooPartnerStatus: true } });
+    if (!agency) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    const owner = await prisma.user.findFirst({ where: { agencyId, role: 'AGENCY_OWNER' }, select: { email: true, firstName: true, lastName: true } });
+
+    const subscriptions = await prisma.recordStoreSubscription.findMany({ where: { agencyId }, select: { id: true, status: true } });
+    const subscriptionIds = subscriptions.map((s) => s.id);
+    const [customRequests, sourceOptimizations, leadsToDetach, fundingPayments] = await Promise.all([
+      prisma.recordStoreCustomRequest.count({ where: { agencyId } }),
+      prisma.recordStoreSourceOptimization.count({ where: { recordStoreSubscriptionId: { in: subscriptionIds } } }),
+      prisma.lead.count({ where: { recordStoreSubscriptionId: { in: subscriptionIds } } }),
+      prisma.recordStoreFundingPayment.findMany({ where: { recordStoreSubscriptionId: { in: subscriptionIds } }, select: { amountCents: true } }),
+    ]);
+
+    return res.json({
+      success: true,
+      agency: { id: agency.id, name: agency.name },
+      ownerEmail: owner?.email || null,
+      ownerName: owner ? `${owner.firstName} ${owner.lastName}` : null,
+      boberdooPartnerId: agency.boberdooPartnerId,
+      boberdooPartnerStatus: agency.boberdooPartnerStatus,
+      counts: {
+        subscriptions: subscriptions.length,
+        customRequests,
+        sourceOptimizations,
+        leadsToDetach,
+        fundingPaymentsToDetach: fundingPayments.length,
+        fundingPaymentsTotalAmountCents: fundingPayments.reduce((sum, p) => sum + p.amountCents, 0),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const resetRecordStoreSchema = z.object({ confirmText: z.string() });
+
+router.post('/admin/agencies/:agencyId/reset-record-store', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const agencyId = req.params.agencyId;
+    const agency = await prisma.agency.findUnique({ where: { id: agencyId }, select: { id: true, name: true } });
+    if (!agency) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+
+    const parsed = resetRecordStoreSchema.safeParse(req.body);
+    if (!parsed.success || parsed.data.confirmText !== agency.name) {
+      return res.status(400).json({ success: false, error: 'CONFIRMATION_MISMATCH', message: "Type the agency's exact name to confirm." });
+    }
+
+    const result = await provisioning.resetAgencyRecordStore(agencyId, req.user.id, req.correlationId);
+    if (!result.success) return res.status(409).json({ success: false, error: result.errorCode, message: result.errorMessage });
+    return res.json({ success: true, wipedCounts: result.wipedCounts, boberdooWarnings: result.boberdooWarnings, partnerDeactivateWarning: result.partnerDeactivateWarning });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ---- Custom Builder (admin) ---------------------------------------------
 
 router.get('/admin/custom-requests', requireRole('PLATFORM_OWNER'), async (req, res, next) => {

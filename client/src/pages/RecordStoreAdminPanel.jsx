@@ -37,6 +37,12 @@ export default function RecordStoreAdminPanel() {
   const [importForm, setImportForm] = useState(null); // { agencyId, filterSetId }
   const [status, setStatus] = useState('');
   const [busyId, setBusyId] = useState(null);
+  const [resettingAgency, setResettingAgency] = useState(null);
+  const [resetPreview, setResetPreview] = useState(null);
+  const [resetConfirmText, setResetConfirmText] = useState('');
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetError, setResetError] = useState('');
+  const [resetDone, setResetDone] = useState(null);
 
   useEffect(() => {
     load();
@@ -146,6 +152,35 @@ export default function RecordStoreAdminPanel() {
       setStatus(err.data?.message || 'Could not resume this account.');
     } finally {
       setBusyId(null);
+    }
+  }
+
+  async function openResetRecordStore(agency) {
+    setResettingAgency(agency);
+    setResetPreview(null);
+    setResetConfirmText('');
+    setResetError('');
+    setResetDone(null);
+    try {
+      const data = await api.adminRecordStoreResetPreview(agency.id);
+      setResetPreview(data);
+    } catch (err) {
+      setResetError(err.data?.message || 'Could not load reset preview.');
+    }
+  }
+
+  async function confirmResetRecordStore() {
+    setResetBusy(true);
+    setResetError('');
+    try {
+      const data = await api.adminResetRecordStoreAccount(resettingAgency.id, resetConfirmText);
+      setResetDone(data);
+      setResetPreview(null);
+      await load(); // this agency drops out of CUSTOMERS entirely (0 subscriptions) — expected
+    } catch (err) {
+      setResetError(err.data?.message || "Could not reset this agency's Record Store.");
+    } finally {
+      setResetBusy(false);
     }
   }
 
@@ -312,6 +347,7 @@ export default function RecordStoreAdminPanel() {
                       ) : (
                         <Button variant="ghost" size="sm" disabled={busyId === a.id} onClick={() => pauseAgencyAccount(a.id)}>PAUSE</Button>
                       )}
+                      <Button variant="danger" size="sm" disabled={busyId === a.id} onClick={() => openResetRecordStore(a)}>RESET</Button>
                     </span>
                   </div>
                   {expandedId === a.id && (
@@ -467,6 +503,20 @@ export default function RecordStoreAdminPanel() {
       {decliningRequest && (
         <DeclineRequestModal request={decliningRequest} onClose={() => setDecliningRequest(null)} onSave={submitDecline} busy={busyId === decliningRequest.id} />
       )}
+
+      {resettingAgency && (
+        <ResetRecordStoreModal
+          agency={resettingAgency}
+          preview={resetPreview}
+          confirmText={resetConfirmText}
+          onConfirmTextChange={setResetConfirmText}
+          error={resetError}
+          done={resetDone}
+          busy={resetBusy}
+          onConfirm={confirmResetRecordStore}
+          onClose={() => setResettingAgency(null)}
+        />
+      )}
     </div>
   );
 }
@@ -508,6 +558,73 @@ function QuoteRequestModal({ request, onClose, onSave, busy }) {
             <Button variant="secondary" type="button" onClick={onClose}>CANCEL</Button>
           </div>
         </form>
+      </Card>
+    </div>
+  );
+}
+
+// Resets one agency's Record Store purchase history back to never-
+// purchased — real funding payments and any already-delivered leads are
+// only ever detached, never deleted, so the confirm step says so
+// explicitly rather than leaving that to assumption. Boberdoo has no
+// hard-delete, so the real Partner/filter sets are driven to inactive,
+// never erased — surfaced here as a one-line note, not hidden.
+function ResetRecordStoreModal({ agency, preview, confirmText, onConfirmTextChange, error, done, busy, onConfirm, onClose }) {
+  return (
+    <div style={s.modalBackdrop} onClick={onClose}>
+      <Card style={s.modal} onClick={(e) => e.stopPropagation()}>
+        <SectionHeader>RESET RECORD STORE — {agency.name}</SectionHeader>
+
+        {error && <div style={s.error}>{error}</div>}
+
+        {done && (
+          <>
+            <div style={s.helpText}>
+              Done. Removed {done.wipedCounts.subscriptions} subscription(s), {done.wipedCounts.customRequests} custom request(s), and{' '}
+              {done.wipedCounts.sourceOptimizations} source optimization record(s). Detached (not deleted) {done.wipedCounts.leadsDetached} lead(s) and{' '}
+              {done.wipedCounts.fundingPaymentsDetached} funding payment(s). Record Store now looks exactly like this agency has never purchased anything.
+            </div>
+            {(done.boberdooWarnings?.length > 0 || done.partnerDeactivateWarning) && (
+              <div style={s.identityWarning}>
+                Boberdoo reported an issue deactivating {done.boberdooWarnings?.length || 0} filter set(s){done.partnerDeactivateWarning ? ' and the Partner account itself' : ''} —
+                they may still show active on the lead exchange until retried manually (SYNC, or contact Boberdoo support). Local state has been fully reset regardless.
+              </div>
+            )}
+            <Button variant="secondary" size="sm" onClick={onClose}>CLOSE</Button>
+          </>
+        )}
+
+        {!done && preview && (
+          <>
+            <div style={s.identityWarning}>
+              You are about to permanently clear Record Store purchase history for <b>{preview.agency.name}</b>, owned by{' '}
+              <b>{preview.ownerEmail || 'no Agency Owner on file'}</b>{preview.ownerName ? ` (${preview.ownerName})` : ''}.
+              Double-check this is the account you mean before confirming — agency names are not unique.
+            </div>
+            <div style={s.helpText}>
+              This will delete {preview.counts.subscriptions} subscription(s), {preview.counts.customRequests} custom request(s), and{' '}
+              {preview.counts.sourceOptimizations} source optimization record(s) — permanently. It will also deactivate every real filter set and
+              the Partner account on the lead exchange (Boberdoo has no hard delete, so they stay inactive forever rather than disappearing).
+            </div>
+            <div style={s.helpText}>
+              {preview.counts.leadsToDetach} lead(s) and {preview.counts.fundingPaymentsToDetach} funding payment(s)
+              {preview.counts.fundingPaymentsTotalAmountCents > 0 ? ` (${(preview.counts.fundingPaymentsTotalAmountCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })} total)` : ''}{' '}
+              will only be detached from the deleted subscriptions — never deleted themselves.
+            </div>
+            <label style={s.fieldLabel}>
+              Type the agency's exact name to confirm: <b>{agency.name}</b>
+              <input style={s.input} value={confirmText} onChange={(e) => onConfirmTextChange(e.target.value)} autoFocus />
+            </label>
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <Button variant="danger" size="sm" disabled={busy || confirmText !== agency.name} onClick={onConfirm}>
+                {busy ? 'RESETTING…' : 'PERMANENTLY RESET'}
+              </Button>
+              <Button variant="secondary" size="sm" onClick={onClose}>CANCEL</Button>
+            </div>
+          </>
+        )}
+
+        {!done && !preview && !error && <div style={s.helpText}>Loading…</div>}
       </Card>
     </div>
   );
@@ -644,4 +761,6 @@ const s = {
   row3: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 },
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },
   error: { color: 'var(--danger)', fontSize: 12 },
+  helpText: { color: 'var(--text-muted)', fontSize: 11, marginBottom: 8, lineHeight: 1.5 },
+  identityWarning: { color: 'var(--danger)', fontSize: 13, lineHeight: 1.5, background: 'rgba(255, 77, 94, 0.1)', border: '1px solid rgba(255, 77, 94, 0.4)', borderRadius: 6, padding: 10, marginBottom: 8 },
 };

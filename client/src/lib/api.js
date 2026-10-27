@@ -197,6 +197,8 @@ export const api = {
   retryRecordStoreProvisioning: (id) => request(`/record-store/admin/subscriptions/${id}/retry`, { method: 'POST' }),
   adminPauseRecordStoreAccount: (agencyId) => request(`/record-store/admin/agencies/${agencyId}/pause-account`, { method: 'POST' }),
   adminResumeRecordStoreAccount: (agencyId) => request(`/record-store/admin/agencies/${agencyId}/resume-account`, { method: 'POST' }),
+  adminRecordStoreResetPreview: (agencyId) => request(`/record-store/admin/agencies/${agencyId}/reset-record-store-preview`),
+  adminResetRecordStoreAccount: (agencyId, confirmText) => request(`/record-store/admin/agencies/${agencyId}/reset-record-store`, { method: 'POST', body: { confirmText } }),
 
   // Personalize page — every user's own account.
   myBackgroundUrl: () => `${BASE}/users/me/background`,

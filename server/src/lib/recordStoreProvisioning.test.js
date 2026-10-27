@@ -310,6 +310,116 @@ test('pausing the whole account, then resuming, restores only what was really on
   assert.equal(home.status, 'PAUSED', 'Home Preferred stays paused — the exact worked example from the spec');
 });
 
+test('resetAgencyRecordStore detaches (never deletes) real Leads/FundingPayments, deletes CustomRequests/Subscriptions/SourceOptimizations, resets Agency fields, and keeps boberdooPartnerId unchanged', async () => {
+  fakeHappyBoberdoo();
+  const template = await loadTemplate(templateId);
+  const { subscription } = await provisioning.createOrder({ agencyId, template, dailyVolume: 10, userId: ownerId });
+  await provisioning.provisionSubscription(subscription.id);
+  await provisioning.refreshFundingStatus(subscription.id); // -> ACTIVE, real boberdooFilterSetId
+
+  const agencyBefore = await prisma.agency.findUnique({ where: { id: agencyId } });
+  assert.ok(agencyBefore.boberdooPartnerId, 'a real Partner must exist before this test is meaningful');
+
+  const customer = await prisma.customer.create({ data: { firstName: 'Reset', lastName: `Test${Date.now()}` } });
+  const lead = await prisma.lead.create({
+    data: {
+      agencyId, customerId: customer.id, source: 'vendor', status: 'NEW', product: 'Auto',
+      createdById: ownerId, recordStoreSubscriptionId: subscription.id, recordStoreSourceCode: 'EF-A',
+    },
+  });
+  const payment = await prisma.recordStoreFundingPayment.create({
+    data: { agencyId, recordStoreSubscriptionId: subscription.id, amountCents: 150000, stripeCheckoutSessionId: `cs_test_reset_${Date.now()}` },
+  });
+  const customRequest = await prisma.recordStoreCustomRequest.create({
+    data: { agencyId, requestedById: ownerId, leadTypeLabel: 'Auto Insurance' },
+  });
+  const sourceOptimization = await prisma.recordStoreSourceOptimization.create({
+    data: {
+      recordStoreSubscriptionId: subscription.id, windowStart: new Date(), windowEnd: new Date(),
+      previousSources: ['EF-A'], newSources: ['EF-B'], droppedSources: ['EF-A'], reasoning: 'test', performanceSnapshot: {},
+    },
+  });
+
+  const result = await provisioning.resetAgencyRecordStore(agencyId, ownerId, 'test-correlation');
+  assert.equal(result.success, true);
+  assert.equal(result.wipedCounts.subscriptions, 1);
+  assert.equal(result.wipedCounts.customRequests, 1);
+  assert.equal(result.wipedCounts.sourceOptimizations, 1);
+  assert.equal(result.wipedCounts.leadsDetached, 1);
+  assert.equal(result.wipedCounts.fundingPaymentsDetached, 1);
+  assert.deepEqual(result.boberdooWarnings, []);
+  assert.equal(result.partnerDeactivateWarning, null);
+
+  const leadAfter = await prisma.lead.findUnique({ where: { id: lead.id } });
+  assert.ok(leadAfter, 'the Lead row itself must survive the reset');
+  assert.equal(leadAfter.recordStoreSubscriptionId, null);
+  assert.equal(leadAfter.recordStoreSourceCode, null);
+
+  const paymentAfter = await prisma.recordStoreFundingPayment.findUnique({ where: { id: payment.id } });
+  assert.ok(paymentAfter, 'the real Stripe-charge row must survive the reset');
+  assert.equal(paymentAfter.amountCents, 150000);
+  assert.equal(paymentAfter.recordStoreSubscriptionId, null);
+
+  assert.equal(await prisma.recordStoreCustomRequest.findUnique({ where: { id: customRequest.id } }), null);
+  assert.equal(await prisma.recordStoreSourceOptimization.findUnique({ where: { id: sourceOptimization.id } }), null);
+  assert.equal(await prisma.recordStoreSubscription.findUnique({ where: { id: subscription.id } }), null);
+
+  const agencyAfter = await prisma.agency.findUnique({ where: { id: agencyId } });
+  assert.equal(agencyAfter.boberdooPartnerId, agencyBefore.boberdooPartnerId, 'the Partner stays linked so a future purchase reuses it instead of orphaning a new one');
+  assert.equal(agencyAfter.boberdooPartnerStatus, 0);
+  assert.equal(agencyAfter.boberdooSyncStatus, 'SYNCED');
+  assert.equal(agencyAfter.boberdooSyncError, null);
+  assert.equal(agencyAfter.recordStoreDepositConfirmedAt, null);
+  assert.equal(agencyAfter.recordStoreBalanceCents, null);
+  assert.equal(agencyAfter.recordStoreBalanceCheckedAt, null);
+
+  await prisma.lead.delete({ where: { id: lead.id } });
+  await prisma.recordStoreFundingPayment.delete({ where: { id: payment.id } });
+  await prisma.customer.delete({ where: { id: customer.id } });
+});
+
+test('resetAgencyRecordStore still fully wipes local state when a Boberdoo deactivation call fails', async () => {
+  fakeHappyBoberdoo();
+  const template = await loadTemplate(templateId);
+  const { subscription } = await provisioning.createOrder({ agencyId, template, dailyVolume: 10, userId: ownerId });
+  await provisioning.provisionSubscription(subscription.id);
+
+  boberdoo.setFilterSetStatus = async () => ({ success: false, errorCode: 'PROVIDER_ERROR', errorMessage: 'lead exchange rejected the deactivation' });
+  boberdoo.setPartnerStatus = async () => ({ success: false, errorCode: 'PROVIDER_ERROR', errorMessage: 'lead exchange rejected the partner status change' });
+
+  const result = await provisioning.resetAgencyRecordStore(agencyId, ownerId, 'test-correlation');
+  assert.equal(result.success, true, 'a Boberdoo-side failure must never block the local wipe');
+  assert.equal(result.boberdooWarnings.length, 1);
+  assert.equal(result.boberdooWarnings[0].subscriptionId, subscription.id);
+  assert.ok(result.partnerDeactivateWarning);
+
+  assert.equal(await prisma.recordStoreSubscription.findUnique({ where: { id: subscription.id } }), null, 'local state is wiped regardless of the Boberdoo outcome');
+});
+
+test('a new purchase after a reset reuses the existing Partner instead of creating a new one', async () => {
+  fakeHappyBoberdoo();
+  const template = await loadTemplate(templateId);
+  const { subscription } = await provisioning.createOrder({ agencyId, template, dailyVolume: 10, userId: ownerId });
+  await provisioning.provisionSubscription(subscription.id);
+  const agencyBefore = await prisma.agency.findUnique({ where: { id: agencyId } });
+
+  await provisioning.resetAgencyRecordStore(agencyId, ownerId, 'test-correlation');
+
+  let createPartnerCalls = 0;
+  boberdoo.createPartner = async () => { createPartnerCalls += 1; return { success: true, partnerId: `P-${++partnerCounter}` }; };
+
+  const order2 = await provisioning.createOrder({ agencyId, template, dailyVolume: 10, userId: ownerId });
+  const result2 = await provisioning.provisionSubscription(order2.subscription.id);
+  assert.equal(result2.success, true);
+  assert.equal(createPartnerCalls, 0, 'the existing Partner must be reused, never re-created');
+
+  const agencyAfter = await prisma.agency.findUnique({ where: { id: agencyId } });
+  assert.equal(agencyAfter.boberdooPartnerId, agencyBefore.boberdooPartnerId);
+
+  const sub2 = await prisma.recordStoreSubscription.findUnique({ where: { id: order2.subscription.id } });
+  assert.ok(sub2.boberdooFilterSetId, 'a fresh Filter Set is still created on the next purchase');
+});
+
 test('changing daily volume updates the real record on success', async () => {
   fakeHappyBoberdoo();
   const template = await loadTemplate(templateId);

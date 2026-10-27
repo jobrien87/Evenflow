@@ -702,6 +702,116 @@ async function resumeAccount(agencyId, actorId, correlationId) {
   return { success: true };
 }
 
+// ---- Admin: full teardown + reset to never-purchased state (reusable) ----
+// Boberdoo's integrated API has no delete-Partner or delete-FilterSet call
+// — a real reset on the Boberdoo side can only ever mean driving every
+// filter set, then the Partner itself, to inactive (Status 0). The same
+// Partner ID is deliberately kept (never nulled) so a REUSED test account
+// doesn't accumulate a fresh orphaned Partner in the real Boberdoo account
+// on every repeat reset — provisionPartner() above already reuses
+// agency.boberdooPartnerId whenever it's set, so the next real purchase
+// re-activates the SAME Partner instead of creating a new one. (A fresh
+// Filter Set IS created per new subscription on the next purchase, same
+// as any normal order — the old, now-permanently-inactive one from before
+// this reset stays in Boberdoo's own records forever, invisible anywhere
+// in EvenFlow and incapable of ever delivering a lead or billing again;
+// an accepted, unavoidable byproduct of Boberdoo having no real delete.)
+//
+// Boberdoo calls are attempted BEFORE the local wipe and are strictly
+// best-effort: a failure on one subscription's filter set (e.g. one
+// Boberdoo already considers gone) is collected and returned, never
+// allowed to block clearing local state — which always succeeds as long
+// as the database itself is healthy.
+//
+// Real financial/CRM data a reset must NEVER delete: RecordStoreFundingPayment
+// rows (actual Stripe charges — detached, not deleted) and Lead rows already
+// delivered through this agency's subscriptions (detached, not deleted).
+async function resetAgencyRecordStore(agencyId, actorId, correlationId) {
+  const agency = await prisma.agency.findUnique({ where: { id: agencyId } });
+  if (!agency) return { success: false, errorCode: 'NOT_FOUND', errorMessage: 'Agency not found.' };
+
+  const subscriptions = await prisma.recordStoreSubscription.findMany({
+    where: { agencyId },
+    include: { template: true },
+  });
+
+  // ---- Real Boberdoo side first, best-effort ---------------------------
+  const boberdooWarnings = [];
+  for (const sub of subscriptions) {
+    if (!sub.boberdooFilterSetId) continue; // never provisioned — nothing to turn off
+    // eslint-disable-next-line no-await-in-loop
+    const result = isIprTemplate(sub.template)
+      ? await boberdoo.updateIprDailyVolume(sub.boberdooFilterSetId, 0)
+      : await boberdoo.setFilterSetStatus(agency.boberdooPartnerId, sub.boberdooFilterSetId, 0);
+    if (!result.success) {
+      boberdooWarnings.push({ subscriptionId: sub.id, productNameSnapshot: sub.productNameSnapshot, errorCode: result.errorCode, errorMessage: result.errorMessage });
+    }
+  }
+
+  let partnerDeactivateWarning = null;
+  if (agency.boberdooPartnerId) {
+    const partnerResult = await boberdoo.setPartnerStatus(agency.boberdooPartnerId, 0, 'Record Store — reset to never-purchased state');
+    if (!partnerResult.success) {
+      partnerDeactivateWarning = { errorCode: partnerResult.errorCode, errorMessage: partnerResult.errorMessage };
+    }
+  }
+
+  // ---- Local wipe — always runs, regardless of the Boberdoo outcomes ---
+  const subscriptionIds = subscriptions.map((s) => s.id);
+  const wipedCounts = await prisma.$transaction(async (tx) => {
+    const leadsDetached = (await tx.lead.updateMany({
+      where: { recordStoreSubscriptionId: { in: subscriptionIds } },
+      data: { recordStoreSubscriptionId: null, recordStoreSourceCode: null },
+    })).count;
+
+    // Required FK — must go before the parent Subscription delete below.
+    const sourceOptimizations = (await tx.recordStoreSourceOptimization.deleteMany({
+      where: { recordStoreSubscriptionId: { in: subscriptionIds } },
+    })).count;
+
+    // Real Stripe-charge rows — detached, never deleted.
+    const fundingPaymentsDetached = (await tx.recordStoreFundingPayment.updateMany({
+      where: { recordStoreSubscriptionId: { in: subscriptionIds } },
+      data: { recordStoreSubscriptionId: null },
+    })).count;
+
+    // Quote-negotiation rows — deleted entirely; no quote history needs to
+    // survive a "looks brand new" reset. Must go before Subscription
+    // delete below (recordStoreSubscriptionId is a real FK on this model).
+    const customRequests = (await tx.recordStoreCustomRequest.deleteMany({ where: { agencyId } })).count;
+
+    const subscriptionsDeleted = (await tx.recordStoreSubscription.deleteMany({ where: { agencyId } })).count;
+
+    await tx.agency.update({
+      where: { id: agencyId },
+      data: {
+        boberdooPartnerStatus: 0,
+        boberdooSyncStatus: 'SYNCED',
+        boberdooSyncError: null,
+        boberdooLastSyncAt: new Date(),
+        recordStoreDepositConfirmedAt: null,
+        recordStoreBalanceCents: null,
+        recordStoreBalanceCheckedAt: null,
+        // boberdooPartnerId deliberately left untouched — see header comment.
+      },
+    });
+
+    return { subscriptions: subscriptionsDeleted, customRequests, sourceOptimizations, leadsDetached, fundingPaymentsDetached };
+  }, { timeout: 30000 });
+
+  await recordAudit({
+    actorId,
+    agencyId,
+    action: 'RECORD_STORE_AGENCY_RESET',
+    entityType: 'Agency',
+    entityId: agencyId,
+    after: { wipedCounts, boberdooWarnings, partnerDeactivateWarning },
+    correlationId,
+  });
+
+  return { success: true, wipedCounts, boberdooWarnings, partnerDeactivateWarning };
+}
+
 // ---- Daily volume change ------------------------------------------------
 
 async function changeDailyVolume(subscriptionId, newVolume, actorId, correlationId) {
@@ -969,6 +1079,7 @@ module.exports = {
   resumeSubscription,
   pauseAccount,
   resumeAccount,
+  resetAgencyRecordStore,
   changeDailyVolume,
   updateAcceptedSources,
   linkExistingPartner,

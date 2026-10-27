@@ -12,6 +12,7 @@ const bcrypt = require('bcryptjs');
 const { prisma } = require('../lib/db');
 const { createSession } = require('../lib/auth');
 const boberdoo = require('../lib/boberdoo');
+const provisioning = require('../lib/recordStoreProvisioning');
 const app = require('../app');
 
 const suffix = Date.now();
@@ -388,5 +389,61 @@ test('POST /admin/agencies/:id/import-filter-set is Platform-Owner-only and pull
     await prisma.recordStoreSubscription.delete({ where: { id: created.id } });
   } finally {
     await prisma.agency.delete({ where: { id: importAgency.id } });
+  }
+});
+
+// ---- Reset an agency's Record Store data to a never-purchased state -----
+
+test('GET/POST .../reset-record-store are Platform-Owner-only, require an exact agency-name confirm, and succeed with real counts', async () => {
+  const resetAgency = await prisma.agency.create({ data: { name: `Reset Route Test Agency ${suffix}`, address: '1 Main St', city: 'Austin', state: 'TX', zip: '78701' } });
+  const resetOwner = await prisma.user.create({
+    data: { email: `reset-owner-${suffix}@test.local`, passwordHash: await bcrypt.hash('TestPass123!', 12), firstName: 'Reset', lastName: 'Owner', role: 'AGENCY_OWNER', agencyId: resetAgency.id, status: 'ACTIVE', phone: '5125551234' },
+  });
+  try {
+    fakeHappyBoberdoo();
+    const template = await prisma.recordStoreTemplate.findUnique({ where: { id: fixedTemplateId } });
+    const { subscription } = await provisioning.createOrder({ agencyId: resetAgency.id, template, dailyVolume: 10, userId: resetOwner.id });
+    await provisioning.provisionSubscription(subscription.id);
+
+    const forbiddenPreview = await fetch(`${baseUrl}/api/record-store/admin/agencies/${resetAgency.id}/reset-record-store-preview`, { headers: { Cookie: ownerCookie } });
+    assert.equal(forbiddenPreview.status, 403);
+
+    const previewRes = await fetch(`${baseUrl}/api/record-store/admin/agencies/${resetAgency.id}/reset-record-store-preview`, { headers: { Cookie: platformOwnerCookie } });
+    assert.equal(previewRes.status, 200);
+    const preview = await previewRes.json();
+    assert.equal(preview.agency.name, resetAgency.name);
+    assert.equal(preview.ownerEmail, resetOwner.email);
+    assert.equal(preview.counts.subscriptions, 1);
+
+    const forbiddenReset = await fetch(`${baseUrl}/api/record-store/admin/agencies/${resetAgency.id}/reset-record-store`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+      body: JSON.stringify({ confirmText: resetAgency.name }),
+    });
+    assert.equal(forbiddenReset.status, 403);
+
+    const wrongNameRes = await fetch(`${baseUrl}/api/record-store/admin/agencies/${resetAgency.id}/reset-record-store`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: platformOwnerCookie },
+      body: JSON.stringify({ confirmText: 'not the right name' }),
+    });
+    assert.equal(wrongNameRes.status, 400);
+    assert.equal((await wrongNameRes.json()).error, 'CONFIRMATION_MISMATCH');
+    assert.ok(await prisma.recordStoreSubscription.findUnique({ where: { id: subscription.id } }), 'a failed confirm must make zero changes');
+
+    const resetRes = await fetch(`${baseUrl}/api/record-store/admin/agencies/${resetAgency.id}/reset-record-store`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: platformOwnerCookie },
+      body: JSON.stringify({ confirmText: resetAgency.name }),
+    });
+    assert.equal(resetRes.status, 200);
+    const resetBody = await resetRes.json();
+    assert.equal(resetBody.wipedCounts.subscriptions, 1);
+    assert.equal(await prisma.recordStoreSubscription.findUnique({ where: { id: subscription.id } }), null);
+
+    const customersRes = await fetch(`${baseUrl}/api/record-store/admin/customers`, { headers: { Cookie: platformOwnerCookie } });
+    const customers = (await customersRes.json()).agencies;
+    assert.equal(customers.some((a) => a.id === resetAgency.id), false, 'an agency with zero subscriptions after reset drops out of the customers list');
+  } finally {
+    await prisma.recordStoreSubscription.deleteMany({ where: { agencyId: resetAgency.id } });
+    await prisma.user.delete({ where: { id: resetOwner.id } });
+    await prisma.agency.delete({ where: { id: resetAgency.id } });
   }
 });
