@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { Button, LeadTypeIcon, EmptyState } from '../ui';
+import { Button, Card, LeadTypeIcon, EmptyState } from '../ui';
 import LeadDetailModal from './LeadDetailModal';
 import BulkLeadUploadBox from './BulkLeadUploadBox';
 import AddClosedSaleModal from './AddClosedSaleModal';
@@ -38,6 +38,11 @@ export default function AgencyLeadsPanel() {
   // Owner, who have no toggle at all); 'mine' re-fetches with
   // assignedToId=self so a selling Manager can see just her own book.
   const [scopeMode, setScopeMode] = useState('all');
+  // Whole-agency open-lead workload snapshot — independent of the scope/
+  // filter/page state above, since the point is visibility into every
+  // producer's own pile, not just whatever's currently being viewed.
+  const [producerCounts, setProducerCounts] = useState(null);
+  const [showProducerCounts, setShowProducerCounts] = useState(true);
 
   const stage = searchParams.get('stage');
   const from = searchParams.get('from');
@@ -49,6 +54,16 @@ export default function AgencyLeadsPanel() {
   useEffect(() => {
     load();
   }, [stage, from, to, scopeMode, typeFilter, sort, page]);
+
+  useEffect(() => {
+    api.leadCountsByProducer().then((data) => {
+      const sorted = [...data.producers].sort((a, b) => b.openCount - a.openCount);
+      setProducerCounts({ producers: sorted, unassignedCount: data.unassignedCount });
+    }).catch(() => {
+      // Non-critical to the main leads list — fails silently, same
+      // convention as this page's own vendor/producer-picker loads.
+    });
+  }, []);
 
   useEffect(() => {
     if (!highlightId || handledHighlightRef.current || leads.length === 0) return;
@@ -133,6 +148,33 @@ export default function AgencyLeadsPanel() {
           <button style={s.smallButton} onClick={() => setShowAddLead(!showAddLead)} data-tour="leads-add-button">+ ADD LEAD</button>
         </div>
       </div>
+      {producerCounts && (
+        <Card style={s.producerCountsCard}>
+          <div style={s.producerCountsHeader}>
+            <div style={s.producerCountsTitle}>LEADS BY PRODUCER (open/workable)</div>
+            <button style={s.smallButtonOutline} onClick={() => setShowProducerCounts((v) => !v)}>
+              {showProducerCounts ? 'HIDE' : 'SHOW'}
+            </button>
+          </div>
+          {showProducerCounts && (
+            <div style={s.producerCountsGrid}>
+              {producerCounts.producers.map((p) => (
+                <div key={p.id} style={s.producerCountRow}>
+                  <span style={s.producerCountName}>{p.firstName} {p.lastName}</span>
+                  <span style={s.producerCountValue}>{p.openCount}</span>
+                </div>
+              ))}
+              {producerCounts.unassignedCount > 0 && (
+                <div style={s.producerCountRow}>
+                  <span style={s.producerCountName}>Unassigned</span>
+                  <span style={s.producerCountValue}>{producerCounts.unassignedCount}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </Card>
+      )}
+
       {showUpload && (
         <BulkLeadUploadBox agencyId={user?.agencyId} onImported={load} />
       )}
@@ -228,4 +270,11 @@ const s = {
   rowSub: { color: 'var(--text-muted)', fontSize: 12 },
   badge: { fontSize: 11, color: 'var(--text-secondary)', border: '1px solid var(--border-strong)', padding: '4px 8px', borderRadius: 4 },
   empty: { color: 'var(--text-muted)', fontStyle: 'italic' },
+  producerCountsCard: { marginBottom: 18, padding: 14 },
+  producerCountsHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  producerCountsTitle: { fontSize: 11, letterSpacing: 1, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' },
+  producerCountsGrid: { display: 'flex', flexWrap: 'wrap', gap: 8 },
+  producerCountRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 8, fontSize: 13 },
+  producerCountName: { color: 'var(--text-secondary)' },
+  producerCountValue: { color: 'var(--text-primary)', fontWeight: 700 },
 };

@@ -35,6 +35,7 @@ export default function ClosedSalesPanel() {
   const [error, setError] = useState('');
   const [editingSale, setEditingSale] = useState(null);
   const [sort, setSort] = useState({ key: 'date', dir: 'desc' });
+  const [showByProducer, setShowByProducer] = useState(true);
   // A real customer-name search — finds a Closed Sale by name regardless
   // of the selected date range, same convenience Find a Lead already
   // gives leads (see api.sales' ?q= handling server-side).
@@ -107,6 +108,25 @@ export default function ClosedSalesPanel() {
     count: acc.count + 1,
   }), { items: 0, premiumCents: 0, count: 0 }), [sales]);
 
+  // Per-LSP (producer) subtotal breakdown — additive to the single grand
+  // total above, so the flat table stays freely sortable by any column
+  // while still answering "what did each producer actually sell" without
+  // manually re-adding each line by hand. Same voided-exclusion as totals.
+  const byProducer = useMemo(() => {
+    const map = new Map();
+    for (const sale of sales) {
+      if (sale.voidedAt) continue;
+      const key = sale.assignedTo ? sale.assignedTo.id : 'unassigned';
+      const name = sale.assignedTo ? `${sale.assignedTo.firstName} ${sale.assignedTo.lastName}` : 'Unassigned';
+      const entry = map.get(key) || { name, items: 0, premiumCents: 0, count: 0 };
+      entry.items += sale.items || 0;
+      entry.premiumCents += sale.premiumCents || 0;
+      entry.count += 1;
+      map.set(key, entry);
+    }
+    return [...map.values()].sort((a, b) => b.premiumCents - a.premiumCents);
+  }, [sales]);
+
   function toggleSort(key) {
     setSort((prev) => (prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'date' || key === 'premium' || key === 'items' ? 'desc' : 'asc' }));
   }
@@ -152,6 +172,27 @@ export default function ClosedSalesPanel() {
         <Button type="submit" size="sm">SEARCH</Button>
         {activeSearch && <Button type="button" variant="secondary" size="sm" onClick={clearSearch}>CLEAR</Button>}
       </form>
+
+      {!isProducer && byProducer.length > 0 && (
+        <Card style={s.byProducerCard}>
+          <div style={s.byProducerHeader}>
+            <div style={s.byProducerTitle}>TOTALS BY PRODUCER (LSP)</div>
+            <button style={s.retryButton} onClick={() => setShowByProducer((v) => !v)}>{showByProducer ? 'HIDE' : 'SHOW'}</button>
+          </div>
+          {showByProducer && (
+            <div style={s.byProducerGrid}>
+              {byProducer.map((p) => (
+                <div key={p.name} style={s.byProducerRow}>
+                  <span style={s.byProducerName}>{p.name}</span>
+                  <span style={s.byProducerStat}>{p.count} sale{p.count === 1 ? '' : 's'}</span>
+                  <span style={s.byProducerStat}>{p.items} item{p.items === 1 ? '' : 's'}</span>
+                  <span style={s.byProducerStatStrong}>{money(p.premiumCents)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
 
       {editingSale && (
         <AddClosedSaleModal
@@ -233,4 +274,12 @@ const s = {
   colPremium: { fontWeight: 600 },
   colItems: { color: 'var(--text-secondary)' },
   colAssigned: { display: 'flex', alignItems: 'center' },
+  byProducerCard: { marginBottom: 18, padding: 14 },
+  byProducerHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  byProducerTitle: { fontSize: 11, letterSpacing: 1, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' },
+  byProducerGrid: { display: 'flex', flexWrap: 'wrap', gap: 8 },
+  byProducerRow: { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-hairline)', borderRadius: 8, fontSize: 13 },
+  byProducerName: { color: 'var(--text-secondary)', fontWeight: 600 },
+  byProducerStat: { color: 'var(--text-muted)', fontSize: 12 },
+  byProducerStatStrong: { color: 'var(--text-primary)', fontWeight: 700 },
 };

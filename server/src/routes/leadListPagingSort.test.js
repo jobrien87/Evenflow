@@ -108,3 +108,32 @@ test('a producer cannot widen sales scope with assignedToId', async () => {
   assert.ok(body.sales.every((s) => s.assignedToId === producerId));
   assert.equal(await prisma.sale.count({ where: { agencyId } }), 2, 'the other producer sale exists');
 });
+
+test('GET /leads/counts-by-producer gives each producer their real open-lead count, is Owner/Manager-only, and lists an idle producer at 0', async () => {
+  const forbidden = await fetch(`${baseUrl}/api/leads/counts-by-producer`, { headers: { Cookie: producerCookie } });
+  assert.equal(forbidden.status, 403);
+
+  const idleOwner = await bcrypt.hash('TestPass123!', 12);
+  const idleProducer = await prisma.user.create({
+    data: { email: `paging-idle-${suffix}@test.local`, passwordHash: idleOwner, firstName: 'Paging', lastName: 'Idle', role: 'PRODUCER', agencyId, status: 'ACTIVE' },
+  });
+
+  const unassignedCustomer = await prisma.customer.create({ data: { firstName: 'Unassigned', lastName: `L${suffix}` } });
+  const unassignedLead = await prisma.lead.create({
+    data: { agencyId, customerId: unassignedCustomer.id, source: 'manual', status: 'NEW', product: 'Auto', leadType: 'INTERNET', createdById: ownerId },
+  });
+
+  try {
+    const body = await get('/api/leads/counts-by-producer', ownerCookie);
+    assert.equal(body.success, true);
+    const byId = Object.fromEntries(body.producers.map((p) => [p.id, p.openCount]));
+    assert.equal(byId[producerId], 30);
+    assert.equal(byId[producer2Id], 3);
+    assert.equal(byId[idleProducer.id], 0, 'a producer with zero open leads must still be listed, not omitted');
+    assert.equal(body.unassignedCount, 1);
+  } finally {
+    await prisma.lead.delete({ where: { id: unassignedLead.id } });
+    await prisma.customer.delete({ where: { id: unassignedCustomer.id } });
+    await prisma.user.delete({ where: { id: idleProducer.id } });
+  }
+});

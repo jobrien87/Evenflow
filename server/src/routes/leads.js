@@ -20,7 +20,7 @@ const { parseHistoricalFileWithAi } = require('../lib/historicalDataImport');
 const { resolveManualAssignment } = require('../lib/leadDistribution');
 const { eligibleProducersWhere } = require('../lib/eligibleProducersQuery');
 const { computeZipBreakdown } = require('../lib/zipBreakdown');
-const { QUOTED_OR_BEYOND_STATUSES } = require('../lib/leadStatusGroups');
+const { QUOTED_OR_BEYOND_STATUSES, ACTIVE_LEAD_STATUSES } = require('../lib/leadStatusGroups');
 const { sendZipReportEmail } = require('../lib/email');
 
 const router = express.Router();
@@ -134,6 +134,46 @@ router.get('/', async (req, res, next) => {
     ]);
 
     return res.json({ success: true, leads, page, pageSize, total });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Per-producer open-lead-count snapshot — answers "how many leads does
+// each agent currently have" and "are we actually working the pile
+// down," which the paginated GET / list alone can't show (it only ever
+// returns one page at a time). Counts ACTIVE_LEAD_STATUSES only
+// (leadStatusGroups.js) — a producer's current, still-workable load, not
+// their lifetime total including everything already closed out. Every
+// eligible producer is listed even at 0, so an idle producer is visible
+// too, not just a busy one.
+router.get('/counts-by-producer', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const agencyId = scopeAgencyId(req);
+    if (!agencyId) return res.status(400).json({ success: false, error: 'AGENCY_REQUIRED' });
+
+    const producers = await prisma.user.findMany({
+      where: eligibleProducersWhere(agencyId),
+      select: { id: true, firstName: true, lastName: true },
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+    });
+
+    const counts = await prisma.lead.groupBy({
+      by: ['assignedToId'],
+      where: { agencyId, archivedAt: null, status: { in: ACTIVE_LEAD_STATUSES }, assignedToId: { not: null } },
+      _count: { _all: true },
+    });
+    const countByUserId = new Map(counts.map((c) => [c.assignedToId, c._count._all]));
+
+    const unassignedCount = await prisma.lead.count({
+      where: { agencyId, archivedAt: null, status: { in: ACTIVE_LEAD_STATUSES }, assignedToId: null },
+    });
+
+    return res.json({
+      success: true,
+      producers: producers.map((p) => ({ id: p.id, firstName: p.firstName, lastName: p.lastName, openCount: countByUserId.get(p.id) || 0 })),
+      unassignedCount,
+    });
   } catch (err) {
     next(err);
   }

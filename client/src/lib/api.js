@@ -38,6 +38,7 @@ export const api = {
   startMyDay: () => request('/start-my-day'),
 
   leads: (params = '') => request(`/leads${params}`),
+  leadCountsByProducer: (params = '') => request(`/leads/counts-by-producer${params}`),
   searchLeads: (params = '') => request(`/leads/search${params}`),
   soldLeadsMissingSale: () => request('/leads/sold-missing-sale'),
   leadDetail: (id) => request(`/leads/${id}`),
