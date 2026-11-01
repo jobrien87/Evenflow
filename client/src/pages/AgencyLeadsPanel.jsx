@@ -7,6 +7,7 @@ import LeadDetailModal from './LeadDetailModal';
 import BulkLeadUploadBox from './BulkLeadUploadBox';
 import AddClosedSaleModal from './AddClosedSaleModal';
 import LeadSearchBox from './LeadSearchBox';
+import { LeadTypeSortControls, LeadPager, LEAD_PAGE_SIZE } from '../ui/LeadListControls';
 import { LEAD_TYPE_LABELS } from '../lib/leadTypeMeta';
 
 // Extracted out of AgencyOwnerDashboard (Main Stage) into its own "Leads"
@@ -26,6 +27,10 @@ export default function AgencyLeadsPanel() {
   const [showAddSale, setShowAddSale] = useState(false);
   const [leadForm, setLeadForm] = useState({ firstName: '', lastName: '', phone: '', email: '', product: 'Auto', assignedToId: '', leadTypeOverride: '', vendorId: '', isLiveTransfer: false });
   const [leadStatus, setLeadStatus] = useState('');
+  const [total, setTotal] = useState(0);
+  const [typeFilter, setTypeFilter] = useState('');
+  const [sort, setSort] = useState('priority');
+  const [page, setPage] = useState(1);
   const [loadError, setLoadError] = useState('');
   // Real server-side scope for a Manager, not a client-side filter of the
   // already-fetched agency-wide list: 'all' sends no assignedToId param
@@ -43,7 +48,7 @@ export default function AgencyLeadsPanel() {
 
   useEffect(() => {
     load();
-  }, [stage, from, to, scopeMode]);
+  }, [stage, from, to, scopeMode, typeFilter, sort, page]);
 
   useEffect(() => {
     if (!highlightId || handledHighlightRef.current || leads.length === 0) return;
@@ -54,7 +59,8 @@ export default function AgencyLeadsPanel() {
 
   async function load() {
     setLoadError('');
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({ pageSize: String(LEAD_PAGE_SIZE), page: String(page), sort });
+    if (typeFilter) params.set('leadType', typeFilter);
     if (stageFilter) {
       params.set('stage', stageFilter.stage);
       params.set('from', stageFilter.from);
@@ -67,6 +73,7 @@ export default function AgencyLeadsPanel() {
     try {
       const [leadData, userData, vendorData] = await Promise.all([api.leads(qs ? `?${qs}` : ''), api.users(''), api.vendors()]);
       setLeads(leadData.leads);
+      setTotal(leadData.total);
       // A selling AGENCY_MANAGER (e.g. Julie) must be a selectable credit
       // target here too, not just a plain PRODUCER — same
       // eligible-production-roles rule as Closed Sale's own producer
@@ -110,12 +117,12 @@ export default function AgencyLeadsPanel() {
       )}
 
       <div style={s.headerRow}>
-        <h3 style={s.h3}>LEADS ({leads.length}){stageFilter ? ` · ${stageFilter.stage.toUpperCase()}` : ''}{isManager ? ` · ${scopeMode === 'mine' ? 'MY LEADS' : 'ALL LEADS'}` : ''}</h3>
+        <h3 style={s.h3}>LEADS ({total}){stageFilter ? ` · ${stageFilter.stage.toUpperCase()}` : ''}{isManager ? ` · ${scopeMode === 'mine' ? 'MY LEADS' : 'ALL LEADS'}` : ''}</h3>
         <div style={{ display: 'flex', gap: 8 }}>
           {isManager && (
             <div style={s.scopeToggle}>
-              <button style={scopeMode === 'all' ? s.scopeButtonActive : s.scopeButton} onClick={() => setScopeMode('all')}>ALL LEADS</button>
-              <button style={scopeMode === 'mine' ? s.scopeButtonActive : s.scopeButton} onClick={() => setScopeMode('mine')}>MY LEADS</button>
+              <button style={scopeMode === 'all' ? s.scopeButtonActive : s.scopeButton} onClick={() => { setScopeMode('all'); setPage(1); }}>ALL LEADS</button>
+              <button style={scopeMode === 'mine' ? s.scopeButtonActive : s.scopeButton} onClick={() => { setScopeMode('mine'); setPage(1); }}>MY LEADS</button>
             </div>
           )}
           {stageFilter && (
@@ -169,6 +176,9 @@ export default function AgencyLeadsPanel() {
         </form>
       )}
       {leadStatus && <div style={s.status}>{leadStatus}</div>}
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+        <LeadTypeSortControls leadType={typeFilter} sort={sort} onLeadType={(v) => { setTypeFilter(v); setPage(1); }} onSort={(v) => { setSort(v); setPage(1); }} />
+      </div>
       {leads.map((l) => (
         <div
           key={l.id}
@@ -188,6 +198,7 @@ export default function AgencyLeadsPanel() {
         </div>
       ))}
       {leads.length === 0 && <div style={s.empty}>No leads yet.</div>}
+      <LeadPager page={page} total={total} onPage={setPage} />
 
       {openLeadId && (
         <LeadDetailModal leadId={openLeadId} onClose={() => setOpenLeadId(null)} onChanged={load} />

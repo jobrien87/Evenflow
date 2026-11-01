@@ -301,8 +301,9 @@ router.get('/', requireRole(...CREATE_ROLES), async (req, res, next) => {
 
     const where = {
       agencyId,
-      ...(req.user.role === 'PRODUCER' ? { assignedToId: req.user.id } : {}),
       ...(req.query.assignedToId ? { assignedToId: req.query.assignedToId } : {}),
+      // Applied after the query filter so a producer can never widen scope.
+      ...(req.user.role === 'PRODUCER' ? { assignedToId: req.user.id } : {}),
       ...(req.query.officeId ? { officeId: req.query.officeId } : {}),
       ...(req.query.productFamily ? { productFamily: req.query.productFamily } : {}),
       ...(req.query.includeVoided === 'true' ? {} : { voidedAt: null }),

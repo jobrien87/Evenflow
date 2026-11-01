@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../lib/AuthContext';
 import { api } from '../lib/api';
 import { Card, Badge, Button, SectionHeader, DateRangeFilter, EmptyState } from '../ui';
@@ -34,6 +34,7 @@ export default function ClosedSalesPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [editingSale, setEditingSale] = useState(null);
+  const [sort, setSort] = useState({ key: 'date', dir: 'desc' });
   // A real customer-name search — finds a Closed Sale by name regardless
   // of the selected date range, same convenience Find a Lead already
   // gives leads (see api.sales' ?q= handling server-side).
@@ -80,6 +81,39 @@ export default function ClosedSalesPanel() {
     setSearchInput('');
     setActiveSearch('');
   }
+
+  const sortedSales = useMemo(() => {
+    const val = (sale) => {
+      if (sort.key === 'date') return new Date(sale.saleDate).getTime();
+      if (sort.key === 'lsp') return sale.assignedTo ? `${sale.assignedTo.lastName} ${sale.assignedTo.firstName}`.toLowerCase() : '';
+      if (sort.key === 'product') return (PRODUCT_META[sale.productFamily]?.label || sale.productFamily || '').toLowerCase();
+      if (sort.key === 'carrier') return (sale.carrier || '').toLowerCase();
+      if (sort.key === 'premium') return sale.premiumCents || 0;
+      if (sort.key === 'items') return sale.items || 0;
+      return '';
+    };
+    const mult = sort.dir === 'asc' ? 1 : -1;
+    return [...sales].sort((a, b) => {
+      const x = val(a);
+      const y = val(b);
+      return (x < y ? -1 : x > y ? 1 : 0) * mult;
+    });
+  }, [sales, sort]);
+
+  // Voided sales are listed but never counted toward totals.
+  const totals = useMemo(() => sales.filter((x) => !x.voidedAt).reduce((acc, x) => ({
+    items: acc.items + (x.items || 0),
+    premiumCents: acc.premiumCents + (x.premiumCents || 0),
+    count: acc.count + 1,
+  }), { items: 0, premiumCents: 0, count: 0 }), [sales]);
+
+  function toggleSort(key) {
+    setSort((prev) => (prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'date' || key === 'premium' || key === 'items' ? 'desc' : 'asc' }));
+  }
+  const arrow = (key) => (sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '');
+  const sortHead = (key, label, style) => (
+    <div style={{ ...style, cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort(key)}>{label}{arrow(key)}</div>
+  );
 
   if (loading) return <div style={s.wrap}>Loading…</div>;
 
@@ -141,15 +175,15 @@ export default function ClosedSalesPanel() {
         ) : (
           <div style={s.table}>
             <div style={s.headerRowTable}>
-              <div style={s.colDate}>Date</div>
+              {sortHead('date', 'Date', s.colDate)}
               <div style={s.colCustomer}>Customer</div>
-              <div style={s.colPolicy}>Carrier / Policy</div>
-              <div style={s.colProduct}>Product</div>
-              <div style={s.colPremium}>Premium</div>
-              <div style={s.colItems}>Items</div>
-              <div style={s.colAssigned}>Assigned To</div>
+              {sortHead('carrier', 'Carrier / Policy', s.colPolicy)}
+              {sortHead('product', 'Product', s.colProduct)}
+              {sortHead('premium', 'Premium', s.colPremium)}
+              {sortHead('items', 'Items', s.colItems)}
+              {sortHead('lsp', 'Assigned To (LSP)', s.colAssigned)}
             </div>
-            {sales.map((sale) => (
+            {sortedSales.map((sale) => (
               <div key={sale.id} style={s.row} onClick={() => setEditingSale(sale)}>
                 <div style={s.colDate}>{new Date(sale.saleDate).toLocaleDateString()}</div>
                 <div style={s.colCustomer}>{sale.firstName} {sale.lastName}</div>
@@ -163,6 +197,15 @@ export default function ClosedSalesPanel() {
                 </div>
               </div>
             ))}
+            <div style={s.totalsRow}>
+              <div style={s.colDate} />
+              <div style={s.colCustomer}>TOTAL ({totals.count} sale{totals.count === 1 ? '' : 's'})</div>
+              <div style={s.colPolicy} />
+              <div style={s.colProduct} />
+              <div style={s.colPremium}>{money(totals.premiumCents)}</div>
+              <div style={s.colItems}>{totals.items}</div>
+              <div style={s.colAssigned} />
+            </div>
           </div>
         )}
       </Card>
@@ -182,6 +225,7 @@ const s = {
   table: { display: 'flex', flexDirection: 'column' },
   headerRowTable: { display: 'grid', gridTemplateColumns: '100px 1.3fr 1.3fr 1fr 110px 70px 1.2fr', gap: 10, padding: '8px 4px', fontSize: 11, letterSpacing: 0.5, textTransform: 'uppercase', color: 'var(--text-muted)', borderBottom: '1px solid var(--border-hairline)' },
   row: { display: 'grid', gridTemplateColumns: '100px 1.3fr 1.3fr 1fr 110px 70px 1.2fr', gap: 10, padding: '10px 4px', fontSize: 13, color: 'var(--text-primary)', borderBottom: '1px solid var(--border-hairline)', cursor: 'pointer' },
+  totalsRow: { display: 'grid', gridTemplateColumns: '100px 1.3fr 1.3fr 1fr 110px 70px 1.2fr', gap: 10, padding: '12px 4px', fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', borderTop: '2px solid var(--border-strong)' },
   colDate: { color: 'var(--text-secondary)' },
   colCustomer: { fontWeight: 600 },
   colPolicy: { color: 'var(--text-secondary)' },

@@ -7,6 +7,7 @@ import LeadDetailModal from './LeadDetailModal';
 import AddClosedSaleModal from './AddClosedSaleModal';
 import AddLeadModal from './AddLeadModal';
 import LeadSearchBox from './LeadSearchBox';
+import { LeadTypeSortControls, LeadPager, LEAD_PAGE_SIZE } from '../ui/LeadListControls';
 
 const PERIODS = [
   { key: 'month', label: 'This month', from: () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); } },
@@ -35,6 +36,9 @@ export default function MyLeadsPanel() {
   const [error, setError] = useState('');
   const [openLeadId, setOpenLeadId] = useState(null);
   const [statusFilter, setStatusFilter] = useState('');
+  const [typeFilter, setTypeFilter] = useState('');
+  const [sort, setSort] = useState('priority');
+  const [page, setPage] = useState(1);
   const [showAddSale, setShowAddSale] = useState(false);
   const [showAddLead, setShowAddLead] = useState(false);
 
@@ -44,7 +48,12 @@ export default function MyLeadsPanel() {
 
   useEffect(() => {
     loadLeads();
-  }, [statusFilter, user?.id]);
+  }, [statusFilter, typeFilter, sort, page, user?.id]);
+
+  // Any filter/sort change returns to page 1.
+  function changeFilter(setter) {
+    return (v) => { setter(v); setPage(1); };
+  }
 
   async function load() {
     if (!user?.id) return;
@@ -66,7 +75,10 @@ export default function MyLeadsPanel() {
 
   async function loadLeads() {
     try {
-      const params = statusFilter ? `?status=${statusFilter}&pageSize=100` : '?pageSize=100';
+      const q = new URLSearchParams({ pageSize: String(LEAD_PAGE_SIZE), page: String(page), sort });
+      if (statusFilter) q.set('status', statusFilter);
+      if (typeFilter) q.set('leadType', typeFilter);
+      const params = `?${q.toString()}`;
       const data = await api.leads(params);
       setLeads(data.leads);
       setTotal(data.total);
@@ -158,13 +170,14 @@ export default function MyLeadsPanel() {
 
       <section style={s.section}>
         <div style={s.headerRow}>
-          <SectionHeader>Your Leads</SectionHeader>
-          <select style={s.filterSelect} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} data-tour="my-leads-status-filter">
+          <SectionHeader>Your Leads ({total})</SectionHeader>
+          <select style={s.filterSelect} value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }} data-tour="my-leads-status-filter">
             <option value="">All statuses</option>
             {['NEW', 'CONTACTED', 'APPOINTMENT', 'QUOTED', 'FOLLOW_UP', 'SOLD', 'LOST'].map((st) => (
               <option key={st} value={st}>{st.replace(/_/g, ' ')}</option>
             ))}
           </select>
+          <LeadTypeSortControls leadType={typeFilter} sort={sort} onLeadType={changeFilter(setTypeFilter)} onSort={changeFilter(setSort)} />
         </div>
 
         {leads.length === 0 ? (
@@ -193,6 +206,7 @@ export default function MyLeadsPanel() {
             ))}
           </Card>
         )}
+        <LeadPager page={page} total={total} onPage={setPage} />
       </section>
 
       {openLeadId && (

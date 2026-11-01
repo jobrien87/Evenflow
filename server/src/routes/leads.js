@@ -83,10 +83,21 @@ router.get('/', async (req, res, next) => {
       sold: { status: 'SOLD' },
     };
 
+    const LEAD_TYPES = ['TRANSFER', 'REFERRAL', 'PAID_AD', 'META_AD', 'GOOGLE_AD', 'INTERNET', 'DIRECT_MAIL', 'MANUAL', 'WINBACK', 'CROSS_SELL', 'AI_APPOINTMENT'];
+    // Whitelisted sort so a client can never inject an arbitrary orderBy.
+    // Default stays priority; `type` groups by lead type, then priority.
+    const SORTS = {
+      priority: [{ priorityScore: 'desc' }, { receivedAt: 'desc' }],
+      newest: [{ receivedAt: 'desc' }],
+      oldest: [{ receivedAt: 'asc' }],
+      type: [{ leadType: 'asc' }, { priorityScore: 'desc' }, { receivedAt: 'desc' }],
+    };
+
     const where = {
       ...(isTelemarketer ? { createdById: req.user.id } : agencyId ? { agencyId } : {}),
       ...(req.query.status ? { status: req.query.status } : {}),
       ...(req.query.source ? { source: req.query.source } : {}),
+      ...(LEAD_TYPES.includes(req.query.leadType) ? { leadType: req.query.leadType } : {}),
       ...(STAGE_FILTERS[req.query.stage] || {}),
       ...(req.query.from || req.query.to ? {
         receivedAt: {
@@ -115,7 +126,7 @@ router.get('/', async (req, res, next) => {
           vendor: { select: { id: true, name: true } },
           _count: { select: { activities: true, notes: true } },
         },
-        orderBy: [{ priorityScore: 'desc' }, { receivedAt: 'desc' }],
+        orderBy: SORTS[req.query.sort] || SORTS.priority,
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
