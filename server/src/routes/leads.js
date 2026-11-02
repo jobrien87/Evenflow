@@ -83,7 +83,7 @@ router.get('/', async (req, res, next) => {
       sold: { status: 'SOLD' },
     };
 
-    const LEAD_TYPES = ['TRANSFER', 'REFERRAL', 'PAID_AD', 'META_AD', 'GOOGLE_AD', 'INTERNET', 'DIRECT_MAIL', 'MANUAL', 'WINBACK', 'CROSS_SELL', 'AI_APPOINTMENT'];
+    const LEAD_TYPES = ['TRANSFER', 'REFERRAL', 'PAID_AD', 'META_AD', 'GOOGLE_AD', 'INTERNET', 'DIRECT_MAIL', 'MANUAL', 'WALK_IN', 'CALL_IN', 'DATA_LEAD', 'WINBACK', 'CROSS_SELL', 'AI_APPOINTMENT'];
     // Whitelisted sort so a client can never inject an arbitrary orderBy.
     // Default stays priority; `type` groups by lead type, then priority.
     const SORTS = {

@@ -17,8 +17,7 @@ import { PRODUCT_META } from '../lib/productMeta';
 // without opening the lead. Any other leadType, or a plain Cross-Sell
 // lead with no specific pair, falls through to the single-icon default.
 export default function LeadTypeIcon({ type, product, crossSellHaveProduct, size = 14, style }) {
-  const meta = LEAD_TYPE_META[type];
-  if (!meta) return null;
+  const meta = LEAD_TYPE_META[type] || { label: type || 'Lead', icon: 'tag', tone: 'neutral' };
   const tone = TONE_COLORS[meta.tone] || TONE_COLORS.neutral;
 
   if (type === 'CROSS_SELL' && crossSellHaveProduct) {

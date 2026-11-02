@@ -88,6 +88,16 @@ test('leadType filter narrows total; unknown type is ignored, not injected', asy
   assert.equal(bogus.total, 30);
 });
 
+test('leadType filter recognizes every real enum value, including ones with no fixture leads', async () => {
+  // WALK_IN/CALL_IN/DATA_LEAD have no leads in this fixture, but the filter
+  // must still *apply* (narrow to 0), not silently fall through to the
+  // unfiltered 30 the way an unrecognized value does.
+  for (const leadType of ['WALK_IN', 'CALL_IN', 'DATA_LEAD']) {
+    const body = await get(`/api/leads?leadType=${leadType}`, producerCookie);
+    assert.equal(body.total, 0, `${leadType} should narrow to zero matches, not fall through unfiltered`);
+  }
+});
+
 test('sort=type groups by lead type; unknown sort falls back safely', async () => {
   const body = await get('/api/leads?sort=type&pageSize=100', producerCookie);
   const types = body.leads.map((l) => l.leadType);
