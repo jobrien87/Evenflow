@@ -1,11 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
-import { Card, SectionHeader, StatTile, BarRow, Badge, Button, ExportButton, EmptyState, TrendChart, MonthSelector, Icon } from '../ui';
+import { Card, SectionHeader, StatTile, BarRow, SegmentedBar, Badge, Button, ExportButton, EmptyState, TrendChart, MonthSelector, Icon } from '../ui';
 import { money } from '../lib/format';
 import { downloadCsv } from '../lib/downloadCsv';
 import { PRODUCTS } from '../lib/productMeta';
+import { productColor, isFoldedToOther, productLegendEntries } from '../lib/productColorSlots';
 import AddClosedSaleModal from './AddClosedSaleModal';
+
+// Folds a vendor's per-product rows into SegmentedBar's {label, value,
+// color, detail} shape — any product past the palette's 8 fixed slots
+// merges into one shared "Other" segment instead of getting its own hue
+// (see productColorSlots.js).
+function buildVendorSegments(vendorRow) {
+  const bucket = new Map();
+  for (const p of vendorRow.products) {
+    const key = isFoldedToOther(p.label) ? 'Other' : p.label;
+    const existing = bucket.get(key) || { label: key, value: 0, premiumCents: 0, color: productColor(p.label) };
+    existing.value += p.soldCount;
+    existing.premiumCents += p.premiumCents;
+    bucket.set(key, existing);
+  }
+  return [...bucket.values()].map((s) => ({ ...s, detail: money(s.premiumCents) }));
+}
 
 // A SOLD disposition posts no revenue by itself — only an explicit Add
 // Closed Sale does (see server/src/routes/leads.js's disposition route
@@ -298,6 +315,45 @@ export default function BillboardPanel() {
         )}
       </Card>
 
+      <Card style={s.card}>
+        <div style={s.cardTitleRow}>
+          <div style={s.cardTitle}>POLICY TYPE BY SOURCE</div>
+          <ExportButton onExport={() => downloadCsv(
+            'billboard-policy-type-by-source',
+            data.byVendorProduct.flatMap((v) => v.products.map((p) => ({ vendorName: v.vendorName, product: p.label, soldCount: p.soldCount, premiumCents: p.premiumCents }))),
+            [
+              { key: 'vendorName', label: 'Vendor' },
+              { key: 'product', label: 'Policy Type' },
+              { key: 'soldCount', label: 'Policies Sold' },
+              { key: (r) => (r.premiumCents / 100).toFixed(2), label: 'Premium ($)' },
+            ]
+          )} />
+        </div>
+        {data.byVendorProduct.length === 0 ? (
+          <div style={s.empty}>No sales in this period yet.</div>
+        ) : (
+          <>
+            <div style={s.legendRow}>
+              {productLegendEntries(data.byVendorProduct.flatMap((v) => v.products.map((p) => p.label))).map((e) => (
+                <span key={e.label} style={s.legendItem}>
+                  <span style={{ ...s.legendSwatch, background: e.color }} />
+                  {e.label}
+                </span>
+              ))}
+            </div>
+            {data.byVendorProduct.map((v) => (
+              <div key={v.vendorId || 'direct'} style={s.vendorProductRow}>
+                <div style={s.vendorProductLabelRow}>
+                  <span style={s.rowName}>{v.vendorName}</span>
+                  <span style={s.rowStat}>{v.soldCount} sold · {money(v.premiumCents)}</span>
+                </div>
+                <SegmentedBar segments={buildVendorSegments(v)} total={v.soldCount} />
+              </div>
+            ))}
+          </>
+        )}
+      </Card>
+
       <Card style={s.card} data-tour="billboard-by-vendor">
         <div style={s.cardTitleRow}>
           <div style={s.cardTitle}>BY VENDOR</div>
@@ -377,4 +433,9 @@ const s = {
   rowRight: { display: 'flex', gap: 16 },
   rowStat: { fontSize: 13, color: 'var(--text-secondary)' },
   empty: { color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 13 },
+  legendRow: { display: 'flex', flexWrap: 'wrap', gap: 14, marginBottom: 14, paddingBottom: 10, borderBottom: '1px solid var(--border-hairline)' },
+  legendItem: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)' },
+  legendSwatch: { width: 10, height: 10, borderRadius: 3, flexShrink: 0 },
+  vendorProductRow: { marginBottom: 16 },
+  vendorProductLabelRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6, gap: 10 },
 };

@@ -26,6 +26,7 @@ const app = require('../app');
 
 const suffix = Date.now();
 let agencyId, ownerId, producerId, producer2Id, managerId, manager2Id, platformOwnerId, ownerCookie, producerCookie, managerCookie, manager2Cookie, platformOwnerCookie, server, baseUrl;
+let vendorId, foreignAgencyId, foreignVendorId;
 
 before(async () => {
   const agency = await prisma.agency.create({ data: { name: `Sales Test Agency ${suffix}` } });
@@ -74,6 +75,17 @@ before(async () => {
   const platformOwnerSession = await createSession(platformOwnerId);
   platformOwnerCookie = `evenflow_session=${platformOwnerSession.rawToken}`;
 
+  const vendor = await prisma.vendor.create({
+    data: { agencyId, name: `Sales Test Vendor ${suffix}`, email: `sales-vendor-${suffix}@test.local`, product: 'AUTO' },
+  });
+  vendorId = vendor.id;
+  const foreignAgency = await prisma.agency.create({ data: { name: `Sales Test Foreign Agency ${suffix}` } });
+  foreignAgencyId = foreignAgency.id;
+  const foreignVendor = await prisma.vendor.create({
+    data: { agencyId: foreignAgencyId, name: `Foreign Vendor ${suffix}`, email: `foreign-vendor-${suffix}@test.local`, product: 'AUTO' },
+  });
+  foreignVendorId = foreignVendor.id;
+
   await new Promise((resolve) => { server = http.createServer(app).listen(0, '127.0.0.1', resolve); });
   const port = server.address().port;
   baseUrl = `http://127.0.0.1:${port}`;
@@ -86,7 +98,9 @@ after(async () => {
   await prisma.session.deleteMany({ where: { userId: { in: [ownerId, producerId, producer2Id, managerId, manager2Id, platformOwnerId] } } });
   await prisma.user.deleteMany({ where: { agencyId } });
   await prisma.user.delete({ where: { id: platformOwnerId } }).catch(() => {});
+  await prisma.vendor.deleteMany({ where: { agencyId: { in: [agencyId, foreignAgencyId] } } });
   await prisma.agency.delete({ where: { id: agencyId } }).catch(() => {});
+  await prisma.agency.delete({ where: { id: foreignAgencyId } }).catch(() => {});
   await new Promise((resolve) => server.close(resolve));
   await prisma.$disconnect();
 });
@@ -123,6 +137,43 @@ test('a standalone sale reaches Billboard\'s byProducer and byProduct with the r
   const productRow = billboard.byProduct.find((p) => p.product === PRODUCT_LABELS.AUTO);
   assert.ok(productRow, 'the product row must appear');
   assert.equal(productRow.soldCount, 1);
+
+  await prisma.sale.delete({ where: { id: sale.id } });
+  await prisma.revenueEvent.deleteMany({ where: { notes: { contains: sale.id } } });
+});
+
+test('a sale can carry an explicit vendorId, rejects a vendor from another agency, and PATCH can set/validate it too', async () => {
+  const createRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ vendorId })),
+  });
+  assert.equal(createRes.status, 201);
+  const { sale } = await createRes.json();
+  assert.equal(sale.vendorId, vendorId);
+
+  const foreignRes = await fetch(`${baseUrl}/api/sales`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify(basePayload({ vendorId: foreignVendorId })),
+  });
+  assert.equal(foreignRes.status, 400);
+  const foreignBody = await foreignRes.json();
+  assert.equal(foreignBody.error, 'INVALID_VENDOR');
+
+  const patchForeignRes = await fetch(`${baseUrl}/api/sales/${sale.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ vendorId: foreignVendorId }),
+  });
+  assert.equal(patchForeignRes.status, 400);
+  const patchForeignBody = await patchForeignRes.json();
+  assert.equal(patchForeignBody.error, 'INVALID_VENDOR');
+
+  const clearRes = await fetch(`${baseUrl}/api/sales/${sale.id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
+    body: JSON.stringify({ notes: 'unrelated edit, vendor unchanged' }),
+  });
+  assert.equal(clearRes.status, 200);
+  const { sale: unchanged } = await clearRes.json();
+  assert.equal(unchanged.vendorId, vendorId, 'an edit that never mentions vendorId must leave it untouched');
 
   await prisma.sale.delete({ where: { id: sale.id } });
   await prisma.revenueEvent.deleteMany({ where: { notes: { contains: sale.id } } });

@@ -1280,6 +1280,14 @@ model Sale {
   // non-voided Sale against the same leadId before a second one is created.
   leadId         String?
   lead           Lead?    @relation(fields: [leadId], references: [id])
+  // Explicit vendor attribution set directly on this Sale — independent of
+  // any originating Lead. A Lead-linked sale can still derive its vendor
+  // from Lead.vendorId (unchanged); this is the only vendor signal a fully
+  // standalone sale (no Lead) can carry, since it has no Lead to inherit
+  // one from. Nullable — most manual sales have no vendor (Direct / No
+  // Vendor), same convention Lead.vendorId already uses.
+  vendorId       String?
+  vendor         Vendor?  @relation(fields: [vendorId], references: [id])
   firstName      String
   lastName       String
   businessName   String?
@@ -1352,6 +1360,7 @@ model Sale {
   @@index([assignedToId])
   @@index([customerId])
   @@index([leadId])
+  @@index([vendorId])
 }
 
 model LeadEvent {
@@ -1850,6 +1859,7 @@ model Vendor {
 
   credentials            VendorCredential[]
   leads                  Lead[]
+  sales                  Sale[]
   apiTransactions        ApiTransaction[]
   costEvents             CostEvent[]
   historicalRecords      HistoricalRecord[]

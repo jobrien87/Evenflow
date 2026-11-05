@@ -15,7 +15,7 @@ function emptyForm(keep = {}) {
     carrier: '', policyType: '', productFamily: PRODUCTS[0], policyNumber: '',
     premiumCents: '', revenueCents: '', items: '1',
     leadSource: '', priorCarrier: '', reason: '', notes: '',
-    officeId: '', assignedToId: '',
+    officeId: '', assignedToId: '', vendorId: '',
     // Any field in `keep` (a "Save & Add Another" carry-forward, or a
     // disposition-nudge prefill from a real Lead) overrides the blank
     // default above.
@@ -54,7 +54,7 @@ function formFromSale(sale) {
     policyNumber: sale.policyNumber || '',
     premiumCents: fromCents(sale.premiumCents), revenueCents: fromCents(sale.revenueCents), items: String(sale.items ?? 1),
     leadSource: sale.leadSource || '', priorCarrier: sale.priorCarrier || '', reason: sale.reason || '', notes: sale.notes || '',
-    officeId: sale.officeId || '', assignedToId: sale.assignedToId || '',
+    officeId: sale.officeId || '', assignedToId: sale.assignedToId || '', vendorId: sale.vendorId || '',
   };
 }
 
@@ -77,6 +77,7 @@ export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill, 
   const isProducer = user?.role === 'PRODUCER';
   const [producers, setProducers] = useState([]);
   const [offices, setOffices] = useState([]);
+  const [vendors, setVendors] = useState([]);
   const [form, setForm] = useState(isEdit ? formFromSale(sale) : emptyForm(prefill));
   const [clientRequestId, setClientRequestId] = useState(crypto.randomUUID());
   const [duplicates, setDuplicates] = useState(null);
@@ -118,6 +119,10 @@ export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill, 
     // eligibleProducersWhere.
     api.users('').then((data) => setProducers(data.users.filter((u) => ['PRODUCER', 'AGENCY_MANAGER'].includes(u.role) && u.status === 'ACTIVE'))).catch(() => {});
     api.offices('').then((data) => setOffices(data.offices || [])).catch(() => {});
+    // GET /vendors is Owner/Manager/Platform-Owner-only (it includes raw
+    // credential metadata), same reason this whole effect is skipped for
+    // a Producer — a Producer never sees the vendor picker below.
+    api.vendors('').then((data) => setVendors(data.vendors || [])).catch(() => {});
   }, [isProducer]);
 
   function setField(key, value) {
@@ -159,6 +164,7 @@ export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill, 
       reason: form.reason || undefined,
       notes: form.notes || undefined,
       officeId: form.officeId || undefined,
+      vendorId: form.vendorId || undefined,
       // Only sent when it's an actual change from the sale's current
       // assignee — an unchanged value here used to trip the server's
       // reassignment-seniority check on every edit (even a plain premium
@@ -346,6 +352,12 @@ export default function AddClosedSaleModal({ onClose, onSaved, leadId, prefill, 
               <option value="">Reason (optional)</option>
               {REASON_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
             </select>
+            {!isProducer && (
+              <select style={s.input} value={form.vendorId} onChange={(e) => setField('vendorId', e.target.value)}>
+                <option value="">Vendor (optional) — tracks this sale by source</option>
+                {vendors.map((v) => <option key={v.id} value={v.id}>{v.vendorBrand || v.name}</option>)}
+              </select>
+            )}
           </div>
 
           {!isProducer && (

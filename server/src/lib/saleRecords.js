@@ -15,7 +15,7 @@ async function createSaleRecord({
   agencyId, customerId, leadId, firstName, lastName, businessName, customerTitle, customerSuffix,
   zip, state, saleDate, issuedDate, effectiveDate, expirationDate, carrier, policyType, productFamily,
   policyNumber, premiumCents, revenueCents, items, leadSource, priorCarrier, reason, notes, officeId,
-  assignedToId, createdById, clientRequestId,
+  vendorId, assignedToId, createdById, clientRequestId,
   actorId, actorRole, auditAction, correlationId,
 }) {
   const sale = await prisma.sale.create({
@@ -46,6 +46,7 @@ async function createSaleRecord({
       reason: reason || null,
       notes: notes || null,
       officeId: officeId || null,
+      vendorId: vendorId || null,
       assignedToId,
       createdById,
       clientRequestId,

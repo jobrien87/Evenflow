@@ -132,6 +132,10 @@ const createSaleSchema = z.object({
   reason: z.string().optional(),
   notes: z.string().max(1000).optional(),
   officeId: z.string().uuid().optional(),
+  // The vendor this sale is attributed to, set directly (independent of
+  // any originating Lead) — the only way a standalone sale (no leadId)
+  // can carry a vendor dimension. See schema.prisma's Sale.vendorId comment.
+  vendorId: z.string().uuid().optional(),
   assignedToId: z.string().uuid().optional(),
   confirmDuplicate: z.boolean().optional(),
 });
@@ -173,6 +177,13 @@ router.post('/', requireRole(...CREATE_ROLES), async (req, res, next) => {
       const office = await prisma.office.findUnique({ where: { id: data.officeId } });
       if (!office || office.agencyId !== agencyId) {
         return res.status(400).json({ success: false, error: 'INVALID_OFFICE', message: 'officeId must be a real office in this agency.' });
+      }
+    }
+
+    if (data.vendorId) {
+      const vendor = await prisma.vendor.findUnique({ where: { id: data.vendorId } });
+      if (!vendor || vendor.agencyId !== agencyId) {
+        return res.status(400).json({ success: false, error: 'INVALID_VENDOR', message: 'vendorId must be a real vendor in this agency.' });
       }
     }
 
@@ -246,6 +257,7 @@ router.post('/', requireRole(...CREATE_ROLES), async (req, res, next) => {
       reason: data.reason,
       notes: data.notes,
       officeId: data.officeId,
+      vendorId: data.vendorId,
       assignedToId,
       createdById: req.user.id,
       clientRequestId: data.clientRequestId,
@@ -409,8 +421,14 @@ router.patch('/:saleId', requireRole(...CREATE_ROLES), async (req, res, next) =>
     }
     const data = parsed.data;
     const patch = {};
-    for (const key of ['firstName', 'lastName', 'businessName', 'customerTitle', 'customerSuffix', 'zip', 'state', 'carrier', 'policyType', 'productFamily', 'policyNumber', 'premiumCents', 'revenueCents', 'items', 'leadSource', 'priorCarrier', 'reason', 'notes', 'officeId']) {
+    for (const key of ['firstName', 'lastName', 'businessName', 'customerTitle', 'customerSuffix', 'zip', 'state', 'carrier', 'policyType', 'productFamily', 'policyNumber', 'premiumCents', 'revenueCents', 'items', 'leadSource', 'priorCarrier', 'reason', 'notes', 'officeId', 'vendorId']) {
       if (data[key] !== undefined) patch[key] = data[key];
+    }
+    if (data.vendorId) {
+      const vendor = await prisma.vendor.findUnique({ where: { id: data.vendorId } });
+      if (!vendor || vendor.agencyId !== sale.agencyId) {
+        return res.status(400).json({ success: false, error: 'INVALID_VENDOR', message: 'vendorId must be a real vendor in this agency.' });
+      }
     }
     for (const key of ['saleDate', 'issuedDate', 'effectiveDate', 'expirationDate']) {
       if (data[key] !== undefined) patch[key] = new Date(data[key]);

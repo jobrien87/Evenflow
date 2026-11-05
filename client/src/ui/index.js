@@ -9,6 +9,7 @@ export { default as StatTile } from './StatTile';
 export { default as ProgressRing } from './ProgressRing';
 export { default as ProgressBar } from './ProgressBar';
 export { default as BarRow } from './BarRow';
+export { default as SegmentedBar } from './SegmentedBar';
 export { default as Sparkline } from './Sparkline';
 export { default as TrendChart } from './TrendChart';
 export { default as MonthSelector } from './MonthSelector';

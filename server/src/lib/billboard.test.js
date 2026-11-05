@@ -170,6 +170,26 @@ test('computeBillboard: aggregates real sold leads by producer and by product', 
   assert.equal(directRow.itemCount, 5, '1 item (producer A sale) + 2 + 1 + 1 items (producer B sales)');
   assert.equal(directRow.unknownPremiumCount, 1);
 
+  // Policy type by source — same vendor set as byVendor, each with its own
+  // product-mix breakdown.
+  const vendorProductRow = result.byVendorProduct.find((v) => v.vendorId === vendorId);
+  assert.equal(vendorProductRow.soldCount, 1);
+  assert.equal(vendorProductRow.premiumCents, 10000);
+  assert.equal(vendorProductRow.products.length, 1);
+  assert.equal(vendorProductRow.products[0].product, PRODUCT_LABELS.AUTO);
+  assert.equal(vendorProductRow.products[0].soldCount, 1);
+  assert.equal(vendorProductRow.products[0].premiumCents, 10000);
+
+  const directProductRow = result.byVendorProduct.find((v) => v.vendorId === null);
+  assert.equal(directProductRow.vendorName, 'Direct / No Vendor');
+  assert.equal(directProductRow.soldCount, 4);
+  const directAuto = directProductRow.products.find((p) => p.product === PRODUCT_LABELS.AUTO);
+  assert.equal(directAuto.soldCount, 1);
+  assert.equal(directAuto.premiumCents, 20000);
+  const directHome = directProductRow.products.find((p) => p.product === PRODUCT_LABELS.HOME);
+  assert.equal(directHome.soldCount, 3, 'the real, $0, and null-premium HOME sales all count');
+  assert.equal(directHome.premiumCents, 30000);
+
   const zipRow = result.byZip.find((z) => z.zip === '90210');
   assert.equal(zipRow.soldCount, 1);
   assert.equal(zipRow.premiumCents, 10000);
@@ -492,4 +512,66 @@ test('computeBillboardPeriod: the same real policy imported as both a Historical
   assert.equal(result.totals.soldCount, 3, 'the duplicate HistoricalRecord is excluded entirely; the 2 real Sales + 1 genuinely distinct HistoricalRecord count');
   assert.equal(result.totals.premiumCents, 800000, '$5000 (Dupe Policy, counted once) + $1000 (Real Distinct) + $2000 (Another Customer) = $8000, never $14000');
   assert.equal(result.historicalRecordsIncluded, 1, 'only the genuinely distinct historical row is included — the duplicate is not');
+});
+
+test('computeBillboard: a Sale\'s own explicit vendorId is tracked even with no originating Lead, and wins over a linked Lead\'s vendorId when both are set', async () => {
+  // Reproduces Tom Paterson's report: a Closed Sale logged standalone
+  // (e.g. a Live Transfer entered directly, no originating Lead) with a
+  // vendor picked on the Add Closed Sale form must show up under that
+  // real vendor, not fall into "Direct / No Vendor" just because there's
+  // no Lead to inherit a vendor from.
+  const agency = await prisma.agency.create({ data: { name: `Billboard Sale-Vendor Test Agency ${suffix}` } });
+  const owner = await prisma.user.create({
+    data: { agencyId: agency.id, email: `billboard-salevendor-owner-${suffix}@test.local`, passwordHash: 'x', firstName: 'SV', lastName: 'Owner', role: 'AGENCY_OWNER', status: 'ACTIVE' },
+  });
+  const producer = await prisma.user.create({
+    data: { agencyId: agency.id, email: `billboard-salevendor-prod-${suffix}@test.local`, passwordHash: 'x', firstName: 'SV', lastName: 'Prod', role: 'PRODUCER', status: 'ACTIVE' },
+  });
+  const explicitVendor = await prisma.vendor.create({
+    data: { agencyId: agency.id, name: `Explicit Vendor ${suffix}`, email: `explicit-vendor-${suffix}@test.local`, product: 'AUTO' },
+  });
+  const leadVendor = await prisma.vendor.create({
+    data: { agencyId: agency.id, name: `Lead Vendor ${suffix}`, email: `lead-vendor-${suffix}@test.local`, product: 'AUTO' },
+  });
+
+  // Standalone — no leadId at all — with an explicit vendorId set directly.
+  const standaloneCustomer = await prisma.customer.create({ data: { firstName: 'Standalone', lastName: 'Sale' } });
+  await prisma.sale.create({
+    data: {
+      agencyId: agency.id, customerId: standaloneCustomer.id, firstName: 'Standalone', lastName: 'Sale',
+      saleDate: new Date('2026-06-10'), carrier: 'Test', policyType: 'Standard', productFamily: 'AUTO',
+      premiumCents: 40000, items: 1, vendorId: explicitVendor.id, assignedToId: producer.id, createdById: owner.id,
+    },
+  });
+
+  // Lead-linked, with a DIFFERENT vendor on the Lead than the one
+  // explicitly set on the Sale itself — the Sale's own vendorId must win.
+  const linkedCustomer = await prisma.customer.create({ data: { firstName: 'Linked', lastName: 'Override' } });
+  const lead = await prisma.lead.create({
+    data: { agencyId: agency.id, customerId: linkedCustomer.id, vendorId: leadVendor.id, status: 'SOLD', assignedToId: producer.id },
+  });
+  await prisma.sale.create({
+    data: {
+      agencyId: agency.id, customerId: linkedCustomer.id, leadId: lead.id, firstName: 'Linked', lastName: 'Override',
+      saleDate: new Date('2026-06-10'), carrier: 'Test', policyType: 'Standard', productFamily: 'HOME',
+      premiumCents: 60000, items: 1, vendorId: explicitVendor.id, assignedToId: producer.id, createdById: owner.id,
+    },
+  });
+
+  const result = await computeBillboard({ agencyId: agency.id, granularity: 'month', from: new Date('2026-06-01'), to: new Date('2026-07-01') });
+
+  const explicitRow = result.byVendor.find((v) => v.vendorId === explicitVendor.id);
+  assert.ok(explicitRow, 'the vendor explicitly set on each Sale must appear');
+  assert.equal(explicitRow.soldCount, 2, 'both the standalone sale and the lead-linked sale (whose own vendorId overrides its Lead\'s) attribute to this vendor');
+  assert.equal(explicitRow.premiumCents, 100000);
+
+  const leadVendorRow = result.byVendor.find((v) => v.vendorId === leadVendor.id);
+  assert.ok(!leadVendorRow, 'the Lead\'s own vendor must never be used once the Sale carries its own explicit vendorId');
+
+  const directRow = result.byVendor.find((v) => v.vendorId === null);
+  assert.ok(!directRow, 'neither sale should fall into Direct / No Vendor');
+
+  const vendorProductRow = result.byVendorProduct.find((v) => v.vendorId === explicitVendor.id);
+  assert.equal(vendorProductRow.soldCount, 2);
+  assert.equal(vendorProductRow.products.length, 2, 'this vendor sold both an Auto and a Home policy');
 });

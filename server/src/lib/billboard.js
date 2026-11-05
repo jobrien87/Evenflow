@@ -106,7 +106,9 @@ function buildSeries(soldLeads, granularity, from, to) {
 // yet) are tracked as distinct numbers alongside premiumCents — a policy
 // with 3 items and no premium yet shows 3 items, contributes $0, and is
 // flagged via unknownPremiumCount, never silently dropped or conflated
-// with row count.
+// with row count. byVendorProduct is the one cross-tab this pass builds —
+// each vendor's own product mix ("policy type by source") — everything
+// else above is a single-dimension breakdown.
 function aggregateSoldRows(soldLeads, producers) {
   const byProducerMap = new Map();
   for (const p of producers) {
@@ -115,6 +117,11 @@ function aggregateSoldRows(soldLeads, producers) {
   const byProductMap = new Map();
   const byVendorMap = new Map();
   const byZipMap = new Map();
+  // Nested per-vendor product breakdown — "policy type by source" — keyed
+  // the same way byVendorMap is (vendorKey -> { ...vendor identity,
+  // products: Map(productKey -> row) }), built in this same single pass
+  // over soldLeads so it costs nothing extra to compute.
+  const byVendorProductMap = new Map();
 
   function itemContribution(lead) {
     return lead.items === null || lead.items === undefined ? 0 : lead.items;
@@ -183,6 +190,21 @@ function aggregateSoldRows(soldLeads, producers) {
     vrow.premiumCents += premium;
     byVendorMap.set(vendorKey, vrow);
 
+    const vpEntry = byVendorProductMap.get(vendorKey) || {
+      vendorId: lead.vendorId || null,
+      vendorName: lead.vendor?.name || 'Direct / No Vendor',
+      soldCount: 0,
+      premiumCents: 0,
+      products: new Map(),
+    };
+    vpEntry.soldCount += 1;
+    vpEntry.premiumCents += premium;
+    const vpProduct = vpEntry.products.get(product) || { product, label: PRODUCT_LABELS[product] || product, soldCount: 0, premiumCents: 0 };
+    vpProduct.soldCount += 1;
+    vpProduct.premiumCents += premium;
+    vpEntry.products.set(product, vpProduct);
+    byVendorProductMap.set(vendorKey, vpEntry);
+
     // zip is only ever captured on telemarketer-intake leads today — a
     // sale from any other source buckets under an honest "Unknown" row
     // rather than being dropped or fabricated.
@@ -202,6 +224,17 @@ function aggregateSoldRows(soldLeads, producers) {
   const byProduct = Array.from(byProductMap.values()).sort((a, b) => b.premiumCents - a.premiumCents);
   const byVendor = Array.from(byVendorMap.values()).sort((a, b) => b.premiumCents - a.premiumCents);
   const byZip = Array.from(byZipMap.values()).sort((a, b) => b.premiumCents - a.premiumCents);
+  // "Policy type by source" — each vendor (including "Direct / No Vendor")
+  // with its own product-mix breakdown, same vendor set/order as byVendor.
+  const byVendorProduct = Array.from(byVendorProductMap.values())
+    .map((v) => ({
+      vendorId: v.vendorId,
+      vendorName: v.vendorName,
+      soldCount: v.soldCount,
+      premiumCents: v.premiumCents,
+      products: Array.from(v.products.values()).sort((a, b) => b.soldCount - a.soldCount),
+    }))
+    .sort((a, b) => b.premiumCents - a.premiumCents);
 
   return {
     totals: {
@@ -214,6 +247,7 @@ function aggregateSoldRows(soldLeads, producers) {
     byProducer,
     byProduct,
     byVendor,
+    byVendorProduct,
     byZip,
   };
 }
