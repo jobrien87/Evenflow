@@ -7,6 +7,7 @@ const { checkAgentOfMonth } = require('./lib/agentOfMonth');
 const { startHrAttendanceDetectionJob } = require('./jobs/hrAttendanceDetection');
 const { startHrLeaveAccrualJob } = require('./lib/hrLeaveAccrual');
 const { backfillMissingSales } = require('./lib/missingSaleBackfill');
+const { backfillSaleVendorFromLead } = require('./lib/saleVendorBackfill');
 const { runSourceOptimizationSweep } = require('./lib/recordStoreSourceOptimization');
 
 const PORT = process.env.PORT || 4000;
@@ -66,6 +67,12 @@ startHrLeaveAccrualJob();
 // agentOfMonth above — this is what makes the backfill run automatically
 // on every deploy with no manual step. See lib/missingSaleBackfill.js.
 backfillMissingSales().catch((err) => console.error('[missingSaleBackfill] run failed', err.message));
+
+// Copies a Lead's own vendorId onto any of its linked Sales that predate
+// the Sale.vendorId column — platform-wide, once per boot, same idempotent
+// "nothing left to do once caught up" convention as the backfill above.
+// See lib/saleVendorBackfill.js.
+backfillSaleVendorFromLead().catch((err) => console.error('[saleVendorBackfill] run failed', err.message));
 
 // Record Store's 30-day rolling lead-source optimizer — same "real
 // cadence, checked on a much tighter interval since there's no real
