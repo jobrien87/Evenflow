@@ -145,6 +145,7 @@ export const api = {
 
   agencies: (params = '') => request(`/agencies${params}`),
   createAgency: (payload) => request('/agencies', { method: 'POST', body: payload }),
+  createDemoAgency: (payload) => request('/agencies/demo', { method: 'POST', body: payload }),
   resendAgencyInvite: (agencyId) => request(`/agencies/${agencyId}/resend-invite`, { method: 'POST' }),
   agencyDetail: (agencyId) => request(`/agencies/${agencyId}`),
   agencyActivity: (agencyId, params = '') => request(`/agencies/${agencyId}/activity${params}`),

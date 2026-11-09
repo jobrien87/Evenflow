@@ -553,6 +553,12 @@ model Agency {
   id                             String       @id @default(uuid())
   name                           String
   status                         AgencyStatus @default(CREATED)
+  // A Platform-Owner-created demo/sales-walkthrough account (see
+  // lib/demoAgency.js) — purely a recognition flag so one never gets
+  // mistaken for a real paying customer at a glance (AgenciesPanel.jsx
+  // shows a small DEMO badge). Never branched on by billing/reporting
+  // code — a demo agency can still carry a real paid Plan/MRR on purpose.
+  isDemo                         Boolean      @default(false)
   timezone                       String       @default("America/New_York")
   officeHours                    Json?
   products                       String[]     @default([])

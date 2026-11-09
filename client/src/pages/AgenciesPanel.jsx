@@ -36,6 +36,24 @@ export default function AgenciesPanel() {
   const [status, setStatus] = useState('');
   const [showAnnounce, setShowAnnounce] = useState(false);
 
+  // Create Demo Agency — a separate flow from + INVITE AGENCY above: that
+  // one sends a real email invite and leaves the owner INVITED until they
+  // click it; this one activates the owner (and any roster typed in)
+  // immediately with a shared password, no email round-trip at all, for a
+  // ready-to-log-in sales-demo account. See server lib/demoAgency.js.
+  const emptyRosterEntry = () => ({ firstName: '', lastName: '', email: '' });
+  const emptyDemoForm = () => ({
+    agencyName: '', ownerFirstName: '', ownerLastName: '', ownerEmail: '',
+    password: 'password123',
+    producers: [emptyRosterEntry()],
+    telemarketers: [],
+    seedDemoData: true,
+  });
+  const [showDemoForm, setShowDemoForm] = useState(false);
+  const [demoForm, setDemoForm] = useState(emptyDemoForm);
+  const [demoStatus, setDemoStatus] = useState('');
+  const [demoResult, setDemoResult] = useState(null);
+
   useEffect(() => {
     refresh();
   }, [page, search]);
@@ -90,6 +108,44 @@ export default function AgenciesPanel() {
       navigate('/agency');
     } catch (err) {
       setStatus(err.data?.message || 'Could not log in as this agency\'s owner.');
+    }
+  }
+
+  function updateRosterEntry(listKey, index, field, value) {
+    setDemoForm((f) => {
+      const list = [...f[listKey]];
+      list[index] = { ...list[index], [field]: value };
+      return { ...f, [listKey]: list };
+    });
+  }
+  function addRosterEntry(listKey) {
+    setDemoForm((f) => ({ ...f, [listKey]: [...f[listKey], emptyRosterEntry()] }));
+  }
+  function removeRosterEntry(listKey, index) {
+    setDemoForm((f) => ({ ...f, [listKey]: f[listKey].filter((_, i) => i !== index) }));
+  }
+
+  async function submitDemoAgency(e) {
+    e.preventDefault();
+    setDemoStatus('Creating…');
+    setDemoResult(null);
+    try {
+      const payload = {
+        agencyName: demoForm.agencyName,
+        owner: { firstName: demoForm.ownerFirstName, lastName: demoForm.ownerLastName, email: demoForm.ownerEmail },
+        producers: demoForm.producers.filter((p) => p.firstName && p.lastName && p.email),
+        telemarketers: demoForm.telemarketers.filter((t) => t.firstName && t.lastName && t.email),
+        password: demoForm.password,
+        seedDemoData: demoForm.seedDemoData,
+      };
+      const res = await api.createDemoAgency(payload);
+      setDemoResult(res);
+      setDemoStatus('');
+      setDemoForm(emptyDemoForm());
+      setShowDemoForm(false);
+      await refresh();
+    } catch (err) {
+      setDemoStatus(err.data?.message || 'Failed to create demo agency.');
     }
   }
 
@@ -155,6 +211,7 @@ export default function AgenciesPanel() {
               ])} />
             )}
             <Button variant="secondary" size="sm" onClick={() => setShowAnnounce(true)}>+ ANNOUNCEMENT</Button>
+            <Button variant="secondary" size="sm" onClick={() => setShowDemoForm(!showDemoForm)}>+ CREATE DEMO AGENCY</Button>
             <Button variant="primary" size="sm" onClick={() => setShowForm(!showForm)}>+ INVITE AGENCY</Button>
           </div>
         }
@@ -187,6 +244,79 @@ export default function AgenciesPanel() {
         value={searchInput}
         onChange={(e) => setSearchInput(e.target.value)}
       />
+
+      {demoResult && (
+        <Card style={s.formCard}>
+          <div style={s.formSectionLabel}>DEMO AGENCY READY — "{demoResult.agency.name}"</div>
+          <div style={s.linkBox}>
+            Nothing was emailed for any of these — this is the only place the logins are shown. Copy them now.
+            <div style={{ marginTop: 8 }}>
+              <strong>Owner:</strong> {demoResult.owner.email} / {demoResult.password}
+            </div>
+            {demoResult.producers.length > 0 && (
+              <div style={{ marginTop: 6 }}>
+                <strong>Producers:</strong>
+                {demoResult.producers.map((p) => <div key={p.id}>{p.firstName} {p.lastName} — {p.email} / {demoResult.password}</div>)}
+              </div>
+            )}
+            {demoResult.telemarketers.length > 0 && (
+              <div style={{ marginTop: 6 }}>
+                <strong>Telemarketers:</strong>
+                {demoResult.telemarketers.map((t) => <div key={t.id}>{t.firstName} {t.lastName} — {t.email} / {demoResult.password}</div>)}
+              </div>
+            )}
+            {demoResult.seeded && (
+              <div style={{ marginTop: 6 }}>Seeded {demoResult.seeded.leadCount} demo leads, {demoResult.seeded.saleCount} demo closed sales, {demoResult.seeded.vendorCount} demo vendors.</div>
+            )}
+          </div>
+          <Button variant="secondary" size="sm" onClick={() => setDemoResult(null)}>DISMISS</Button>
+        </Card>
+      )}
+
+      {showDemoForm && (
+        <Card style={s.formCard}>
+          <form onSubmit={submitDemoAgency} style={s.form}>
+            <div style={s.formSectionLabel}>AGENCY</div>
+            <input style={s.input} placeholder="Agency name (e.g. Tom Paterson Allstate (Demo))" value={demoForm.agencyName} onChange={(e) => setDemoForm({ ...demoForm, agencyName: e.target.value })} required />
+
+            <div style={s.formSectionLabel}>OWNER</div>
+            <input style={s.input} placeholder="Owner first name" value={demoForm.ownerFirstName} onChange={(e) => setDemoForm({ ...demoForm, ownerFirstName: e.target.value })} required />
+            <input style={s.input} placeholder="Owner last name" value={demoForm.ownerLastName} onChange={(e) => setDemoForm({ ...demoForm, ownerLastName: e.target.value })} required />
+            <input style={s.input} type="email" placeholder="Owner email (login)" value={demoForm.ownerEmail} onChange={(e) => setDemoForm({ ...demoForm, ownerEmail: e.target.value })} required />
+            <input style={s.input} placeholder="Shared password (10+ characters)" value={demoForm.password} onChange={(e) => setDemoForm({ ...demoForm, password: e.target.value })} required minLength={10} />
+
+            <div style={s.formSectionLabel}>PRODUCERS</div>
+            {demoForm.producers.map((p, i) => (
+              <div key={i} style={s.rosterRow}>
+                <input style={s.input} placeholder="First name" value={p.firstName} onChange={(e) => updateRosterEntry('producers', i, 'firstName', e.target.value)} />
+                <input style={s.input} placeholder="Last name" value={p.lastName} onChange={(e) => updateRosterEntry('producers', i, 'lastName', e.target.value)} />
+                <input style={s.input} type="email" placeholder="Email" value={p.email} onChange={(e) => updateRosterEntry('producers', i, 'email', e.target.value)} />
+                <Button type="button" variant="secondary" size="sm" onClick={() => removeRosterEntry('producers', i)}>REMOVE</Button>
+              </div>
+            ))}
+            <Button type="button" variant="secondary" size="sm" onClick={() => addRosterEntry('producers')}>+ ADD PRODUCER</Button>
+
+            <div style={s.formSectionLabel}>TELEMARKETERS</div>
+            {demoForm.telemarketers.map((t, i) => (
+              <div key={i} style={s.rosterRow}>
+                <input style={s.input} placeholder="First name" value={t.firstName} onChange={(e) => updateRosterEntry('telemarketers', i, 'firstName', e.target.value)} />
+                <input style={s.input} placeholder="Last name" value={t.lastName} onChange={(e) => updateRosterEntry('telemarketers', i, 'lastName', e.target.value)} />
+                <input style={s.input} type="email" placeholder="Email" value={t.email} onChange={(e) => updateRosterEntry('telemarketers', i, 'email', e.target.value)} />
+                <Button type="button" variant="secondary" size="sm" onClick={() => removeRosterEntry('telemarketers', i)}>REMOVE</Button>
+              </div>
+            ))}
+            <Button type="button" variant="secondary" size="sm" onClick={() => addRosterEntry('telemarketers')}>+ ADD TELEMARKETER</Button>
+
+            <label style={s.checkboxRow}>
+              <input type="checkbox" checked={demoForm.seedDemoData} onChange={(e) => setDemoForm({ ...demoForm, seedDemoData: e.target.checked })} />
+              Seed sample leads &amp; closed sales (clearly fabricated demo data, never real customer data)
+            </label>
+
+            {demoStatus && <div style={s.status}>{demoStatus}</div>}
+            <Button variant="primary" type="submit">CREATE DEMO AGENCY</Button>
+          </form>
+        </Card>
+      )}
 
       {showForm && (
         <Card style={s.formCard}>
@@ -256,7 +386,10 @@ export default function AgenciesPanel() {
           {agencies.map((a) => (
             <Link key={a.id} to={`/platform/agencies/${a.id}`} style={s.tableRowLink}>
               <div style={s.tableRow}>
-                <div style={s.colName}>{a.name}</div>
+                <div style={s.colName}>
+                  {a.name}
+                  {a.isDemo && <Badge tone="warning" style={{ marginLeft: 8 }}>DEMO</Badge>}
+                </div>
                 <div style={s.colSmall}><Badge tone={statusTone(a.status)}>{a.status}</Badge></div>
                 <div style={s.colSmall}>{a.plan ? a.plan.name : '—'}</div>
                 <div style={s.colSmall}>${(a.mrrCents / 100).toFixed(0)}</div>
@@ -308,6 +441,7 @@ const s = {
   input: { padding: '10px 12px', background: 'var(--bg-sunken)', border: '1px solid var(--border-strong)', borderRadius: 6, color: 'var(--text-primary)' },
   formSectionLabel: { color: 'var(--text-muted)', fontSize: 11, letterSpacing: 1, fontWeight: 700, marginTop: 6 },
   checkboxRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-secondary)' },
+  rosterRow: { display: 'grid', gridTemplateColumns: '1fr 1fr 1.4fr auto', gap: 8, alignItems: 'center' },
   entitlementGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 },
   status: { color: 'var(--accent)', marginBottom: 16, fontSize: 13 },
   linkBox: { color: 'var(--text-secondary)', fontSize: 13, marginBottom: 16, background: 'var(--bg-elevated)', border: '1px solid var(--border-hairline)', borderRadius: 8, padding: 12 },

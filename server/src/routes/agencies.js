@@ -7,6 +7,7 @@ const { recordAudit } = require('../lib/audit');
 const { sendInvitationEmail } = require('../lib/email');
 const { reissueInvitation, recordInvitationEmailResult } = require('../lib/invitations');
 const { resolveSettings } = require('../lib/breakRoom');
+const { createDemoAgency } = require('../lib/demoAgency');
 
 const router = express.Router();
 
@@ -248,6 +249,55 @@ router.post('/', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
         // fails), lib/email.js already logs the link server-side for an
         // operator with real log access to relay manually.
       },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const demoRosterEntrySchema = z.object({
+  firstName: z.string().min(1),
+  lastName: z.string().min(1),
+  email: z.string().email(),
+});
+
+const createDemoAgencySchema = z.object({
+  agencyName: z.string().min(2),
+  owner: demoRosterEntrySchema,
+  producers: z.array(demoRosterEntrySchema).max(25).optional().default([]),
+  telemarketers: z.array(demoRosterEntrySchema).max(25).optional().default([]),
+  // Same minimum every other password-setting path in this app enforces
+  // (acceptInvitationSchema/resetPasswordSchema in routes/auth.js) —
+  // reused here, not loosened, even though nothing is emailed.
+  password: z.string().min(10, 'Password must be at least 10 characters.'),
+  seedDemoData: z.boolean().optional().default(true),
+});
+
+// Platform Owner only: create a fully active demo/sales-walkthrough
+// agency — owner + roster activated immediately with the given password,
+// no email invite round-trip at all (unlike POST / above), optionally
+// seeded with fabricated demo leads/sales. See lib/demoAgency.js.
+router.post('/demo', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const parsed = createDemoAgencySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
+    }
+    const result = await createDemoAgency({ ...parsed.data, createdById: req.user.id });
+    if (!result.success) {
+      const status = result.errorCode === 'EMAIL_IN_USE' || result.errorCode === 'DUPLICATE_EMAIL_IN_REQUEST' ? 409 : 400;
+      return res.status(status).json({ success: false, ...result });
+    }
+    return res.status(201).json({
+      success: true,
+      agency: result.agency,
+      // The only place these credentials are ever shown — nothing is
+      // emailed for a demo account, so this response IS the handoff.
+      owner: { id: result.owner.id, email: result.owner.email, firstName: result.owner.firstName, lastName: result.owner.lastName },
+      producers: result.producers.map((p) => ({ id: p.id, email: p.email, firstName: p.firstName, lastName: p.lastName })),
+      telemarketers: result.telemarketers.map((t) => ({ id: t.id, email: t.email, firstName: t.firstName, lastName: t.lastName })),
+      password: parsed.data.password,
+      seeded: result.seeded,
     });
   } catch (err) {
     next(err);

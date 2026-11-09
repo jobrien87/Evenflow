@@ -106,6 +106,40 @@ test('a Platform Owner editing an agency does not have ownerPhone applied to the
   assert.notEqual(ownerB.phone, '512-555-0150', 'ownerPhone must also never silently apply to the target agency\'s real owner');
 });
 
+test('POST /agencies/demo is Platform-Owner-only, and a created demo agency shows isDemo:true in GET /agencies', async () => {
+  const forbiddenRes = await fetch(`${baseUrl}/api/agencies/demo`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: ownerACookie },
+    body: JSON.stringify({ agencyName: 'Should Not Be Created', owner: { firstName: 'X', lastName: 'Y', email: `blocked-${suffix}@test.local` }, password: 'password123' }),
+  });
+  assert.equal(forbiddenRes.status, 403);
+
+  const createRes = await fetch(`${baseUrl}/api/agencies/demo`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: platformOwnerCookie },
+    body: JSON.stringify({
+      agencyName: `Route Demo Agency ${suffix}`,
+      owner: { firstName: 'Route', lastName: 'Demo', email: `route-demo-owner-${suffix}@test.local` },
+      password: 'password123',
+      seedDemoData: false,
+    }),
+  });
+  assert.equal(createRes.status, 201);
+  const created = await createRes.json();
+  assert.equal(created.password, 'password123');
+
+  try {
+    const listRes = await fetch(`${baseUrl}/api/agencies?pageSize=200`, { headers: { Cookie: platformOwnerCookie } });
+    const listData = await listRes.json();
+    const row = listData.agencies.find((a) => a.id === created.agency.id);
+    assert.ok(row);
+    assert.equal(row.isDemo, true);
+  } finally {
+    await prisma.agencySubscription.deleteMany({ where: { agencyId: created.agency.id } });
+    await prisma.session.deleteMany({ where: { userId: created.owner.id } });
+    await prisma.user.delete({ where: { id: created.owner.id } });
+    await prisma.agency.delete({ where: { id: created.agency.id } });
+  }
+});
+
 test('GET /agencies enriches each row with its real active owner (ownerId/ownerName) — the "Log in as" button\'s target — and omits it for an agency with no active owner', async () => {
   const res = await fetch(`${baseUrl}/api/agencies?pageSize=200`, { headers: { Cookie: platformOwnerCookie } });
   assert.equal(res.status, 200);
