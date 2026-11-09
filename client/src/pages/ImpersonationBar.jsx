@@ -1,26 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/AuthContext';
 
 export default function ImpersonationBar() {
-  const { user, refreshUser } = useAuth();
-  const [status, setStatus] = useState(null);
+  // isImpersonating/viewingAs live on AuthContext (shared with whatever
+  // triggered the view-as in the first place, e.g. AgenciesPanel's own
+  // "Log in as" button) rather than a private fetch owned by this
+  // component — refreshUser() keeps both in sync, from any trigger point.
+  const { user, refreshUser, impersonation: status } = useAuth();
   const [showSearch, setShowSearch] = useState(false);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
-
-  useEffect(() => {
-    loadStatus();
-  }, []);
-
-  async function loadStatus() {
-    try {
-      const data = await api.impersonationStatus();
-      setStatus(data);
-    } catch (err) {
-      // not logged in yet
-    }
-  }
 
   async function search(q) {
     setQuery(q);
@@ -32,7 +22,6 @@ export default function ImpersonationBar() {
   async function viewAs(targetUserId) {
     await api.startImpersonation(targetUserId);
     await refreshUser();
-    await loadStatus();
     setShowSearch(false);
     setQuery('');
     setResults([]);
@@ -41,7 +30,6 @@ export default function ImpersonationBar() {
   async function exit() {
     await api.endImpersonation();
     await refreshUser();
-    await loadStatus();
   }
 
   if (!status) return null;

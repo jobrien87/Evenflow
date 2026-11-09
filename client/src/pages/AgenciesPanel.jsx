@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
+import { useAuth } from '../lib/AuthContext';
 import { Card, Badge, Button, StatTile, SectionHeader, EmptyState, ExportButton } from '../ui';
 import { downloadCsv } from '../lib/downloadCsv';
 import { emailStatusMessage } from '../lib/emailStatus';
@@ -14,6 +15,8 @@ function statusTone(status) {
 }
 
 export default function AgenciesPanel() {
+  const navigate = useNavigate();
+  const { refreshUser } = useAuth();
   const [agencies, setAgencies] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -67,6 +70,26 @@ export default function AgenciesPanel() {
       setStatus(emailStatusMessage('Invitation resent.', res.emailStatus));
     } catch (err) {
       setStatus(err.data?.message || 'Failed to resend invitation.');
+    }
+  }
+
+  // Jumps straight into this agency's owner dashboard — same "VIEW AS"
+  // impersonation already available globally (ImpersonationBar.jsx), just
+  // one click from the row instead of searching by name. Every action
+  // taken from here on is tagged as Admin Activity on the audit trail
+  // automatically (see server lib/requestContext.js + lib/audit.js) —
+  // nothing further to wire up for that per action.
+  async function loginAsOwner(ownerId) {
+    setStatus('');
+    try {
+      await api.startImpersonation(ownerId);
+      // Refresh AuthContext's cached user BEFORE navigating — without
+      // this, the client still believes it's the Platform Owner, so
+      // RoleGate immediately bounces the /agency route back here.
+      await refreshUser();
+      navigate('/agency');
+    } catch (err) {
+      setStatus(err.data?.message || 'Could not log in as this agency\'s owner.');
     }
   }
 
@@ -239,9 +262,19 @@ export default function AgenciesPanel() {
                 <div style={s.colSmall}>${(a.mrrCents / 100).toFixed(0)}</div>
                 <div style={s.colSmall}>{a.producerCount}</div>
                 <div style={s.colSmall}>{a.telemarketerCount}</div>
-                <div style={s.colAction}>
+                <div style={s.colActionRow}>
                   {a.status !== 'ACTIVE' && (
                     <Button variant="secondary" size="sm" onClick={(e) => { e.preventDefault(); resendAgency(a.id); }}>RESEND INVITE</Button>
+                  )}
+                  {a.ownerId && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      title={`Log in as ${a.ownerName}`}
+                      onClick={(e) => { e.preventDefault(); loginAsOwner(a.ownerId); }}
+                    >
+                      LOG IN AS OWNER
+                    </Button>
                   )}
                 </div>
               </div>
@@ -282,11 +315,12 @@ const s = {
   tableCard: { padding: 0, overflow: 'hidden' },
   tableRowLink: { textDecoration: 'none', color: 'inherit', display: 'block' },
   tableRow: {
-    display: 'grid', gridTemplateColumns: '2fr 1fr 1.2fr 0.8fr 1fr 1fr 1.4fr',
+    display: 'grid', gridTemplateColumns: '2fr 1fr 1.2fr 0.8fr 1fr 1fr 2fr',
     alignItems: 'center', gap: 8, padding: '12px 16px', borderBottom: '1px solid var(--border-hairline)', fontSize: 13,
   },
   tableHeader: { color: 'var(--text-muted)', fontSize: 11, letterSpacing: 1, fontWeight: 700 },
   colName: { fontWeight: 600, color: 'var(--text-primary)' },
   colSmall: { color: 'var(--text-secondary)' },
   colAction: { textAlign: 'right' },
+  colActionRow: { display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' },
 };

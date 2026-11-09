@@ -22,7 +22,7 @@ async function enrichAgencies(agencies) {
   const agencyIds = agencies.map((a) => a.id);
   if (agencyIds.length === 0) return [];
 
-  const [userCounts, tmCounts, subs] = await Promise.all([
+  const [userCounts, tmCounts, subs, owners] = await Promise.all([
     prisma.user.groupBy({
       by: ['agencyId', 'role'],
       where: { agencyId: { in: agencyIds }, status: { not: 'DEACTIVATED' } },
@@ -38,6 +38,15 @@ async function enrichAgencies(agencies) {
       include: { plan: true },
       orderBy: { createdAt: 'desc' },
     }),
+    // One real, active AGENCY_OWNER per agency — the "log in as owner"
+    // target. Ordered oldest-first so the earliest-created owner wins
+    // when an agency has more than one, the same "the" primary-owner
+    // convention isLastActiveOwner's own callers already rely on.
+    prisma.user.findMany({
+      where: { agencyId: { in: agencyIds }, role: 'AGENCY_OWNER', status: 'ACTIVE' },
+      select: { id: true, agencyId: true, firstName: true, lastName: true },
+      orderBy: { createdAt: 'asc' },
+    }),
   ]);
 
   const latestSubByAgency = {};
@@ -45,6 +54,10 @@ async function enrichAgencies(agencies) {
     if (!latestSubByAgency[sub.agencyId]) latestSubByAgency[sub.agencyId] = sub;
   }
   const tmCountByAgency = Object.fromEntries(tmCounts.map((c) => [c.agencyId, c._count._all]));
+  const ownerByAgency = {};
+  for (const owner of owners) {
+    if (!ownerByAgency[owner.agencyId]) ownerByAgency[owner.agencyId] = owner;
+  }
 
   return agencies.map((a) => {
     const producerCount = userCounts.find((c) => c.agencyId === a.id && c.role === 'PRODUCER')?._count._all || 0;
@@ -56,6 +69,7 @@ async function enrichAgencies(agencies) {
     const mrrCents = sub && sub.status === 'ACTIVE'
       ? (sub.plan.interval === 'ANNUAL' ? Math.round(sub.plan.priceCents / 12) : sub.plan.priceCents)
       : 0;
+    const owner = ownerByAgency[a.id] || null;
     return {
       ...a,
       producerCount,
@@ -64,6 +78,8 @@ async function enrichAgencies(agencies) {
       plan: sub ? { id: sub.plan.id, name: sub.plan.name, priceCents: sub.plan.priceCents, interval: sub.plan.interval } : null,
       subscriptionStatus: sub ? sub.status : null,
       mrrCents,
+      ownerId: owner?.id || null,
+      ownerName: owner ? `${owner.firstName} ${owner.lastName}` : null,
     };
   });
 }

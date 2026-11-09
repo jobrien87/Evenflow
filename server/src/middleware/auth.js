@@ -1,6 +1,7 @@
 const { v4: uuidv4 } = require('uuid');
 const { getSessionUser, SESSION_COOKIE } = require('../lib/auth');
 const { IMPERSONATION_COOKIE, resolveImpersonation } = require('../lib/impersonation');
+const { runWithContext } = require('../lib/requestContext');
 
 function correlationId(req, res, next) {
   req.correlationId = req.headers['x-correlation-id'] || uuidv4();
@@ -38,7 +39,16 @@ async function attachUser(req, res, next) {
       }
     }
 
-    next();
+    // Carries "this request is impersonating, by whom" through the rest of
+    // the request's async call chain without threading it through every
+    // handler — see lib/requestContext.js and lib/audit.js's recordAudit,
+    // which reads this to tag every audit event written during an
+    // impersonated request as Admin Activity, with no per-call-site change
+    // needed anywhere else in the app.
+    const context = req.isImpersonating
+      ? { isImpersonating: true, impersonatedBy: { id: req.realUser.id, firstName: req.realUser.firstName, lastName: req.realUser.lastName } }
+      : { isImpersonating: false };
+    runWithContext(context, next);
   } catch (err) {
     next(err);
   }

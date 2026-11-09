@@ -6,6 +6,24 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Impersonation state lives here, alongside `user`, rather than in its
+  // own component-local fetch (ImpersonationBar.jsx used to own this) —
+  // a "Log in as" action can be triggered from more than one place in the
+  // app now (the global VIEW AS... search, and AgenciesPanel's per-row
+  // button), and every one of them already has to call refreshUser() to
+  // pick up the new effective user for RoleGate/routing. Folding
+  // impersonation status into that same refresh means every trigger point
+  // updates the banner too, for free, with no separate wiring per caller.
+  const [impersonation, setImpersonation] = useState(null);
+
+  async function loadImpersonationStatus() {
+    try {
+      const data = await api.impersonationStatus();
+      setImpersonation(data);
+    } catch {
+      setImpersonation(null);
+    }
+  }
 
   useEffect(() => {
     api
@@ -13,6 +31,7 @@ export function AuthProvider({ children }) {
       .then((data) => setUser(data.user))
       .catch(() => setUser(null))
       .finally(() => setLoading(false));
+    loadImpersonationStatus();
   }, []);
 
   // A password-verified login for an MFA-enrolled account doesn't set a
@@ -43,10 +62,11 @@ export function AuthProvider({ children }) {
   async function refreshUser() {
     const data = await api.me();
     setUser(data.user);
+    await loadImpersonationStatus();
     return data.user;
   }
 
-  return <AuthContext.Provider value={{ user, loading, login, logout, refreshUser }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ user, loading, login, logout, refreshUser, impersonation }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

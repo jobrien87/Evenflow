@@ -105,3 +105,26 @@ test('a Platform Owner editing an agency does not have ownerPhone applied to the
   const ownerB = await prisma.user.findUnique({ where: { id: ownerBId } });
   assert.notEqual(ownerB.phone, '512-555-0150', 'ownerPhone must also never silently apply to the target agency\'s real owner');
 });
+
+test('GET /agencies enriches each row with its real active owner (ownerId/ownerName) — the "Log in as" button\'s target — and omits it for an agency with no active owner', async () => {
+  const res = await fetch(`${baseUrl}/api/agencies?pageSize=200`, { headers: { Cookie: platformOwnerCookie } });
+  assert.equal(res.status, 200);
+  const data = await res.json();
+
+  const rowA = data.agencies.find((a) => a.id === agencyAId);
+  assert.ok(rowA, 'agency A must appear in the list');
+  assert.equal(rowA.ownerId, ownerAId);
+  assert.equal(rowA.ownerName, 'Ann OwnerA');
+
+  const noOwnerAgency = await prisma.agency.create({ data: { name: `Agency No Owner Yet ${suffix}` } });
+  try {
+    const res2 = await fetch(`${baseUrl}/api/agencies?pageSize=200`, { headers: { Cookie: platformOwnerCookie } });
+    const data2 = await res2.json();
+    const noOwnerRow = data2.agencies.find((a) => a.id === noOwnerAgency.id);
+    assert.ok(noOwnerRow, 'an agency with no active owner yet must still appear');
+    assert.equal(noOwnerRow.ownerId, null, 'no real active owner exists yet, so there must be nothing to log in as');
+    assert.equal(noOwnerRow.ownerName, null);
+  } finally {
+    await prisma.agency.delete({ where: { id: noOwnerAgency.id } });
+  }
+});
