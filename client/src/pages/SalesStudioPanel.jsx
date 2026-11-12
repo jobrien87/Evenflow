@@ -6,15 +6,20 @@ import DrillLibraryPanel from './DrillLibraryPanel';
 import CallScoringPanel from './CallScoringPanel';
 import CallsPanel from './CallsPanel';
 import CoursesAdminPanel from './CoursesAdminPanel';
+import SalesScriptsPanel from './SalesScriptsPanel';
 
 // Sales Studio is the one home for every coaching surface, per role, in
-// this fixed order: TP SALES PROCESS, DRILLS, CALL SCORING.
+// this fixed order: TP SALES PROCESS, DRILLS, SALES SCRIPTS, CALL SCORING.
 //  - TP SALES PROCESS (Producer, Agency Owner/Manager): per-call upload/
 //    transcript/analysis — carries the Coaching Video Theater, a
 //    Producer's own self-service coaching breakdown, and (Producer only)
 //    the "Sales Courses" progress summary moved here from the retired
 //    standalone Training tab. Still the same CallsPanel component.
 //  - DRILLS (everyone): the 75-drill library + AI roleplay.
+//  - SALES SCRIPTS (everyone): human producer call scripts for Internet
+//    Leads and Cold High Intent Data, plus shared producer guidance —
+//    see salesScriptsContent.js. Static reference content, same
+//    no-admin-editor convention as Drills/EvenFlow 101.
 //  - CALL SCORING (Agency Owner/Manager only): upload a producer's call
 //    on their behalf, then drill into a per-producer Call Scoring
 //    profile page for the full depth breakdown.
@@ -29,14 +34,17 @@ const TAB_DEFS = {
   PRODUCER: [
     { key: 'diagnostics', label: 'TP SALES PROCESS', Component: CallsPanel },
     { key: 'drills', label: 'DRILLS', Component: DrillLibraryPanel },
+    { key: 'scripts', label: 'SALES SCRIPTS', Component: SalesScriptsPanel },
   ],
   AGENCY_OWNER: [
     { key: 'diagnostics', label: 'TP SALES PROCESS', Component: CallsPanel },
     { key: 'drills', label: 'DRILLS', Component: DrillLibraryPanel },
+    { key: 'scripts', label: 'SALES SCRIPTS', Component: SalesScriptsPanel },
     { key: 'scoring', label: 'CALL SCORING', Component: CallScoringPanel },
   ],
   PLATFORM_OWNER: [
     { key: 'drills', label: 'DRILLS', Component: DrillLibraryPanel },
+    { key: 'scripts', label: 'SALES SCRIPTS', Component: SalesScriptsPanel },
     { key: 'training', label: 'TRAINING', Component: CoursesAdminPanel },
   ],
 };

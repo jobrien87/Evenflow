@@ -55,6 +55,7 @@ import ProductUpdatesAdminPanel from './pages/ProductUpdatesAdminPanel';
 import SaleItemsReviewPanel from './pages/SaleItemsReviewPanel';
 import EvenFlow101Panel from './pages/EvenFlow101Panel';
 import EvenFlow101DetailPage from './pages/EvenFlow101DetailPage';
+import SalesScriptsDetailPage from './pages/SalesScriptsDetailPage';
 
 function RequireAuth() {
   const { user, loading } = useAuth();
@@ -111,6 +112,7 @@ export default function App() {
           <Route path="producer/sales-studio" element={<SalesStudioPanel />} />
           <Route path="producer/drills" element={<RedirectToSalesStudio tab="drills" />} />
           <Route path="producer/drills/:courseId/:lessonId" element={<DrillDetailPage />} />
+          <Route path="producer/sales-scripts/:scriptId" element={<SalesScriptsDetailPage />} />
           <Route path="producer/tasks" element={<TasksPanel />} />
           <Route path="producer/team-chat" element={<TeamChatPanel />} />
           <Route path="producer/coaching" element={<RedirectToSalesStudio tab="diagnostics" />} />
@@ -130,6 +132,7 @@ export default function App() {
           <Route path="agency" element={<AgencyOwnerDashboard />} />
           <Route path="agency/sales-studio" element={<SalesStudioPanel />} />
           <Route path="agency/drills/:courseId/:lessonId" element={<DrillDetailPage />} />
+          <Route path="agency/sales-scripts/:scriptId" element={<SalesScriptsDetailPage />} />
           <Route path="agency/tasks" element={<TasksPanel />} />
           <Route path="agency/transfers" element={<YieldTransfersPanel />} />
           <Route path="agency/team-chat" element={<TeamChatPanel />} />
@@ -166,6 +169,7 @@ export default function App() {
           <Route path="platform/sales-studio" element={<SalesStudioPanel />} />
           <Route path="platform/drills" element={<RedirectToSalesStudio tab="drills" />} />
           <Route path="platform/drills/:courseId/:lessonId" element={<DrillDetailPage />} />
+          <Route path="platform/sales-scripts/:scriptId" element={<SalesScriptsDetailPage />} />
           <Route path="platform/tasks" element={<TasksPanel />} />
           <Route path="platform/agencies/:agencyId" element={<AgencyDetailPage />} />
           <Route path="platform/agencies/:agencyId/hr" element={<PlatformAgencyHr />} />
