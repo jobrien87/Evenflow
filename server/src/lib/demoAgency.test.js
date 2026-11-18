@@ -15,6 +15,7 @@ const assert = require('node:assert/strict');
 const bcrypt = require('bcryptjs');
 const { prisma } = require('./db');
 const { createDemoAgency } = require('./demoAgency');
+const { wipeAgencyDemoData } = require('./demoDataSeeder');
 const { computeBillboard } = require('./billboard');
 
 const suffix = Date.now();
@@ -26,22 +27,14 @@ const userIdsToClean = [];
 const SMALL_SEED_OPTIONS = { months: 1, leadsPerDay: 10, transfersPerDay: 2, crossSellCount: 10, winbackCount: 10 };
 
 after(async () => {
+  // Reuses the real wipe function rather than duplicating its FK-safe
+  // order here — keeps teardown automatically in sync with it (it now
+  // also clears LeadNote/Task/the full Backstage HR suite, none of which
+  // this file ever needs to know the shape of).
   for (const agencyId of agencyIdsToClean) {
-    await prisma.breakRoomAchievement.deleteMany({ where: { agencyId } });
-    await prisma.breakRoomHighScore.deleteMany({ where: { agencyId } });
-    await prisma.breakRoomGameSession.deleteMany({ where: { agencyId } });
-    await prisma.timeClockEntry.deleteMany({ where: { agencyId } });
-    await prisma.ptoRequest.deleteMany({ where: { agencyId } });
-    await prisma.goal.deleteMany({ where: { agencyId } });
-    await prisma.opportunityEvent.deleteMany({ where: { opportunity: { agencyId } } });
-    await prisma.opportunity.deleteMany({ where: { agencyId } });
+    await wipeAgencyDemoData(agencyId);
   }
-  await prisma.sale.deleteMany({ where: { agencyId: { in: agencyIdsToClean } } });
-  await prisma.revenueEvent.deleteMany({ where: { agencyId: { in: agencyIdsToClean } } });
-  await prisma.costEvent.deleteMany({ where: { agencyId: { in: agencyIdsToClean } } });
   await prisma.auditEvent.deleteMany({ where: { agencyId: { in: agencyIdsToClean } } });
-  await prisma.lead.deleteMany({ where: { agencyId: { in: agencyIdsToClean } } });
-  await prisma.vendor.deleteMany({ where: { agencyId: { in: agencyIdsToClean } } });
   await prisma.telemarketerAssignment.deleteMany({ where: { agencyId: { in: agencyIdsToClean } } });
   await prisma.telemarketerProfile.deleteMany({ where: { userId: { in: userIdsToClean } } });
   await prisma.agencySubscription.deleteMany({ where: { agencyId: { in: agencyIdsToClean } } });

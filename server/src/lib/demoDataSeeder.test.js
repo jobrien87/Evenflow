@@ -219,6 +219,65 @@ test('seedRealisticDemoData: reseeding wipes cleanly even when the agency has re
   }
 });
 
+test('seedRealisticDemoData: worked leads carry real notes, and the live pipeline has open follow-up tasks', async () => {
+  const soldCount = await prisma.lead.count({ where: { agencyId: agency.id, status: 'SOLD' } });
+  const soldNoteCount = await prisma.leadNote.count({ where: { lead: { agencyId: agency.id, status: 'SOLD' } } });
+  assert.equal(soldNoteCount, soldCount, 'every SOLD lead must carry exactly one closing note');
+
+  const newLeadCount = await prisma.lead.count({ where: { agencyId: agency.id, status: 'NEW' } });
+  const newLeadNoteCount = await prisma.leadNote.count({ where: { lead: { agencyId: agency.id, status: 'NEW' } } });
+  assert.equal(newLeadNoteCount, 0, 'an unworked NEW lead must never have a note yet');
+
+  const openTasks = await prisma.task.count({ where: { agencyId: agency.id, status: 'OPEN' } });
+  assert.ok(openTasks > 0, 'the live pipeline should have at least one open follow-up task');
+  const openTaskLeads = await prisma.task.findMany({ where: { agencyId: agency.id, status: 'OPEN' }, select: { leadId: true } });
+  for (const t of openTaskLeads) {
+    const lead = await prisma.lead.findUnique({ where: { id: t.leadId } });
+    assert.ok(['CONTACTED', 'QUOTED', 'FOLLOW_UP', 'APPOINTMENT', 'NEW'].includes(lead.status), 'an open follow-up task must only sit on a still-in-progress lead');
+  }
+});
+
+test('seedRealisticDemoData: the full Backstage HR suite is seeded for every roster member', async () => {
+  const roster = [owner, ...producers, ...telemarketers];
+
+  const legalEmployer = await prisma.hrLegalEmployer.findFirst({ where: { agencyId: agency.id } });
+  assert.ok(legalEmployer, 'a legal employer row must exist');
+
+  const departments = await prisma.hrDepartment.findMany({ where: { agencyId: agency.id } });
+  assert.ok(departments.length >= 3, 'Sales/Telemarketing/Leadership departments must all exist');
+
+  const positions = await prisma.hrPosition.findMany({ where: { agencyId: agency.id } });
+  assert.ok(positions.length > 0);
+
+  for (const user of roster) {
+    const profile = await prisma.hrEmployeeProfile.findUnique({ where: { userId: user.id } });
+    assert.ok(profile, `${user.lastName} must have an HrEmployeeProfile`);
+    assert.equal(profile.onboardingStatus, 'COMPLETE');
+    assert.ok(profile.hireDate, `${user.lastName}'s profile must carry a real hireDate`);
+    assert.ok(profile.departmentId && profile.positionId, `${user.lastName}'s profile must be linked to a department and position`);
+
+    const historyCount = await prisma.hrEmploymentHistoryEvent.count({ where: { employeeProfileId: profile.id } });
+    assert.ok(historyCount > 0, `${user.lastName} must have at least one employment history event`);
+
+    const shiftCount = await prisma.hrShiftAssignment.count({ where: { employeeProfileId: profile.id } });
+    assert.ok(shiftCount > 0, `${user.lastName} must have scheduled shifts`);
+
+    const timesheetCount = await prisma.hrTimesheet.count({ where: { employeeProfileId: profile.id } });
+    assert.ok(timesheetCount > 0, `${user.lastName} must have at least one timesheet`);
+
+    const leaveAssignmentCount = await prisma.hrLeavePolicyAssignment.count({ where: { employeeProfileId: profile.id } });
+    assert.ok(leaveAssignmentCount >= 2, `${user.lastName} must be assigned to both leave policies`);
+
+    const ledgerCount = await prisma.hrLeaveLedgerEntry.count({ where: { employeeProfileId: profile.id } });
+    assert.ok(ledgerCount > 0, `${user.lastName} must have real leave-accrual ledger entries`);
+  }
+
+  const leaveTypes = await prisma.hrLeaveType.findMany({ where: { agencyId: agency.id } });
+  assert.ok(leaveTypes.length >= 2, 'PTO and Sick Time leave types must exist');
+  const leavePolicies = await prisma.hrLeavePolicy.findMany({ where: { agencyId: agency.id } });
+  assert.ok(leavePolicies.length >= 2);
+});
+
 test('seedRealisticDemoData: zero producers is a safe no-op', async () => {
   const soloAgency = await prisma.agency.create({ data: { name: `Seeder Solo Agency ${suffix}`, status: 'ACTIVE', isDemo: true } });
   const result = await seedRealisticDemoData(soloAgency.id, SMALL);

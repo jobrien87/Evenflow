@@ -1,11 +1,12 @@
 // Realistic demo-agency data generator — replaces the old, tiny
 // seedDemoAgencyData (28 leads / 10 sales / 2 vendors) stub. Builds 6
 // months of believable, high-volume activity for a demo agency: vendor-
-// sourced leads, telemarketer live transfers, a Cross-Sell/Winback
-// opportunity pipeline, per-producer monthly goals, and HR activity
-// (clock entries, PTO, Break Room) — so a demo account looks like a real,
-// busy agency rather than an empty shell, without ever touching the
-// agency's real roster/billing.
+// sourced leads, telemarketer live transfers, lead notes/tasks, a
+// Cross-Sell/Winback opportunity pipeline, per-producer monthly goals,
+// and the full HR picture (clock entries, PTO, Break Room, Backstage HR
+// employee profiles/departments/shifts/leave) — so a demo account looks
+// like a real, mature, busy agency rather than an empty shell, without
+// ever touching the agency's real roster/billing.
 //
 // Deliberately does NOT reuse createSaleRecord/updateCustomerProductsAnd-
 // DetectCrossSells for its bulk-pool sales — that live cross-sell auto-
@@ -17,17 +18,22 @@
 // pool itself, explicitly, at exact counts.
 //
 // Also deliberately breaks from this codebase's own "never createMany a
-// Lead/Sale" precedent for every high-volume row this seeder writes,
-// Sale/RevenueEvent included. Existing bulk paths (bulk-import, Back
-// Catalog) loop one create() at a time because they need live
-// distribution/notification/priority-scoring/edit-history logic; this
-// seeder is purely backdated synthetic data with no such history to
-// reconcile, so a plain chunked createMany is correct, ~100x faster, and
-// — critically — keeps the whole operation to a handful of round trips
-// regardless of real network latency to a remote (non-local) Postgres
-// instance. Thousands of individual creates, even batched via
-// Promise.all, would still serialize behind Prisma's connection pool and
-// risk the request exceeding a reverse-proxy timeout in production.
+// Lead/Sale" precedent for every high-volume row this seeder writes.
+// Existing bulk paths (bulk-import, Back Catalog) loop one create() at a
+// time because they need live distribution/notification/priority-
+// scoring/edit-history logic; this seeder is purely backdated synthetic
+// data with no such history to reconcile, so a plain chunked createMany
+// is correct and far faster.
+//
+// Row construction is flushed to the database every LEAD_FLUSH_DAYS days
+// (not accumulated for the full 6 months before a single write) — on a
+// single-worker deploy (Render sets WEB_CONCURRENCY=1 by default), tens
+// of thousands of JS object allocations done in one unbroken synchronous
+// stretch block the event loop for every other concurrent request on the
+// whole server, logins included, for as long as it takes. Each `await`
+// on a real database round trip yields control back to the event loop,
+// so regular flushing keeps both peak memory and max single-stretch CPU
+// time bounded regardless of how large `months`/`leadsPerDay` are.
 const crypto = require('crypto');
 const { prisma } = require('./db');
 const { recordAudit } = require('./audit');
@@ -50,6 +56,11 @@ const DEFAULTS = {
   vendorAvgCostCents: 525,
 };
 
+// How many calendar days of lead/customer/cost-event/note/task rows to
+// build in memory before flushing to the database and moving on to the
+// next chunk — see the file header comment for why this matters.
+const LEAD_FLUSH_DAYS = 10;
+
 const CARRIERS = ['Allstate', 'Progressive', 'State Farm', 'Nationwide', 'Travelers', 'Liberty Mutual', 'GEICO'];
 const DEMO_LAST_NAMES = ['Alvarez', 'Baxter', 'Chen', 'Delgado', 'Esposito', 'Franklin', 'Gutierrez', 'Harmon', 'Ibrahim', 'Jorgensen', 'Kowalski', 'Lindqvist', 'Monroe', 'Nguyen', 'Osei', 'Pruitt', 'Quintero', 'Reyes', 'Sato', 'Thibodeaux'];
 const DEMO_FIRST_NAMES = ['Jordan', 'Taylor', 'Morgan', 'Casey', 'Riley', 'Avery', 'Reese', 'Quinn', 'Rowan', 'Sawyer', 'Dakota', 'Emerson', 'Hayden', 'Jamie', 'Kendall', 'Logan', 'Parker', 'Skyler', 'Tatum', 'Blair'];
@@ -70,6 +81,29 @@ const GA_ZIP_TIERS = [
 
 const CROSS_SELL_PRODUCTS = ['Auto', 'Home', 'Life'];
 const WINBACK_LOST_REASONS = ['Price', 'Non-renewal', 'Moved out of state', 'Switched carriers', 'Coverage no longer needed'];
+
+const SOLD_NOTES = [
+  'Policy bound and premium confirmed. Welcome packet sent.',
+  'Closed — signed application received, first payment processed.',
+  'Sale finalized. Customer asked about adding coverage at next renewal.',
+  'Bound today. Declarations page emailed, confirmed customer received it.',
+];
+const LOST_NOTES = [
+  'Went with a competitor on price. No further action.',
+  'Not interested at this time — asked not to be contacted further.',
+  'Could not reach after multiple attempts. Closing out.',
+  'Already has coverage through a family member\'s agency.',
+  'Budget doesn\'t work right now. Left door open for next renewal.',
+];
+const WORKING_NOTES = [
+  'Spoke with customer, gathering info for a full quote.',
+  'Quote delivered — following up early next week.',
+  'Scheduled a callback to review options.',
+  'Customer comparing a couple of options, staying in touch.',
+  'Left a message, will try again tomorrow.',
+  'Sent the quote over email, waiting to hear back.',
+];
+const TERMINAL_UNSOLD_STATUSES = new Set(['LOST', 'NOT_INTERESTED', 'DO_NOT_CONTACT', 'BAD_CONTACT']);
 
 function uuid() {
   return crypto.randomUUID();
@@ -129,6 +163,29 @@ function policyTypeFor(productFamily) {
 
 function daysBetween(a, b) {
   return Math.round((b.getTime() - a.getTime()) / (24 * 60 * 60 * 1000));
+}
+
+// Converts a wall-clock "year, month(0-idx), day, hour, minute" meant as
+// America/New_York local time into the correct UTC Date instant, DST
+// included. Needed because this process runs in UTC (confirmed: a bare
+// `new Date(day); date.setHours(8, 30)` stores 8:30 UTC, not 8:30
+// Eastern) — every TimeClockEntry/HrShiftAssignment timestamp this
+// seeder writes is rendered in the agency's own America/New_York
+// timezone (Agency.timezone's default), so a naive setHours call made a
+// "Standard 9-5" shift visibly render as ~3-4 AM. Standard guess-and-
+// correct technique: treat the desired fields as a UTC guess, see what
+// that instant actually displays as in America/New_York, and shift by
+// the difference — accurate for any instant outside the one skipped/
+// repeated hour at a DST transition, which this data never needs to hit
+// precisely.
+function easternWallClockToUtc(year, month, day, hour, minute) {
+  const guess = Date.UTC(year, month, day, hour, minute, 0, 0);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+  }).formatToParts(new Date(guess)).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+  const shown = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute);
+  return new Date(guess + (guess - shown));
 }
 
 // A demo customer's own fabricated full name — never resembling a real person.
@@ -196,6 +253,32 @@ async function wipeAgencyDemoData(agencyId) {
   await prisma.sale.deleteMany({ where: { agencyId } });
   await prisma.lead.deleteMany({ where: { agencyId } });
   await prisma.vendor.deleteMany({ where: { agencyId } });
+
+  // Backstage HR — only ever written by this seeder (a brand-new, mostly-
+  // unused Phase-1 feature elsewhere in the app), but cleared defensively
+  // in full FK-safe order all the same. Scoped by agencyId directly (or a
+  // relation down to it) everywhere it's available, rather than a
+  // precomputed id array handed between queries — every one of these
+  // models already carries agencyId (HrLeavePolicyAssignment and
+  // HrShiftSwapRequest are the two exceptions, scoped via a relation
+  // filter instead), so there's no separate snapshot that can ever go
+  // stale relative to the delete it's meant to guard.
+  await prisma.hrShiftSwapRequest.deleteMany({ where: { shiftAssignment: { agencyId } } });
+  await prisma.hrShiftAssignment.deleteMany({ where: { agencyId } });
+  await prisma.hrAttendanceException.deleteMany({ where: { agencyId } });
+  await prisma.hrTimesheetSegment.deleteMany({ where: { timesheet: { agencyId } } });
+  await prisma.hrTimesheet.deleteMany({ where: { agencyId } });
+  await prisma.hrLeaveLedgerEntry.deleteMany({ where: { agencyId } });
+  await prisma.hrLeaveRequest.deleteMany({ where: { agencyId } });
+  await prisma.hrLeavePolicyAssignment.deleteMany({ where: { employeeProfile: { agencyId } } });
+  await prisma.hrEmploymentHistoryEvent.deleteMany({ where: { agencyId } });
+  await prisma.hrLeavePolicy.deleteMany({ where: { agencyId } });
+  await prisma.hrLeaveType.deleteMany({ where: { agencyId } });
+  await prisma.hrShiftTemplate.deleteMany({ where: { agencyId } });
+  await prisma.hrEmployeeProfile.deleteMany({ where: { agencyId } });
+  await prisma.hrPosition.deleteMany({ where: { agencyId } });
+  await prisma.hrDepartment.deleteMany({ where: { agencyId } });
+  await prisma.hrLegalEmployer.deleteMany({ where: { agencyId } });
 }
 
 async function createVendors(agencyId) {
@@ -274,6 +357,106 @@ function pickProducerForDate(monthlyWeights, date) {
   return weightedPick(monthlyWeights.get(monthKey(date)));
 }
 
+// Builds one lead's full row set (customer, lead, cost event, note,
+// task) — called for both the general vendor pool and the telemarketer
+// transfer pool, which only differ in how the lead is sourced/typed and
+// what its close rate is. Pushes everything into the caller's shared
+// per-flush-chunk arrays; returns nothing.
+function buildLeadBundle({
+  agencyId, day, now, isOld, closeRate, zipTiers, producer, product, vendor, tm, roster,
+  buckets,
+}) {
+  const { firstName, lastName } = demoName();
+  const customerId = uuid();
+  const leadId = uuid();
+  const zip = weightedPick(zipTiers.map((t) => ({ value: t.zip, weight: t.weight })));
+  const receivedAt = new Date(day.getTime() + randomInt(8, 18) * 60 * 60 * 1000);
+  const isTransfer = !!tm;
+
+  let status;
+  let isSold = false;
+  if (isOld) {
+    if (Math.random() < closeRate) {
+      status = 'SOLD';
+      isSold = true;
+    } else if (isTransfer) {
+      status = weightedPick([{ value: 'LOST', weight: 50 }, { value: 'NOT_INTERESTED', weight: 40 }, { value: 'BAD_CONTACT', weight: 10 }]);
+    } else {
+      status = weightedPick([
+        { value: 'LOST', weight: 40 }, { value: 'NOT_INTERESTED', weight: 35 },
+        { value: 'DO_NOT_CONTACT', weight: 5 }, { value: 'BAD_CONTACT', weight: 20 },
+      ]);
+    }
+  } else {
+    status = weightedPick([
+      { value: 'NEW', weight: 20 }, { value: 'CONTACTED', weight: 25 }, { value: 'QUOTED', weight: 25 },
+      { value: 'FOLLOW_UP', weight: 15 }, { value: 'APPOINTMENT', weight: 15 },
+    ]);
+  }
+
+  buckets.customers.push({ id: customerId, firstName, lastName, zip, state: 'GA' });
+  buckets.leads.push({
+    id: leadId, agencyId, customerId,
+    source: isTransfer ? 'telemarketer' : 'vendor',
+    vendorId: isTransfer ? null : vendor.id,
+    product, status,
+    leadType: isTransfer ? 'TRANSFER' : deriveLeadType({ vendorCategory: vendor.category }),
+    isLiveTransfer: isTransfer, moshpitEligible: isTransfer,
+    assignedToId: producer.id,
+    createdById: isTransfer ? tm.id : (roster.owner ? roster.owner.id : producer.id),
+    receivedAt, assignedAt: receivedAt, zip, state: 'GA',
+  });
+  if (!isTransfer) {
+    buckets.costEvents.push({ id: uuid(), agencyId, vendorId: vendor.id, category: 'VENDOR_LEAD_COST', amountCents: vendor.costPerLeadCents, occurredAt: receivedAt, notes: `Vendor lead cost for lead ${leadId}` });
+  }
+  if (isSold) buckets.soldLeadSaleInputs.push({ leadId, customerId, assignedToId: producer.id, productFamily: product, receivedAt, zip });
+
+  // Notes + tasks — the real texture of a lead that's actually been
+  // worked. NEW leads are untouched (nobody's called them yet, which is
+  // itself realistic); everything else gets a real chance at a note, and
+  // an in-progress lead in the live/recent window also gets an open
+  // follow-up task so the Tasks page and work queue look genuinely active
+  // right now, not just historically.
+  if (status === 'SOLD') {
+    buckets.leadNotes.push({ id: uuid(), leadId, authorId: producer.id, content: randomChoice(SOLD_NOTES), createdAt: new Date(receivedAt.getTime() + randomInt(1, 5) * 24 * 60 * 60 * 1000) });
+    if (Math.random() < 0.3) {
+      const dueAt = new Date(receivedAt.getTime() + randomInt(5, 10) * 24 * 60 * 60 * 1000);
+      buckets.tasks.push({
+        id: uuid(), agencyId, leadId, type: 'FOLLOW_UP', title: `Send renewal reminder — ${firstName} ${lastName}`,
+        status: 'COMPLETED', priority: 0, assignedToId: producer.id, createdById: producer.id,
+        dueAt, completedAt: dueAt,
+      });
+    }
+  } else if (TERMINAL_UNSOLD_STATUSES.has(status) && Math.random() < 0.5) {
+    buckets.leadNotes.push({ id: uuid(), leadId, authorId: producer.id, content: randomChoice(LOST_NOTES), createdAt: new Date(receivedAt.getTime() + randomInt(1, 4) * 24 * 60 * 60 * 1000) });
+  } else if (!isOld && status !== 'NEW') {
+    // In-progress and recent — the live pipeline. NEW is deliberately
+    // excluded: nobody has worked this lead yet, so it has no note and no
+    // follow-up task — same reasoning as the isOld branch above never
+    // touching NEW (it never produces NEW at all).
+    if (Math.random() < 0.7) {
+      buckets.leadNotes.push({ id: uuid(), leadId, authorId: producer.id, content: randomChoice(WORKING_NOTES), createdAt: new Date(receivedAt.getTime() + randomInt(0, 2) * 24 * 60 * 60 * 1000) });
+    }
+    if (Math.random() < 0.6) {
+      // Mostly due hours-to-days out (not yet due), with a small realistic
+      // slice already overdue — not a near-even split. Every one of these
+      // tasks is built at the same `now`, so an even day-level spread
+      // (e.g. -1..+3 days) put a day-0 AND a day-(-1) bucket in the past
+      // the moment any real time passes after seeding, making ~40% of
+      // the live work queue look overdue on first look — exactly the
+      // opposite of "well-oiled machine."
+      const dueAt = Math.random() < 0.15
+        ? new Date(now.getTime() - randomInt(2, 48) * 60 * 60 * 1000)
+        : new Date(now.getTime() + randomInt(4, 96) * 60 * 60 * 1000);
+      buckets.tasks.push({
+        id: uuid(), agencyId, leadId, type: 'FOLLOW_UP', title: `Follow up with ${firstName} ${lastName}`,
+        status: 'OPEN', priority: randomInt(0, 2), assignedToId: producer.id, createdById: producer.id,
+        dueAt,
+      });
+    }
+  }
+}
+
 async function seedRealisticDemoData(agencyId, options = {}) {
   const cfg = { ...DEFAULTS, ...options };
   const roster = await loadRoster(agencyId);
@@ -284,7 +467,7 @@ async function seedRealisticDemoData(agencyId, options = {}) {
   await wipeAgencyDemoData(agencyId);
 
   // Agency located in GA, matching the lead zip tiers below.
-  await prisma.agency.update({
+  const agency = await prisma.agency.update({
     where: { id: agencyId },
     data: { state: 'GA', city: 'Atlanta', address: '1100 Peachtree St NE', zip: '30309' },
   });
@@ -300,118 +483,61 @@ async function seedRealisticDemoData(agencyId, options = {}) {
   const monthlyProducerWeights = buildMonthlyProducerWeights(producerTiers, start, now);
   const zipTiers = GA_ZIP_TIERS;
 
-  const customers = [];
-  const leads = [];
-  const costEvents = [];
-  const soldLeadSaleInputs = []; // { leadId, customerId, assignedToId, productFamily, receivedAt }
+  const soldLeadSaleInputs = []; // { leadId, customerId, assignedToId, productFamily, receivedAt, zip } — kept across the whole run, tiny per-entry
 
   let transferCount = 0;
   let generalCount = 0;
+  let leadNoteCount = 0;
+  let taskCount = 0;
 
-  for (let dayOffset = 0; dayOffset <= totalDays; dayOffset++) {
-    const day = new Date(start);
-    day.setDate(day.getDate() + dayOffset);
-    const ageDays = daysBetween(day, now);
-    const isOld = ageDays >= 10;
+  // --- General + telemarketer-transfer leads, flushed every LEAD_FLUSH_DAYS days ---
+  for (let chunkStart = 0; chunkStart <= totalDays; chunkStart += LEAD_FLUSH_DAYS) {
+    const buckets = { customers: [], leads: [], costEvents: [], leadNotes: [], tasks: [], soldLeadSaleInputs: [] };
+    const chunkEnd = Math.min(chunkStart + LEAD_FLUSH_DAYS - 1, totalDays);
 
-    // --- General vendor-sourced leads ---
-    const generalToday = cfg.leadsPerDay - cfg.transfersPerDay;
-    for (let i = 0; i < generalToday; i++) {
-      const vendor = weightedPick(vendorWeights);
-      const producer = pickProducerForDate(monthlyProducerWeights, day);
-      const zip = weightedPick(zipTiers.map((t) => ({ value: t.zip, weight: t.weight })));
-      const product = randomChoice(PRODUCTS);
-      const { firstName, lastName } = demoName();
-      const customerId = uuid();
-      const leadId = uuid();
-      const receivedAt = new Date(day.getTime() + randomInt(8, 18) * 60 * 60 * 1000);
+    for (let dayOffset = chunkStart; dayOffset <= chunkEnd; dayOffset++) {
+      const day = new Date(start);
+      day.setDate(day.getDate() + dayOffset);
+      const ageDays = daysBetween(day, now);
+      const isOld = ageDays >= 10;
 
-      let status;
-      let isSold = false;
-      if (isOld) {
-        if (Math.random() < cfg.generalCloseRate) {
-          status = 'SOLD';
-          isSold = true;
-        } else {
-          status = weightedPick([
-            { value: 'LOST', weight: 40 }, { value: 'NOT_INTERESTED', weight: 35 },
-            { value: 'DO_NOT_CONTACT', weight: 5 }, { value: 'BAD_CONTACT', weight: 20 },
-          ]);
-        }
-      } else {
-        status = weightedPick([
-          { value: 'NEW', weight: 25 }, { value: 'CONTACTED', weight: 25 }, { value: 'QUOTED', weight: 20 },
-          { value: 'FOLLOW_UP', weight: 15 }, { value: 'APPOINTMENT', weight: 15 },
-        ]);
-      }
-
-      customers.push({ id: customerId, firstName, lastName, zip, state: 'GA' });
-      leads.push({
-        id: leadId, agencyId, customerId, source: 'vendor', vendorId: vendor.id,
-        product, status, leadType: deriveLeadType({ vendorCategory: vendor.category }),
-        assignedToId: producer.id, createdById: roster.owner ? roster.owner.id : producer.id,
-        receivedAt, assignedAt: receivedAt, zip, state: 'GA',
-      });
-      costEvents.push({ id: uuid(), agencyId, vendorId: vendor.id, category: 'VENDOR_LEAD_COST', amountCents: vendor.costPerLeadCents, occurredAt: receivedAt, notes: `Vendor lead cost for lead ${leadId}` });
-      if (isSold) soldLeadSaleInputs.push({ leadId, customerId, assignedToId: producer.id, productFamily: product, receivedAt, zip });
-      generalCount++;
-    }
-
-    // --- Telemarketer live transfers ---
-    if (roster.telemarketers.length > 0) {
-      for (let i = 0; i < cfg.transfersPerDay; i++) {
-        const tm = roster.telemarketers[i % roster.telemarketers.length];
-        const producer = pickProducerForDate(monthlyProducerWeights, day);
-        const zip = weightedPick(zipTiers.map((t) => ({ value: t.zip, weight: t.weight })));
-        const product = randomChoice(PRODUCTS);
-        const { firstName, lastName } = demoName();
-        const customerId = uuid();
-        const leadId = uuid();
-        const receivedAt = new Date(day.getTime() + randomInt(8, 18) * 60 * 60 * 1000);
-
-        let status;
-        let isSold = false;
-        if (isOld) {
-          if (Math.random() < cfg.transferCloseRate) {
-            status = 'SOLD';
-            isSold = true;
-          } else {
-            status = weightedPick([{ value: 'LOST', weight: 50 }, { value: 'NOT_INTERESTED', weight: 40 }, { value: 'BAD_CONTACT', weight: 10 }]);
-          }
-        } else {
-          status = weightedPick([
-            { value: 'NEW', weight: 20 }, { value: 'CONTACTED', weight: 25 }, { value: 'QUOTED', weight: 25 },
-            { value: 'FOLLOW_UP', weight: 15 }, { value: 'APPOINTMENT', weight: 15 },
-          ]);
-        }
-
-        customers.push({ id: customerId, firstName, lastName, zip, state: 'GA' });
-        leads.push({
-          id: leadId, agencyId, customerId, source: 'telemarketer', vendorId: null,
-          product, status, leadType: 'TRANSFER', isLiveTransfer: true, moshpitEligible: true,
-          assignedToId: producer.id, createdById: tm.id, receivedAt, assignedAt: receivedAt, zip, state: 'GA',
+      const generalToday = cfg.leadsPerDay - cfg.transfersPerDay;
+      for (let i = 0; i < generalToday; i++) {
+        buildLeadBundle({
+          agencyId, day, now, isOld, closeRate: cfg.generalCloseRate, zipTiers,
+          producer: pickProducerForDate(monthlyProducerWeights, day),
+          product: randomChoice(PRODUCTS), vendor: weightedPick(vendorWeights), tm: null, roster, buckets,
         });
-        if (isSold) soldLeadSaleInputs.push({ leadId, customerId, assignedToId: producer.id, productFamily: product, receivedAt, zip });
-        transferCount++;
+        generalCount++;
+      }
+
+      if (roster.telemarketers.length > 0) {
+        for (let i = 0; i < cfg.transfersPerDay; i++) {
+          buildLeadBundle({
+            agencyId, day, now, isOld, closeRate: cfg.transferCloseRate, zipTiers,
+            producer: pickProducerForDate(monthlyProducerWeights, day),
+            product: randomChoice(PRODUCTS), vendor: null, tm: roster.telemarketers[i % roster.telemarketers.length], roster, buckets,
+          });
+          transferCount++;
+        }
       }
     }
-  }
 
-  await createManyChunked(prisma.customer, customers);
-  await createManyChunked(prisma.lead, leads);
-  await createManyChunked(prisma.costEvent, costEvents);
-  const customersInsertedSoFar = customers.length;
+    await createManyChunked(prisma.customer, buckets.customers);
+    await createManyChunked(prisma.lead, buckets.leads);
+    await createManyChunked(prisma.costEvent, buckets.costEvents);
+    await createManyChunked(prisma.leadNote, buckets.leadNotes);
+    await createManyChunked(prisma.task, buckets.tasks);
+    leadNoteCount += buckets.leadNotes.length;
+    taskCount += buckets.tasks.length;
+    soldLeadSaleInputs.push(...buckets.soldLeadSaleInputs);
+  }
 
   // --- Sales for every terminal-SOLD lead, posting the one real revenue entry every dashboard reads ---
   // Built as plain rows and createMany'd (never individual creates) —
   // every Sale here is brand new, so there's no edit/void history to
   // reconcile and no need for syncSaleRevenueEvent's upsert semantics;
-  // a matching RevenueEvent row is just as cheap to build directly. This
-  // keeps the whole operation to a handful of round trips regardless of
-  // real network latency to a remote (non-local) Postgres instance —
-  // thousands of individual creates, even batched via Promise.all, would
-  // still serialize behind Prisma's connection pool and risk the request
-  // exceeding a reverse-proxy timeout in production.
+  // a matching RevenueEvent row is just as cheap to build directly.
   let saleCount = 0;
   let totalItemsSold = 0;
   const itemsByProducerMonth = new Map(); // `${producerId}:${year}-${month}` -> items
@@ -445,9 +571,16 @@ async function seedRealisticDemoData(agencyId, options = {}) {
     saleCount++;
   }
 
-  for (const input of soldLeadSaleInputs) buildSaleAndRevenue(input);
+  for (const batch of chunk(soldLeadSaleInputs, 5000)) {
+    for (const input of batch) buildSaleAndRevenue(input);
+  }
+  await createManyChunked(prisma.sale, saleRows);
+  await createManyChunked(prisma.revenueEvent, revenueRows);
+  saleRows.length = 0;
+  revenueRows.length = 0;
 
   // --- Cross-Sell / Winback opportunity pipeline ---
+  const opportunityCustomers = [];
   const opportunityRows = [];
   const opportunityEventRows = [];
   const wonOpportunities = [];
@@ -460,7 +593,7 @@ async function seedRealisticDemoData(agencyId, options = {}) {
   function buildOpportunityBatch(type, count) {
     for (let i = 0; i < count; i++) {
       // Leave room for a WON opportunity's own sale to land 1-5 days after
-      // createdAt (bulkCreateSaleWithRevenue) without ever landing in the
+      // createdAt (buildSaleAndRevenue) without ever landing in the
       // future relative to "now".
       const latestCreatedAt = now.getTime() - 6 * 24 * 60 * 60 * 1000;
       const createdAt = new Date(start.getTime() + Math.random() * (latestCreatedAt - start.getTime()));
@@ -492,7 +625,7 @@ async function seedRealisticDemoData(agencyId, options = {}) {
       }
 
       const zip = weightedPick(zipTiers.map((t) => ({ value: t.zip, weight: t.weight })));
-      customers.push({ id: customerId, firstName, lastName, zip, state: 'GA' });
+      opportunityCustomers.push({ id: customerId, firstName, lastName, zip, state: 'GA' });
       opportunityRows.push({
         id, agencyId, customerId, type, status, product, previousProduct, previousPremiumCents,
         lostAt, lostReason, reason, priorityScore: randomInt(10, 60), assignedToId: producer.id,
@@ -512,15 +645,11 @@ async function seedRealisticDemoData(agencyId, options = {}) {
   buildOpportunityBatch('CROSS_SELL', cfg.crossSellCount);
   buildOpportunityBatch('WINBACK', cfg.winbackCount);
 
-  // customers[] already has the general/transfer-pool rows createMany'd
-  // above (customersInsertedSoFar) — only the new opportunity-pool
-  // customers pushed since then need their own createMany.
-  await createManyChunked(prisma.customer, customers.slice(customersInsertedSoFar));
+  await createManyChunked(prisma.customer, opportunityCustomers);
   await createManyChunked(prisma.opportunity, opportunityRows);
   await createManyChunked(prisma.opportunityEvent, opportunityEventRows);
 
   for (const input of wonOpportunities) buildSaleAndRevenue(input);
-
   await createManyChunked(prisma.sale, saleRows);
   await createManyChunked(prisma.revenueEvent, revenueRows);
 
@@ -556,12 +685,12 @@ async function seedRealisticDemoData(agencyId, options = {}) {
       if (dow === 0 || dow === 6) continue; // weekends off
       if (Math.random() < 0.06) continue; // occasional absence
 
-      const clockInAt = new Date(day); clockInAt.setHours(randomInt(8, 9), randomInt(0, 59), 0, 0);
+      const clockInAt = easternWallClockToUtc(day.getFullYear(), day.getMonth(), day.getDate(), randomInt(8, 9), randomInt(0, 59));
       const lunchStartAt = new Date(clockInAt.getTime() + randomInt(3, 4) * 60 * 60 * 1000);
       const lunchEndAt = new Date(lunchStartAt.getTime() + randomInt(30, 60) * 60 * 1000);
       const breakStartAt = new Date(lunchEndAt.getTime() + randomInt(60, 120) * 60 * 1000);
       const breakEndAt = new Date(breakStartAt.getTime() + randomInt(10, 15) * 60 * 1000);
-      const clockOutAt = new Date(day); clockOutAt.setHours(randomInt(17, 18), randomInt(0, 59), 0, 0);
+      const clockOutAt = easternWallClockToUtc(day.getFullYear(), day.getMonth(), day.getDate(), randomInt(17, 18), randomInt(0, 59));
 
       timeClockRows.push({
         id: uuid(), userId: user.id, agencyId, clockInAt, clockOutAt,
@@ -584,14 +713,15 @@ async function seedRealisticDemoData(agencyId, options = {}) {
   await createManyChunked(prisma.timeClockEntry, timeClockRows);
   await createManyChunked(prisma.ptoRequest, ptoRows);
 
-  const gameTypes = ['CONGO_LINE', 'BUCKETS', 'FULL_SEND', 'PILL_POP'];
-  const sessionRows = [];
-  const bestScores = new Map(); // `${userId}:${gameType}` -> { score, sessionId, achievedAt }
   const clockEntriesByUser = new Map();
   for (const row of timeClockRows) {
     if (!clockEntriesByUser.has(row.userId)) clockEntriesByUser.set(row.userId, []);
     clockEntriesByUser.get(row.userId).push(row);
   }
+
+  const gameTypes = ['CONGO_LINE', 'BUCKETS', 'FULL_SEND', 'PILL_POP'];
+  const sessionRows = [];
+  const bestScores = new Map(); // `${userId}:${gameType}` -> { score, sessionId, achievedAt }
   for (const user of roster.hrRoster) {
     const entries = clockEntriesByUser.get(user.id) || [];
     if (entries.length === 0) continue;
@@ -620,6 +750,9 @@ async function seedRealisticDemoData(agencyId, options = {}) {
   });
   await createManyChunked(prisma.breakRoomHighScore, highScoreRows);
 
+  // --- Backstage HR: departments, positions, employee profiles, shifts, leave ---
+  const hr = await seedBackstageHr({ agencyId, agency, roster, start, now, totalDays, clockEntriesByUser, ptoRows });
+
   const blendedCostPerLeadCents = Math.round(
     vendors.reduce((sum, v) => sum + v.costPerLeadCents, 0) / vendors.length,
   );
@@ -643,6 +776,8 @@ async function seedRealisticDemoData(agencyId, options = {}) {
       vendors: vendors.length,
       generalLeads: generalCount,
       transferLeads: transferCount,
+      leadNotes: leadNoteCount,
+      tasks: taskCount,
       sales: saleCount,
       crossSellOpportunities: cfg.crossSellCount,
       winbackOpportunities: cfg.winbackCount,
@@ -654,7 +789,262 @@ async function seedRealisticDemoData(agencyId, options = {}) {
       totalItemsSold,
       blendedCostPerLeadCents,
       telemarketerCount: roster.telemarketers.length,
+      ...hr,
     },
+  };
+}
+
+// Backstage HR — the Phase-1 admin suite at /agency/hr. A real agency
+// that's been operating for years has departments, positions, employee
+// profiles, a work schedule, and a leave program; a demo agency should
+// look exactly as lived-in. Runs once per reseed (not per lead-day), so
+// row counts here are small (roughly roster size, not lead volume) and
+// it's safe to build this in a single pass.
+async function seedBackstageHr({ agencyId, agency, roster, start, now, totalDays, clockEntriesByUser, ptoRows }) {
+  const legalEmployer = await prisma.hrLegalEmployer.create({
+    data: { agencyId, legalName: `${agency.name} LLC`, jurisdictionCountry: 'US', jurisdictionRegion: 'GA' },
+  });
+
+  const departments = {};
+  for (const name of ['Sales', 'Telemarketing', 'Leadership']) {
+    departments[name] = await prisma.hrDepartment.create({
+      data: { agencyId, name, managerId: roster.owner ? roster.owner.id : null },
+    });
+  }
+  const positions = {};
+  const positionSpecs = [
+    { role: 'PRODUCER', title: 'Producer', dept: 'Sales' },
+    { role: 'TELEMARKETER', title: 'Telemarketer', dept: 'Telemarketing' },
+    { role: 'AGENCY_OWNER', title: 'Agency Owner', dept: 'Leadership' },
+    { role: 'AGENCY_MANAGER', title: 'Agency Manager', dept: 'Leadership' },
+  ];
+  for (const spec of positionSpecs) {
+    positions[spec.role] = await prisma.hrPosition.create({
+      data: { agencyId, title: spec.title, departmentId: departments[spec.dept].id },
+    });
+  }
+
+  // Hire dates spread out so the roster looks like it's been built up over
+  // real time, not all hired on the same day — the owner is always the
+  // most tenured.
+  const sixYearsMs = 6 * 365 * 24 * 60 * 60 * 1000;
+  const employeeByUserId = new Map();
+  const employeeRows = [];
+  const historyRows = [];
+  let employeeSeq = 1;
+  for (const user of roster.hrRoster) {
+    const isOwner = roster.owner && user.id === roster.owner.id;
+    const tenureMs = isOwner ? randomInt(3, 6) * 365 * 24 * 60 * 60 * 1000 : randomInt(90, 3 * 365) * 24 * 60 * 60 * 1000;
+    const hireDate = new Date(Math.max(now.getTime() - tenureMs, now.getTime() - sixYearsMs));
+    const position = positions[user.role] || positions.PRODUCER;
+    const id = uuid();
+    employeeRows.push({
+      id, userId: user.id, agencyId, legalEmployerId: legalEmployer.id,
+      employeeNumber: `EMP-${String(employeeSeq).padStart(3, '0')}`,
+      legalFirstName: user.firstName, legalLastName: user.lastName, personalEmail: user.email,
+      employmentType: 'FULL_TIME', workerClassification: 'W2',
+      hireDate, originalHireDate: hireDate,
+      departmentId: position.departmentId, positionId: position.id,
+      managerId: !isOwner && roster.owner ? roster.owner.id : null,
+      workTimeZone: 'America/New_York', onboardingStatus: 'COMPLETE', offboardingStatus: 'NOT_STARTED',
+    });
+    historyRows.push({
+      id: uuid(), employeeProfileId: id, agencyId, changeType: 'STATUS_CHANGE',
+      effectiveFrom: hireDate, newValue: { onboardingStatus: 'COMPLETE' },
+      recordedById: roster.owner ? roster.owner.id : user.id, createdAt: hireDate,
+    });
+    employeeByUserId.set(user.id, { id, hireDate });
+    employeeSeq++;
+  }
+  await createManyChunked(prisma.hrEmployeeProfile, employeeRows);
+  await createManyChunked(prisma.hrEmploymentHistoryEvent, historyRows);
+
+  // Shift template + assignments, reusing the exact same workdays
+  // TimeClockEntry already has — a schedule that lines up with real clock
+  // history instead of a second, disconnected calendar.
+  const shiftTemplate = await prisma.hrShiftTemplate.create({
+    data: { agencyId, name: 'Standard 9-5', startTime: '09:00', endTime: '17:00' },
+  });
+  const shiftRows = [];
+  const attendanceExceptionRows = [];
+  const EXCEPTION_TYPES = ['LATE_ARRIVAL', 'EARLY_DEPARTURE', 'MISSED_PUNCH'];
+  for (const user of roster.hrRoster) {
+    const employee = employeeByUserId.get(user.id);
+    if (!employee) continue;
+    const entries = clockEntriesByUser.get(user.id) || [];
+    for (const entry of entries) {
+      const workDate = new Date(entry.clockInAt.getFullYear(), entry.clockInAt.getMonth(), entry.clockInAt.getDate());
+      shiftRows.push({
+        id: uuid(), agencyId, employeeProfileId: employee.id, shiftTemplateId: shiftTemplate.id,
+        workDate, startAt: entry.clockInAt, endAt: entry.clockOutAt, status: 'SCHEDULED',
+        createdById: roster.owner ? roster.owner.id : user.id, createdAt: entry.clockInAt,
+      });
+      if (Math.random() < 0.03) {
+        const exceptionType = randomChoice(EXCEPTION_TYPES);
+        const resolved = Math.random() < 0.7;
+        attendanceExceptionRows.push({
+          id: uuid(), employeeProfileId: employee.id, agencyId, exceptionType,
+          detectedAt: entry.clockInAt,
+          status: resolved ? randomChoice(['RESOLVED_EXCUSED', 'RESOLVED_UNEXCUSED']) : 'OPEN',
+          reviewedById: resolved ? (roster.owner ? roster.owner.id : null) : null,
+          reviewedAt: resolved ? new Date(entry.clockInAt.getTime() + 2 * 24 * 60 * 60 * 1000) : null,
+          reviewNote: resolved ? 'Reviewed — one-off, no pattern.' : null,
+        });
+      }
+    }
+  }
+  await createManyChunked(prisma.hrShiftAssignment, shiftRows);
+  await createManyChunked(prisma.hrAttendanceException, attendanceExceptionRows);
+
+  // A couple of real shift-swap requests for texture — one still pending
+  // so there's something live to act on, a couple already decided.
+  const swapRows = [];
+  if (shiftRows.length > 5 && roster.hrRoster.length > 1) {
+    const sample = [shiftRows[Math.floor(shiftRows.length * 0.25)], shiftRows[Math.floor(shiftRows.length * 0.6)], shiftRows[shiftRows.length - 3]].filter(Boolean);
+    sample.forEach((shift, i) => {
+      const requester = randomChoice(roster.hrRoster);
+      const covering = randomChoice(roster.hrRoster.filter((u) => u.id !== requester.id)) || requester;
+      const isPending = i === sample.length - 1;
+      swapRows.push({
+        id: uuid(), shiftAssignmentId: shift.id, requestedById: requester.id, proposedCoveringUserId: covering.id,
+        status: isPending ? 'PENDING' : 'APPROVED', reason: 'Personal scheduling conflict',
+        decidedById: isPending ? null : (roster.owner ? roster.owner.id : null),
+        decidedAt: isPending ? null : new Date(shift.workDate.getTime() - 24 * 60 * 60 * 1000),
+      });
+    });
+  }
+  await createManyChunked(prisma.hrShiftSwapRequest, swapRows);
+
+  // Monthly timesheets per employee, computed from the same clock rows —
+  // all but the most recent period already approved, the latest one
+  // still sitting SUBMITTED so there's a real pending item to approve.
+  const timesheetRows = [];
+  const segmentRows = [];
+  for (const user of roster.hrRoster) {
+    const employee = employeeByUserId.get(user.id);
+    if (!employee) continue;
+    const entries = clockEntriesByUser.get(user.id) || [];
+    for (let m = 0; m < Math.ceil((totalDays + 1) / 30); m++) {
+      const periodStart = new Date(start);
+      periodStart.setDate(periodStart.getDate() + m * 30);
+      const periodEnd = new Date(Math.min(periodStart.getTime() + 29 * 24 * 60 * 60 * 1000, now.getTime()));
+      const periodEntries = entries.filter((e) => e.clockInAt >= periodStart && e.clockInAt <= periodEnd);
+      if (periodEntries.length === 0) continue;
+      const regularMinutes = periodEntries.reduce((sum, e) => {
+        const gross = (e.clockOutAt.getTime() - e.clockInAt.getTime()) / 60000;
+        const lunch = (e.lunchEndAt.getTime() - e.lunchStartAt.getTime()) / 60000;
+        const brk = (e.breakEndAt.getTime() - e.breakStartAt.getTime()) / 60000;
+        return sum + Math.max(0, gross - lunch - brk);
+      }, 0);
+      const isLatestPeriod = periodEnd.getTime() >= now.getTime() - 30 * 24 * 60 * 60 * 1000;
+      const timesheetId = uuid();
+      timesheetRows.push({
+        id: timesheetId, employeeProfileId: employee.id, agencyId, periodStart, periodEnd,
+        regularMinutes: Math.round(regularMinutes), overtimeMinutes: 0, paidLeaveMinutes: 0,
+        status: isLatestPeriod ? 'SUBMITTED' : 'APPROVED',
+        approvedById: isLatestPeriod ? null : (roster.owner ? roster.owner.id : null),
+        approvedAt: isLatestPeriod ? null : periodEnd,
+      });
+      segmentRows.push({
+        id: uuid(), timesheetId, sourceTimeClockEntryId: periodEntries[0].id, segmentType: 'WORK',
+        startedAt: periodStart, endedAt: periodEnd, minutes: Math.round(regularMinutes),
+      });
+    }
+  }
+  await createManyChunked(prisma.hrTimesheet, timesheetRows);
+  await createManyChunked(prisma.hrTimesheetSegment, segmentRows);
+
+  // Leave program — PTO + Sick, accrued monthly, with real leave requests
+  // mirroring the already-seeded PtoRequest rows so Leave Calendar/Leave
+  // Policies aren't a second, disconnected system.
+  const leaveTypes = {};
+  for (const name of ['PTO', 'Sick Time']) {
+    leaveTypes[name] = await prisma.hrLeaveType.create({ data: { agencyId, name, isPaid: true } });
+  }
+  const leavePolicies = {};
+  for (const name of ['PTO', 'Sick Time']) {
+    leavePolicies[name] = await prisma.hrLeavePolicy.create({
+      data: {
+        agencyId, leaveTypeId: leaveTypes[name].id, name: `${name} Accrual`,
+        accrualMethod: 'PER_PAY_PERIOD', accrualAmountMinutes: name === 'PTO' ? 400 : 240,
+        annualCapMinutes: name === 'PTO' ? 9600 : 4800, effectiveFrom: new Date(now.getTime() - 2 * 365 * 24 * 60 * 60 * 1000),
+      },
+    });
+  }
+  const policyAssignmentRows = [];
+  const ledgerRows = [];
+  const leaveRequestRows = [];
+  for (const user of roster.hrRoster) {
+    const employee = employeeByUserId.get(user.id);
+    if (!employee) continue;
+    for (const name of ['PTO', 'Sick Time']) {
+      policyAssignmentRows.push({ id: uuid(), employeeProfileId: employee.id, leavePolicyId: leavePolicies[name].id, effectiveFrom: employee.hireDate });
+      for (let m = 0; m < 6; m++) {
+        const accruedAt = new Date(now.getFullYear(), now.getMonth() - m, 1);
+        if (accruedAt < employee.hireDate) continue;
+        ledgerRows.push({
+          id: uuid(), employeeProfileId: employee.id, leaveTypeId: leaveTypes[name].id, agencyId,
+          transactionType: 'ACCRUAL', minutes: name === 'PTO' ? 400 : 240, reason: 'Monthly accrual',
+          idempotencyKey: `accrual-${employee.id}-${name}-${accruedAt.getFullYear()}-${accruedAt.getMonth()}`,
+          recordedById: roster.owner ? roster.owner.id : user.id, createdAt: accruedAt,
+        });
+      }
+    }
+  }
+  // Mirror the PtoRequest rows into HrLeaveRequest, so both leave systems
+  // agree instead of looking like two disconnected features. APPROVED
+  // ones (sampled, not every one) also get a matching USE ledger entry;
+  // PENDING ones are carried over as-is (no decidedById/decidedAt yet) so
+  // the Leave Policies tab's "PENDING LEAVE REQUESTS" panel always has
+  // something real to review, the same way an open attendance exception
+  // and a pending shift swap already do elsewhere in this suite; DENIED
+  // ones carry over too, for the same "real history, not just success"
+  // reason Opportunity/Task already follow.
+  for (const pto of ptoRows) {
+    const employee = employeeByUserId.get(pto.userId);
+    if (!employee) continue;
+    const minutes = Math.round((pto.endDate.getTime() - pto.startDate.getTime()) / 60000);
+    if (pto.status === 'PENDING') {
+      leaveRequestRows.push({
+        id: uuid(), employeeProfileId: employee.id, agencyId, leaveTypeId: leaveTypes.PTO.id,
+        startDate: pto.startDate, endDate: pto.endDate, requestedMinutes: minutes, note: pto.reason,
+        status: 'PENDING',
+      });
+      continue;
+    }
+    if (pto.status === 'DENIED') {
+      leaveRequestRows.push({
+        id: uuid(), employeeProfileId: employee.id, agencyId, leaveTypeId: leaveTypes.PTO.id,
+        startDate: pto.startDate, endDate: pto.endDate, requestedMinutes: minutes, note: pto.reason,
+        status: 'DENIED', decidedById: roster.owner ? roster.owner.id : null, decidedAt: pto.createdAt,
+        decisionNote: pto.reviewNote || 'Coverage not available for this period.',
+      });
+      continue;
+    }
+    if (Math.random() < 0.4) continue; // sample the (much larger) APPROVED pool
+    leaveRequestRows.push({
+      id: uuid(), employeeProfileId: employee.id, agencyId, leaveTypeId: leaveTypes.PTO.id,
+      startDate: pto.startDate, endDate: pto.endDate, requestedMinutes: minutes, note: pto.reason,
+      status: 'APPROVED', decidedById: roster.owner ? roster.owner.id : null, decidedAt: pto.createdAt,
+    });
+    ledgerRows.push({
+      id: uuid(), employeeProfileId: employee.id, leaveTypeId: leaveTypes.PTO.id, agencyId,
+      transactionType: 'USE', minutes: -minutes, reason: 'Approved time off',
+      idempotencyKey: `use-${employee.id}-${pto.startDate.getTime()}`,
+      recordedById: roster.owner ? roster.owner.id : null, createdAt: pto.startDate,
+    });
+  }
+  await createManyChunked(prisma.hrLeavePolicyAssignment, policyAssignmentRows);
+  await createManyChunked(prisma.hrLeaveLedgerEntry, ledgerRows);
+  await createManyChunked(prisma.hrLeaveRequest, leaveRequestRows);
+
+  return {
+    hrEmployeeProfiles: employeeRows.length,
+    hrDepartments: Object.keys(departments).length,
+    hrShiftAssignments: shiftRows.length,
+    hrTimesheets: timesheetRows.length,
+    hrAttendanceExceptions: attendanceExceptionRows.length,
+    hrLeaveRequests: leaveRequestRows.length,
   };
 }
 
