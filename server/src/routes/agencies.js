@@ -312,9 +312,27 @@ router.post('/demo', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
 // working. Hard-blocked to isDemo agencies — the one safety rail that
 // makes this reusable without a full exact-name-retype confirm (unlike
 // Reset Record Store, there's no real billing/customer impact here).
+// In-process guard against two overlapping reseeds on the same agency —
+// e.g. a slow request that LOOKS like it failed (a client-side timeout,
+// a dropped connection) prompting a second click while the first is
+// still actually running server-side. wipeAgencyDemoData()+
+// seedRealisticDemoData() were never designed to run twice concurrently
+// against the same agency: both calls would wipe/rebuild the same rows
+// at once, and whichever finishes its wipe last can delete rows the
+// other just created — a real way to end up with an agency that looks
+// "lost all their data" even though nothing crashed. WEB_CONCURRENCY=1
+// in production (a single Node process) makes a plain in-memory Set
+// sufficient; no DB-level/distributed lock is needed.
+const agencyReseedsInProgress = new Set();
+
 router.post('/:agencyId/demo/reseed', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
+  const agencyId = req.params.agencyId;
+  if (agencyReseedsInProgress.has(agencyId)) {
+    return res.status(409).json({ success: false, error: 'RESEED_IN_PROGRESS', message: 'A reseed is already running for this agency — wait for it to finish before trying again.' });
+  }
+  agencyReseedsInProgress.add(agencyId);
   try {
-    const agency = await prisma.agency.findUnique({ where: { id: req.params.agencyId } });
+    const agency = await prisma.agency.findUnique({ where: { id: agencyId } });
     if (!agency) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
     if (!agency.isDemo) {
       return res.status(400).json({ success: false, error: 'NOT_DEMO', message: 'Reseeding is only available for demo agencies.' });
@@ -325,7 +343,14 @@ router.post('/:agencyId/demo/reseed', requireRole('PLATFORM_OWNER'), async (req,
     }
     return res.json({ success: true, ...result });
   } catch (err) {
-    next(err);
+    // Platform-Owner-only action, not customer-facing — surface the real
+    // error instead of the generic app-wide 500 handler's "Something went
+    // wrong" so whoever's driving this doesn't have to go dig up server
+    // logs just to tell us what broke.
+    console.error(`[agencies] demo reseed failed for agency=${agencyId} correlationId=${req.correlationId}`, err);
+    return res.status(500).json({ success: false, error: 'RESEED_FAILED', message: err.message, correlationId: req.correlationId });
+  } finally {
+    agencyReseedsInProgress.delete(agencyId);
   }
 });
 
