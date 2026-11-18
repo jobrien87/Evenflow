@@ -4,10 +4,11 @@
 // Covers: owner/producers/telemarketers are created directly ACTIVE with a
 // working password and zero Invitation rows (no email round-trip at all,
 // unlike every other account-creation path); a colliding email aborts
-// with no partial writes; TelemarketerAssignment links correctly; demo
-// data seeding produces real, fabricated leads/sales that show up on a
-// real Billboard computation; and a demo agency with no producers simply
-// seeds nothing rather than failing.
+// with no partial writes; demo data seeding (via demoDataSeeder.js, at a
+// small scale here for speed — see seedOptions) produces real, fabricated
+// leads/sales that show up on a real Billboard computation; and a demo
+// agency with no producers simply seeds nothing rather than failing.
+// demoDataSeeder.test.js covers the seeder's own invariants in depth.
 
 const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
@@ -20,9 +21,24 @@ const suffix = Date.now();
 const agencyIdsToClean = [];
 const userIdsToClean = [];
 
+// Small enough to keep this suite fast — demoDataSeeder.test.js is where
+// the full-scale shape/invariants are actually exercised.
+const SMALL_SEED_OPTIONS = { months: 1, leadsPerDay: 10, transfersPerDay: 2, crossSellCount: 10, winbackCount: 10 };
+
 after(async () => {
+  for (const agencyId of agencyIdsToClean) {
+    await prisma.breakRoomAchievement.deleteMany({ where: { agencyId } });
+    await prisma.breakRoomHighScore.deleteMany({ where: { agencyId } });
+    await prisma.breakRoomGameSession.deleteMany({ where: { agencyId } });
+    await prisma.timeClockEntry.deleteMany({ where: { agencyId } });
+    await prisma.ptoRequest.deleteMany({ where: { agencyId } });
+    await prisma.goal.deleteMany({ where: { agencyId } });
+    await prisma.opportunityEvent.deleteMany({ where: { opportunity: { agencyId } } });
+    await prisma.opportunity.deleteMany({ where: { agencyId } });
+  }
   await prisma.sale.deleteMany({ where: { agencyId: { in: agencyIdsToClean } } });
   await prisma.revenueEvent.deleteMany({ where: { agencyId: { in: agencyIdsToClean } } });
+  await prisma.costEvent.deleteMany({ where: { agencyId: { in: agencyIdsToClean } } });
   await prisma.auditEvent.deleteMany({ where: { agencyId: { in: agencyIdsToClean } } });
   await prisma.lead.deleteMany({ where: { agencyId: { in: agencyIdsToClean } } });
   await prisma.vendor.deleteMany({ where: { agencyId: { in: agencyIdsToClean } } });
@@ -47,6 +63,7 @@ test('createDemoAgency activates owner/producers/telemarketers directly, with a 
     ],
     password: 'password123',
     seedDemoData: true,
+    seedOptions: SMALL_SEED_OPTIONS,
     createdById: null,
   });
 
@@ -83,14 +100,15 @@ test('createDemoAgency activates owner/producers/telemarketers directly, with a 
   assert.equal(subscription.plan.name, 'Full Platform');
   assert.equal(subscription.status, 'ACTIVE');
 
-  assert.ok(result.seeded);
-  assert.ok(result.seeded.leadCount > 0);
-  assert.ok(result.seeded.saleCount > 0);
+  assert.ok(result.seeded && result.seeded.seeded);
+  assert.ok(result.seeded.counts.generalLeads > 0);
+  assert.ok(result.seeded.counts.sales > 0);
+  assert.equal(result.seeded.counts.vendors, 5, 'exactly 5 "Lead Source" vendors');
 
   // The fabricated sales must show up on a real Billboard computation,
   // exactly like genuine production data would.
   const billboard = await computeBillboard({ agencyId: result.agency.id, granularity: 'month', from: new Date('2020-01-01'), to: new Date() });
-  assert.equal(billboard.totals.soldCount, result.seeded.saleCount);
+  assert.equal(billboard.totals.soldCount, result.seeded.counts.sales);
 });
 
 test('createDemoAgency aborts entirely, with no partial writes, when an email in the roster already exists', async () => {
@@ -100,9 +118,9 @@ test('createDemoAgency aborts entirely, with no partial writes, when an email in
   });
   userIdsToClean.push(existingUser.id);
 
-  const before = await prisma.agency.count();
+  const agencyName = `Demo Collision Agency ${suffix}`;
   const result = await createDemoAgency({
-    agencyName: `Demo Collision Agency ${suffix}`,
+    agencyName,
     owner: { firstName: 'Demo', lastName: 'Owner2', email: `demo-owner2-${suffix}@test.local` },
     producers: [{ firstName: 'Taken', lastName: 'Email', email: collidingEmail }],
     telemarketers: [],
@@ -113,8 +131,12 @@ test('createDemoAgency aborts entirely, with no partial writes, when an email in
 
   assert.equal(result.success, false);
   assert.equal(result.errorCode, 'EMAIL_IN_USE');
-  const after = await prisma.agency.count();
-  assert.equal(after, before, 'no agency row must be created when any roster email collides');
+  // Checked by this exact agency's own name, not a global row count — a
+  // global count would race against any other test file concurrently
+  // creating/deleting unrelated agencies under node --test's parallel
+  // file execution.
+  const createdAgency = await prisma.agency.findFirst({ where: { name: agencyName } });
+  assert.equal(createdAgency, null, 'no agency row must be created when any roster email collides');
   const ownerRow = await prisma.user.findUnique({ where: { email: `demo-owner2-${suffix}@test.local` } });
   assert.equal(ownerRow, null, 'no user row must be created either, since the whole request is rejected up front');
 });

@@ -8,7 +8,7 @@
 const { z } = require('zod');
 const { callEd, isConfigured } = require('./aiProvider');
 
-const METRICS = ['sales', 'quotes', 'calls', 'contacts', 'premium_cents', 'cross_sells', 'winbacks', 'transfers'];
+const METRICS = ['sales', 'quotes', 'calls', 'contacts', 'premium_cents', 'items', 'cross_sells', 'winbacks', 'transfers'];
 const PERIOD_TYPES = ['daily', 'weekly', 'monthly', 'quarterly', 'custom'];
 
 const draftSchema = z.object({

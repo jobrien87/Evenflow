@@ -76,7 +76,12 @@ async function checkFirstAttemptSla() {
       relatedEntityType: 'Lead',
       relatedEntityId: lead.id,
     });
-    await prisma.lead.update({ where: { id: lead.id }, data: { firstAttemptSlaAlertSentAt: new Date() } });
+    // updateMany (not update) — this is a global sweep across every
+    // agency's leads, so a lead legitimately deleted/archived by someone
+    // else between the scan above and this write must never abort the
+    // whole batch with a P2025 "record not found" (update throws on a
+    // missing row; updateMany simply reports 0 rows affected).
+    await prisma.lead.updateMany({ where: { id: lead.id }, data: { firstAttemptSlaAlertSentAt: new Date() } });
     alerted += 1;
   }
 

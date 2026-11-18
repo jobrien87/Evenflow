@@ -5,7 +5,7 @@ import { EdSuggestionBox } from '../ui';
 import { fireCelebration } from '../lib/celebrations';
 import { money, centsToDollarInput, dollarsToCents } from '../lib/format';
 
-const METRICS = ['sales', 'quotes', 'calls', 'contacts', 'premium_cents', 'cross_sells', 'winbacks', 'transfers'];
+const METRICS = ['sales', 'quotes', 'calls', 'contacts', 'premium_cents', 'items', 'cross_sells', 'winbacks', 'transfers'];
 // The one metric whose targetValue/actual are dollar-denominated (stored
 // as integer cents) rather than a plain count — everywhere a number for
 // this metric is entered or displayed must go through the dollar<->cents

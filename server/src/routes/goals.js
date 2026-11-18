@@ -127,7 +127,7 @@ router.post('/parse', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PLATFORM_OW
 
 const createGoalSchema = z.object({
   userId: z.string().uuid().optional(),
-  metric: z.enum(['sales', 'quotes', 'calls', 'contacts', 'premium_cents', 'cross_sells', 'winbacks', 'transfers']),
+  metric: z.enum(['sales', 'quotes', 'calls', 'contacts', 'premium_cents', 'items', 'cross_sells', 'winbacks', 'transfers']),
   targetValue: z.number().int().positive(),
   periodType: z.enum(['daily', 'weekly', 'monthly', 'quarterly', 'custom']),
   periodStart: z.string().datetime(),

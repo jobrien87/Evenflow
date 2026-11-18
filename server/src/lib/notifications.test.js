@@ -208,7 +208,7 @@ test('speed-to-lead sweep keeps its critical in-app alert and one-time alert tim
       assignedAt: new Date(Date.now() - 60 * 60 * 1000), agency: { firstAttemptSlaMinutes: null },
       customer: { firstName: 'Test', lastName: 'Lead' },
     }],
-    update: async (args) => { updates.push(args); },
+    updateMany: async (args) => { updates.push(args); },
   };
   const sla = loadModule('firstAttemptSlaAlerts', { './db': { prisma: h.prisma }, './notifications': h, './leadStatusGroups': { TERMINAL_LEAD_STATUSES: ['SOLD', 'LOST', 'NOT_INTERESTED', 'BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT', 'INELIGIBLE', 'ARCHIVED'] } });
   assert.equal(await sla.checkFirstAttemptSla(), 1);

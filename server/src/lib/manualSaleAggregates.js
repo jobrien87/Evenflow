@@ -63,6 +63,15 @@ async function sumSalePremium({ agencyId, from, to, assignedToId, productFamily,
   return result._sum.premiumCents || 0;
 }
 
+async function sumSaleItems({ agencyId, from, to, assignedToId, productFamily, timeZone }) {
+  const where = dateRangeWhere(agencyId, from, to, {
+    ...(assignedToId !== undefined ? { assignedToId } : {}),
+    ...(productFamily ? { productFamily } : {}),
+  }, timeZone);
+  const result = await prisma.sale.aggregate({ where, _sum: { items: true } });
+  return result._sum.items || 0;
+}
+
 async function countSales({ agencyId, from, to, assignedToId, productFamily, timeZone }) {
   const where = dateRangeWhere(agencyId, from, to, {
     ...(assignedToId !== undefined ? { assignedToId } : {}),
@@ -191,6 +200,7 @@ async function saleLeadLikeRows({ agencyId, from, to, timeZone }) {
 
 module.exports = {
   sumSalePremium,
+  sumSaleItems,
   countSales,
   countStandaloneSales,
   salesByAgent,

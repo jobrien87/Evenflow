@@ -8,6 +8,7 @@ const { sendInvitationEmail } = require('../lib/email');
 const { reissueInvitation, recordInvitationEmailResult } = require('../lib/invitations');
 const { resolveSettings } = require('../lib/breakRoom');
 const { createDemoAgency } = require('../lib/demoAgency');
+const { seedRealisticDemoData } = require('../lib/demoDataSeeder');
 
 const router = express.Router();
 
@@ -299,6 +300,30 @@ router.post('/demo', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
       password: parsed.data.password,
       seeded: result.seeded,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Platform Owner only: wipe and regenerate a demo agency's entire 6-month
+// operational data profile (leads, sales, opportunities, vendors, goals,
+// HR activity) using whatever roster currently exists on that agency —
+// never touches the roster/billing plan itself, so credentials keep
+// working. Hard-blocked to isDemo agencies — the one safety rail that
+// makes this reusable without a full exact-name-retype confirm (unlike
+// Reset Record Store, there's no real billing/customer impact here).
+router.post('/:agencyId/demo/reseed', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
+  try {
+    const agency = await prisma.agency.findUnique({ where: { id: req.params.agencyId } });
+    if (!agency) return res.status(404).json({ success: false, error: 'NOT_FOUND' });
+    if (!agency.isDemo) {
+      return res.status(400).json({ success: false, error: 'NOT_DEMO', message: 'Reseeding is only available for demo agencies.' });
+    }
+    const result = await seedRealisticDemoData(agency.id);
+    if (!result.seeded) {
+      return res.status(400).json({ success: false, error: result.reason || 'NOT_SEEDED', message: 'This agency has no producers to assign demo data to yet — add a producer first.' });
+    }
+    return res.json({ success: true, ...result });
   } catch (err) {
     next(err);
   }

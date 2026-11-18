@@ -7,7 +7,7 @@
 const { prisma } = require('./db');
 const { explainScore, scoreToGrade } = require('./flowScore');
 const { computeFunnel } = require('./funnelMetrics');
-const { sumSalePremium, countSales, countStandaloneSales } = require('./manualSaleAggregates');
+const { sumSalePremium, sumSaleItems, countSales, countStandaloneSales } = require('./manualSaleAggregates');
 
 function startOfMonth(d) {
   return new Date(d.getFullYear(), d.getMonth(), 1);
@@ -88,6 +88,12 @@ async function computeGoalActual(goal) {
       // total is Add Closed Sale.
       return sumSalePremium({ agencyId, from: periodStart, to: periodEnd, assignedToId: userId || undefined });
     }
+    case 'items':
+      // Total product count sold (Sale.items) — the real unit a per-
+      // producer "items a month" goal tracks, distinct from 'sales' (deal
+      // count) and 'premium_cents' (dollars). Same Sale-is-the-only-real-
+      // production-entry rule as every other case here.
+      return sumSaleItems({ agencyId, from: periodStart, to: periodEnd, assignedToId: userId || undefined });
     case 'cross_sells':
     case 'winbacks':
       return prisma.opportunityEvent.count({

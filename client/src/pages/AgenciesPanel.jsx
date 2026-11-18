@@ -14,6 +14,27 @@ function statusTone(status) {
   return 'neutral';
 }
 
+const SEED_COUNT_LABELS = [
+  ['vendors', 'vendors'], ['generalLeads', 'general leads'], ['transferLeads', 'live transfers'],
+  ['sales', 'closed sales'], ['crossSellOpportunities', 'cross-sell opportunities'],
+  ['winbackOpportunities', 'winback opportunities'], ['opportunitiesWon', 'opportunities won'],
+  ['goals', 'monthly goals'], ['timeClockEntries', 'clock entries'], ['ptoRequests', 'PTO requests'],
+  ['breakRoomSessions', 'Break Room sessions'],
+];
+
+function SeedCountsSummary({ counts }) {
+  return (
+    <div style={{ marginTop: 6 }}>
+      {SEED_COUNT_LABELS.map(([key, label]) => (
+        counts[key] != null && <div key={key}>{counts[key].toLocaleString()} {label}</div>
+      ))}
+      {counts.blendedCostPerLeadCents != null && (
+        <div>Blended vendor cost/lead: ${(counts.blendedCostPerLeadCents / 100).toFixed(2)}</div>
+      )}
+    </div>
+  );
+}
+
 export default function AgenciesPanel() {
   const navigate = useNavigate();
   const { refreshUser } = useAuth();
@@ -53,6 +74,16 @@ export default function AgenciesPanel() {
   const [demoForm, setDemoForm] = useState(emptyDemoForm);
   const [demoStatus, setDemoStatus] = useState('');
   const [demoResult, setDemoResult] = useState(null);
+
+  // RESEED DEMO DATA — regenerates a demo agency's entire 6-month
+  // operational profile in place (see server lib/demoDataSeeder.js).
+  // Roster logins are untouched, so no exact-name retype confirm is
+  // needed here (unlike Reset Record Store) — the route itself is
+  // already hard-gated to isDemo agencies, and nothing real is at risk.
+  const [reseedTarget, setReseedTarget] = useState(null);
+  const [reseedBusyId, setReseedBusyId] = useState(null);
+  const [reseedStatus, setReseedStatus] = useState('');
+  const [reseedResult, setReseedResult] = useState(null);
 
   useEffect(() => {
     refresh();
@@ -146,6 +177,21 @@ export default function AgenciesPanel() {
       await refresh();
     } catch (err) {
       setDemoStatus(err.data?.message || 'Failed to create demo agency.');
+    }
+  }
+
+  async function confirmReseed() {
+    if (!reseedTarget) return;
+    setReseedBusyId(reseedTarget.id);
+    setReseedStatus('');
+    try {
+      const res = await api.reseedDemoAgency(reseedTarget.id);
+      setReseedResult({ agencyName: reseedTarget.name, counts: res.counts });
+      setReseedTarget(null);
+    } catch (err) {
+      setReseedStatus(err.data?.message || 'Failed to reseed demo data.');
+    } finally {
+      setReseedBusyId(null);
     }
   }
 
@@ -265,11 +311,34 @@ export default function AgenciesPanel() {
                 {demoResult.telemarketers.map((t) => <div key={t.id}>{t.firstName} {t.lastName} — {t.email} / {demoResult.password}</div>)}
               </div>
             )}
-            {demoResult.seeded && (
-              <div style={{ marginTop: 6 }}>Seeded {demoResult.seeded.leadCount} demo leads, {demoResult.seeded.saleCount} demo closed sales, {demoResult.seeded.vendorCount} demo vendors.</div>
-            )}
+            {demoResult.seeded?.counts && <SeedCountsSummary counts={demoResult.seeded.counts} />}
           </div>
           <Button variant="secondary" size="sm" onClick={() => setDemoResult(null)}>DISMISS</Button>
+        </Card>
+      )}
+
+      {reseedResult && (
+        <Card style={s.formCard}>
+          <div style={s.formSectionLabel}>DEMO DATA RESEEDED — "{reseedResult.agencyName}"</div>
+          <SeedCountsSummary counts={reseedResult.counts} />
+          <Button variant="secondary" size="sm" onClick={() => setReseedResult(null)}>DISMISS</Button>
+        </Card>
+      )}
+
+      {reseedTarget && (
+        <Card style={s.formCard}>
+          <div style={s.formSectionLabel}>RESEED DEMO DATA — "{reseedTarget.name}"</div>
+          <div style={s.linkBox}>
+            This regenerates every lead, sale, opportunity, vendor, goal, and HR record for this agency with a
+            fresh 6-month realistic profile. Roster logins are untouched — nobody's password changes.
+          </div>
+          {reseedStatus && <div style={s.status}>{reseedStatus}</div>}
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <Button variant="secondary" size="sm" onClick={() => setReseedTarget(null)} disabled={reseedBusyId === reseedTarget.id}>CANCEL</Button>
+            <Button variant="primary" size="sm" onClick={confirmReseed} disabled={reseedBusyId === reseedTarget.id}>
+              {reseedBusyId === reseedTarget.id ? 'RESEEDING…' : 'CONFIRM RESEED'}
+            </Button>
+          </div>
         </Card>
       )}
 
@@ -309,7 +378,7 @@ export default function AgenciesPanel() {
 
             <label style={s.checkboxRow}>
               <input type="checkbox" checked={demoForm.seedDemoData} onChange={(e) => setDemoForm({ ...demoForm, seedDemoData: e.target.checked })} />
-              Seed sample leads &amp; closed sales (clearly fabricated demo data, never real customer data)
+              Seed 6 months of realistic demo activity — leads, transfers, closed sales, Cross-Sell/Winback opportunities, goals, and HR activity (clearly fabricated, never real customer data)
             </label>
 
             {demoStatus && <div style={s.status}>{demoStatus}</div>}
@@ -407,6 +476,16 @@ export default function AgenciesPanel() {
                       onClick={(e) => { e.preventDefault(); loginAsOwner(a.ownerId); }}
                     >
                       LOG IN AS OWNER
+                    </Button>
+                  )}
+                  {a.isDemo && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={reseedBusyId === a.id}
+                      onClick={(e) => { e.preventDefault(); setReseedTarget(a); }}
+                    >
+                      {reseedBusyId === a.id ? 'RESEEDING…' : 'RESEED DEMO DATA'}
                     </Button>
                   )}
                 </div>

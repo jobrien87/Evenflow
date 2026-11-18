@@ -121,6 +121,26 @@ test('computeGoalActual: a standalone Closed Sale (no leadId) adds one quote, ad
   await prisma.customer.delete({ where: { id: customer.id } });
 });
 
+test('computeGoalActual: metric "items" sums Sale.items for the period/producer', async () => {
+  const before = await computeGoalActual({ metric: 'items', userId, agencyId, periodStart, periodEnd });
+
+  const customer = await prisma.customer.create({ data: { firstName: 'Items', lastName: `Metric${suffix}` } });
+  const sale = await prisma.sale.create({
+    data: {
+      agencyId, customerId: customer.id, firstName: 'Items', lastName: `Metric${suffix}`,
+      saleDate: new Date(), carrier: 'Allstate', policyType: 'Auto-Standard', productFamily: 'AUTO',
+      premiumCents: 10000, items: 3, assignedToId: userId, createdById: userId,
+    },
+  });
+
+  const after = await computeGoalActual({ metric: 'items', userId, agencyId, periodStart, periodEnd });
+  assert.equal(after, before + 3, 'a 3-item sale must add exactly 3 to the items total');
+
+  await prisma.sale.delete({ where: { id: sale.id } });
+  await prisma.revenueEvent.deleteMany({ where: { saleId: sale.id } });
+  await prisma.customer.delete({ where: { id: customer.id } });
+});
+
 test('computeGoalActual: a Lead-linked Closed Sale adds no extra quote credit beyond its Lead\'s own disposition history', async () => {
   const lead = await prisma.lead.create({ data: { agencyId, assignedToId: userId } });
   leadIds.push(lead.id);
