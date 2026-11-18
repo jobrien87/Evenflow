@@ -18,7 +18,7 @@ const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const bcrypt = require('bcryptjs');
 const { prisma } = require('./db');
-const { seedRealisticDemoData } = require('./demoDataSeeder');
+const { seedRealisticDemoData, wipeAgencyDemoData } = require('./demoDataSeeder');
 const { computeGoalActual } = require('./runningReport');
 
 const suffix = Date.now();
@@ -32,19 +32,9 @@ let telemarketers;
 after(async () => {
   if (!agency) return;
   const agencyId = agency.id;
-  await prisma.breakRoomAchievement.deleteMany({ where: { agencyId } });
-  await prisma.breakRoomHighScore.deleteMany({ where: { agencyId } });
-  await prisma.breakRoomGameSession.deleteMany({ where: { agencyId } });
-  await prisma.timeClockEntry.deleteMany({ where: { agencyId } });
-  await prisma.ptoRequest.deleteMany({ where: { agencyId } });
-  await prisma.goal.deleteMany({ where: { agencyId } });
-  await prisma.opportunityEvent.deleteMany({ where: { opportunity: { agencyId } } });
-  await prisma.opportunity.deleteMany({ where: { agencyId } });
-  await prisma.revenueEvent.deleteMany({ where: { agencyId } });
-  await prisma.costEvent.deleteMany({ where: { agencyId } });
-  await prisma.sale.deleteMany({ where: { agencyId } });
-  await prisma.lead.deleteMany({ where: { agencyId } });
-  await prisma.vendor.deleteMany({ where: { agencyId } });
+  // Reuses the real wipe function rather than duplicating its FK-safe
+  // order here — keeps teardown automatically in sync with it.
+  await wipeAgencyDemoData(agencyId);
   await prisma.auditEvent.deleteMany({ where: { agencyId } });
   const userIds = [owner.id, ...producers.map((p) => p.id), ...telemarketers.map((t) => t.id)];
   await prisma.telemarketerAssignment.deleteMany({ where: { agencyId } });
@@ -182,6 +172,51 @@ test('seedRealisticDemoData: re-running on the same agency wipes old rows first,
   assert.equal(after.vendors, 5);
   assert.equal(after.opportunities, before.opportunities, 'a reseed must not duplicate opportunities');
   assert.ok(Math.abs(after.leads - before.leads) <= 1, 'lead count should match the same config, not accumulate across a reseed');
+});
+
+test('seedRealisticDemoData: reseeding wipes cleanly even when the agency has real prior activity (vendor credential, lead notes/tasks/calls/quotes)', async () => {
+  // Reproduces the exact production failure: a demo agency that's
+  // actually been clicked around in (not just seeded by this function)
+  // accumulates real rows — a live vendor credential, inbound API/
+  // webhook logs, lead notes/tasks/calls/activities/product quotes, an
+  // appointment, a historical import row — none of which cascade, so a
+  // naive wipe FK-blocks on deleting the Vendor/Lead they reference.
+  const vendor = await prisma.vendor.findFirst({ where: { agencyId: agency.id } });
+  const lead = await prisma.lead.findFirst({ where: { agencyId: agency.id } });
+  const batch = await prisma.leadImportBatch.create({ data: { agencyId: agency.id, uploadedById: owner.id, totalRows: 0, created: 0, skipped: 0 } });
+
+  try {
+    await prisma.vendorCredential.create({ data: { vendorId: vendor.id, keyPrefix: `test_${suffix}`, secretHash: 'x' } });
+    await prisma.apiTransaction.create({ data: { vendorId: vendor.id, method: 'POST', endpoint: '/x', statusCode: 200, latencyMs: 1, resultCode: 'OK' } });
+    await prisma.highLevelWebhookEvent.create({ data: { id: `hl-${suffix}`, vendorId: vendor.id, type: 'test', payload: {} } });
+    await prisma.leadNote.create({ data: { leadId: lead.id, authorId: owner.id, content: 'test note' } });
+    await prisma.leadEvent.create({ data: { leadId: lead.id, type: 'test.event' } });
+    await prisma.leadActivity.create({ data: { leadId: lead.id, type: 'CALL', createdById: owner.id } });
+    await prisma.leadProductQuote.create({ data: { leadId: lead.id, product: 'AUTO' } });
+    const task = await prisma.task.create({ data: { agencyId: agency.id, leadId: lead.id, type: 'FOLLOW_UP', title: 'test task' } });
+    await prisma.call.create({ data: { agencyId: agency.id, uploadedById: owner.id, leadId: lead.id, filename: 'test.mp3' } });
+    const now = new Date();
+    await prisma.appointment.create({
+      data: {
+        agencyId: agency.id, leadId: lead.id, vendorId: vendor.id, taskId: task.id,
+        providerLocationId: 'loc', providerCalendarId: 'cal', providerBookingId: `booking-${suffix}`,
+        startAt: now, endAt: new Date(now.getTime() + 30 * 60 * 1000),
+      },
+    });
+    await prisma.historicalRecord.create({ data: { agencyId: agency.id, importBatchId: batch.id, vendorId: vendor.id, recordDate: new Date(), sourceSystem: 'AGENCYZOOM' } });
+
+    // Must not throw — this is the regression this test locks in.
+    const result = await seedRealisticDemoData(agency.id, SMALL);
+    assert.equal(result.seeded, true);
+    assert.equal(result.counts.vendors, 5);
+  } finally {
+    // wipeAgencyDemoData (via seedRealisticDemoData above) already
+    // cleared HistoricalRecord; the batch itself is outside its scope by
+    // design, so this test cleans up its own fixture regardless of
+    // whether the body above threw.
+    await prisma.historicalRecord.deleteMany({ where: { importBatchId: batch.id } });
+    await prisma.leadImportBatch.delete({ where: { id: batch.id } });
+  }
 });
 
 test('seedRealisticDemoData: zero producers is a safe no-op', async () => {

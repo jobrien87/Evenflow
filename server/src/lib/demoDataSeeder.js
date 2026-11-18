@@ -12,23 +12,25 @@
 // detector would silently create extra Opportunity rows past the exact
 // Cross-Sell/Winback counts this seeder is asked to produce (a fresh
 // single-product demo customer almost always trips a detected gap). It
-// posts the one piece every dashboard actually reads (RevenueEvent, via
-// the real syncSaleRevenueEvent) directly instead, and builds the
-// Opportunity pool itself, explicitly, at exact counts.
+// posts the one piece every dashboard actually reads (a matching
+// RevenueEvent row, built directly) instead, and builds the Opportunity
+// pool itself, explicitly, at exact counts.
 //
 // Also deliberately breaks from this codebase's own "never createMany a
-// Lead/Sale" precedent for the high-volume, side-effect-free rows (Lead,
-// Customer, CostEvent, Opportunity, OpportunityEvent, TimeClockEntry) —
-// those existing bulk paths (bulk-import, Back Catalog) loop one create()
-// at a time because they need live distribution/notification/priority-
-// scoring logic; this seeder is purely backdated synthetic data, so a
-// plain chunked createMany is correct and ~100x faster. Sale rows are the
-// one exception (they need a real RevenueEvent upsert), so they go in via
-// individual creates, batched with Promise.all.
+// Lead/Sale" precedent for every high-volume row this seeder writes,
+// Sale/RevenueEvent included. Existing bulk paths (bulk-import, Back
+// Catalog) loop one create() at a time because they need live
+// distribution/notification/priority-scoring/edit-history logic; this
+// seeder is purely backdated synthetic data with no such history to
+// reconcile, so a plain chunked createMany is correct, ~100x faster, and
+// — critically — keeps the whole operation to a handful of round trips
+// regardless of real network latency to a remote (non-local) Postgres
+// instance. Thousands of individual creates, even batched via
+// Promise.all, would still serialize behind Prisma's connection pool and
+// risk the request exceeding a reverse-proxy timeout in production.
 const crypto = require('crypto');
 const { prisma } = require('./db');
 const { recordAudit } = require('./audit');
-const { syncSaleRevenueEvent } = require('./financialEvents');
 const { PRODUCTS, PRODUCT_LABELS } = require('./products');
 const { deriveLeadType } = require('./leadType');
 
@@ -165,7 +167,32 @@ async function wipeAgencyDemoData(agencyId) {
   await prisma.opportunityEvent.deleteMany({ where: { opportunity: { agencyId } } });
   await prisma.opportunity.deleteMany({ where: { agencyId } });
   if (saleIds.length) await prisma.revenueEvent.deleteMany({ where: { saleId: { in: saleIds } } });
-  if (vendorIds.length) await prisma.costEvent.deleteMany({ where: { vendorId: { in: vendorIds } } });
+  if (vendorIds.length) {
+    await prisma.costEvent.deleteMany({ where: { vendorId: { in: vendorIds } } });
+    // A real (non-demo-seeded) agency can already have genuine vendor
+    // history — a live API credential, inbound webhook log, or
+    // historical-import/appointment rows — that FK-blocks a plain
+    // Vendor delete (none of these relations cascade; Postgres defaults
+    // to NO ACTION). All of it belongs to a vendor this wipe is about to
+    // remove, so it goes too, not just the rows this seeder itself wrote.
+    await prisma.vendorCredential.deleteMany({ where: { vendorId: { in: vendorIds } } });
+    await prisma.apiTransaction.deleteMany({ where: { vendorId: { in: vendorIds } } });
+    await prisma.highLevelWebhookEvent.deleteMany({ where: { vendorId: { in: vendorIds } } });
+  }
+  await prisma.historicalRecord.deleteMany({ where: { agencyId } });
+  // A real demo agency that's actually been clicked around in (not just
+  // seeded by this function) can have genuine Lead activity — notes,
+  // calls, tasks, logged activities, per-product quotes, appointments —
+  // every one of which FK-blocks a plain Lead delete the same way the
+  // vendor rows above do. Appointment FKs Lead+Vendor+Task, so it must
+  // clear before any of those three.
+  await prisma.appointment.deleteMany({ where: { agencyId } });
+  await prisma.call.deleteMany({ where: { agencyId } });
+  await prisma.task.deleteMany({ where: { agencyId } });
+  await prisma.leadActivity.deleteMany({ where: { lead: { agencyId } } });
+  await prisma.leadNote.deleteMany({ where: { lead: { agencyId } } });
+  await prisma.leadEvent.deleteMany({ where: { lead: { agencyId } } });
+  await prisma.leadProductQuote.deleteMany({ where: { lead: { agencyId } } });
   await prisma.sale.deleteMany({ where: { agencyId } });
   await prisma.lead.deleteMany({ where: { agencyId } });
   await prisma.vendor.deleteMany({ where: { agencyId } });
@@ -376,39 +403,49 @@ async function seedRealisticDemoData(agencyId, options = {}) {
   const customersInsertedSoFar = customers.length;
 
   // --- Sales for every terminal-SOLD lead, posting the one real revenue entry every dashboard reads ---
+  // Built as plain rows and createMany'd (never individual creates) —
+  // every Sale here is brand new, so there's no edit/void history to
+  // reconcile and no need for syncSaleRevenueEvent's upsert semantics;
+  // a matching RevenueEvent row is just as cheap to build directly. This
+  // keeps the whole operation to a handful of round trips regardless of
+  // real network latency to a remote (non-local) Postgres instance —
+  // thousands of individual creates, even batched via Promise.all, would
+  // still serialize behind Prisma's connection pool and risk the request
+  // exceeding a reverse-proxy timeout in production.
   let saleCount = 0;
   let totalItemsSold = 0;
   const itemsByProducerMonth = new Map(); // `${producerId}:${year}-${month}` -> items
+  const saleRows = [];
+  const revenueRows = [];
 
   function trackItems(producerId, saleDate, items) {
     const key = `${producerId}:${saleDate.getFullYear()}-${saleDate.getMonth()}`;
     itemsByProducerMonth.set(key, (itemsByProducerMonth.get(key) || 0) + items);
   }
 
-  async function bulkCreateSaleWithRevenue(input) {
+  function buildSaleAndRevenue(input) {
     const items = randomItems();
     const premiumCents = randomPremiumCents(input.productFamily);
     const saleDate = new Date(input.receivedAt.getTime() + randomInt(1, 5) * 24 * 60 * 60 * 1000);
     const { firstName, lastName } = demoName();
-    const sale = await prisma.sale.create({
-      data: {
-        agencyId, customerId: input.customerId, leadId: input.leadId || null,
-        firstName, lastName, saleDate, carrier: randomChoice(CARRIERS),
-        policyType: policyTypeFor(input.productFamily), productFamily: input.productFamily,
-        premiumCents, items, assignedToId: input.assignedToId, zip: input.zip || null, state: 'GA',
-        createdById: input.assignedToId, clientRequestId: `demo-seed-${uuid()}`,
-      },
+    const saleId = uuid();
+    saleRows.push({
+      id: saleId, agencyId, customerId: input.customerId, leadId: input.leadId || null,
+      firstName, lastName, saleDate, carrier: randomChoice(CARRIERS),
+      policyType: policyTypeFor(input.productFamily), productFamily: input.productFamily,
+      premiumCents, items, assignedToId: input.assignedToId, zip: input.zip || null, state: 'GA',
+      createdById: input.assignedToId, clientRequestId: `demo-seed-${saleId}`,
     });
-    await syncSaleRevenueEvent(prisma, sale);
+    revenueRows.push({
+      id: uuid(), agencyId, saleId, category: 'LEAD_REVENUE', sourceType: 'SALE',
+      amountCents: premiumCents, occurredAt: saleDate, notes: `Demo-seeded closed sale (sale ${saleId})`,
+    });
     trackItems(input.assignedToId, saleDate, items);
     totalItemsSold += items;
     saleCount++;
-    return sale;
   }
 
-  for (const batch of chunk(soldLeadSaleInputs, 50)) {
-    await Promise.all(batch.map((input) => bulkCreateSaleWithRevenue(input)));
-  }
+  for (const input of soldLeadSaleInputs) buildSaleAndRevenue(input);
 
   // --- Cross-Sell / Winback opportunity pipeline ---
   const opportunityRows = [];
@@ -482,9 +519,10 @@ async function seedRealisticDemoData(agencyId, options = {}) {
   await createManyChunked(prisma.opportunity, opportunityRows);
   await createManyChunked(prisma.opportunityEvent, opportunityEventRows);
 
-  for (const batch of chunk(wonOpportunities, 50)) {
-    await Promise.all(batch.map((input) => bulkCreateSaleWithRevenue(input)));
-  }
+  for (const input of wonOpportunities) buildSaleAndRevenue(input);
+
+  await createManyChunked(prisma.sale, saleRows);
+  await createManyChunked(prisma.revenueEvent, revenueRows);
 
   // --- Per-producer monthly "items" goals ---
   const goalRows = [];
