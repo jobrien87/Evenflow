@@ -114,3 +114,24 @@ test('backfillMissingSales: a SOLD lead with 2 SOLD product quotes gets a Sale w
   assert.ok(sale, 'a Sale must be created for this lead');
   assert.equal(sale.items, 2, 'items must reflect the real count of SOLD product quotes, not default to 1');
 });
+
+test('backfillMissingSales: a lead whose backfilled Sale later gets voided is re-backfilled, not permanently stuck', async () => {
+  const lead = await makeSoldLead({ saleCarrier: 'Geico', salePolicyTypeDetail: 'Standard', saleProduct: 'AUTO', salePremiumCents: 80000 });
+
+  const first = await backfillMissingSales({ agencyId });
+  assert.ok(first.backfilled >= 1);
+  const firstSale = await prisma.sale.findFirst({ where: { leadId: lead.id } });
+  assert.ok(firstSale, 'the first backfill run must create a Sale');
+
+  // A real, legitimate correction — voiding never reverts Lead.status, so
+  // this lead is still SOLD with no live Sale, same as the original gap.
+  await prisma.sale.update({ where: { id: firstSale.id }, data: { voidedAt: new Date() } });
+
+  const second = await backfillMissingSales({ agencyId });
+  assert.ok(second.backfilled >= 1, 'the lead must be re-backfilled, not permanently skipped once its only Sale is voided');
+  assert.equal(second.skipped, 0, 'a deterministic clientRequestId must never collide with the now-voided prior attempt');
+
+  const liveSale = await prisma.sale.findFirst({ where: { leadId: lead.id, voidedAt: null } });
+  assert.ok(liveSale, 'a second, live Sale must exist after the retry');
+  assert.notEqual(liveSale.id, firstSale.id, 'the retry must create a new row, not reuse the voided one');
+});

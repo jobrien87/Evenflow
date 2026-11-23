@@ -90,7 +90,15 @@ async function backfillMissingSales({ agencyId } = {}) {
         premiumCents: lead.salePremiumCents != null ? lead.salePremiumCents : null,
         assignedToId: lead.assignedToId,
         createdById: lead.assignedToId,
-        clientRequestId: `backfill-${lead.id}`,
+        // Unique per attempt, not per lead — if a backfilled Sale is later
+        // voided (a real, legitimate correction; voiding never reverts
+        // Lead.status), this lead is correctly re-selected as "missing" on
+        // the next boot, but a value derived only from lead.id would
+        // collide forever with the still-present voided row's own
+        // clientRequestId. The job's real idempotency — never double-
+        // backfilling a lead that already has a live Sale — already comes
+        // entirely from the selection query above, not from this field.
+        clientRequestId: `backfill-${lead.id}-${Date.now()}`,
         actorId: lead.assignedToId,
         actorRole: 'SYSTEM',
         auditAction: 'sale.backfilled',
