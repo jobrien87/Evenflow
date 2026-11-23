@@ -278,6 +278,36 @@ test('seedRealisticDemoData: the full Backstage HR suite is seeded for every ros
   assert.ok(leavePolicies.length >= 2);
 });
 
+test('seedRealisticDemoData: Flow Score snapshots are computed for the agency and every producer', async () => {
+  const agencySnapshot = await prisma.flowScoreSnapshot.findFirst({
+    where: { subjectType: 'AGENCY', subjectId: agency.id },
+  });
+  assert.ok(agencySnapshot, 'the agency must have a real FlowScoreSnapshot, not "No data yet"');
+
+  for (const producer of producers) {
+    const producerSnapshot = await prisma.flowScoreSnapshot.findFirst({
+      where: { subjectType: 'USER', subjectId: producer.id },
+    });
+    assert.ok(producerSnapshot, `${producer.lastName} must have a real FlowScoreSnapshot`);
+  }
+});
+
+test('seedRealisticDemoData: every roster member has a valid, idempotently-reset presenceStatus, and the team looks live', async () => {
+  const roster = [owner, ...producers, ...telemarketers];
+  const refreshed = await prisma.user.findMany({ where: { id: { in: roster.map((u) => u.id) } } });
+
+  for (const user of refreshed) {
+    assert.ok(
+      ['GRINDING', 'BREAK', 'LUNCH', 'AWAY'].includes(user.presenceStatus),
+      `${user.lastName}'s presenceStatus must be a real PresenceStatus value, got ${user.presenceStatus}`
+    );
+  }
+  assert.ok(
+    refreshed.some((u) => u.presenceStatus !== 'AWAY'),
+    'Team Status must show at least one non-AWAY member — a demo must never look fully idle'
+  );
+});
+
 test('seedRealisticDemoData: zero producers is a safe no-op', async () => {
   const soloAgency = await prisma.agency.create({ data: { name: `Seeder Solo Agency ${suffix}`, status: 'ACTIVE', isDemo: true } });
   const result = await seedRealisticDemoData(soloAgency.id, SMALL);

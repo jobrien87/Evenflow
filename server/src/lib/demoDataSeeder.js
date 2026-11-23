@@ -39,6 +39,7 @@ const { prisma } = require('./db');
 const { recordAudit } = require('./audit');
 const { PRODUCTS, PRODUCT_LABELS } = require('./products');
 const { deriveLeadType } = require('./leadType');
+const { computeAgencyScore, computeProducerScore, computeTelemarketerScore } = require('./flowScore');
 
 const DEFAULTS = {
   months: 6,
@@ -186,6 +187,22 @@ function easternWallClockToUtc(year, month, day, hour, minute) {
   }).formatToParts(new Date(guess)).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
   const shown = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute);
   return new Date(guess + (guess - shown));
+}
+
+// The read-side counterpart to easternWallClockToUtc above — what calendar
+// date (and hour, unused today but kept for any future time-of-day logic)
+// "right now" falls on in America/New_York. Used only to build today's
+// live TimeClockEntry below, never to compute a stored historical
+// timestamp (those all go through easternWallClockToUtc). `month` is
+// 0-indexed (Jan=0), matching every other caller of
+// easternWallClockToUtc in this file (all of which pass a `.getMonth()`
+// value) — Intl's '2-digit' month is 1-indexed, so it's corrected here.
+function easternNowParts() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', hourCycle: 'h23', weekday: 'short',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+  }).formatToParts(new Date()).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+  return { year: +parts.year, month: +parts.month - 1, day: +parts.day, hour: +parts.hour };
 }
 
 // A demo customer's own fabricated full name — never resembling a real person.
@@ -677,8 +694,16 @@ async function seedRealisticDemoData(agencyId, options = {}) {
   // --- HR suite: time clock, PTO, Break Room ---
   const timeClockRows = [];
   const ptoRows = [];
+  // userId -> GRINDING/BREAK/LUNCH for today's always-on "live right now"
+  // entry seeded below — applied to User.presenceStatus after the bulk
+  // TimeClockEntry insert, since Team Status reads that field, not the
+  // entries directly.
+  const livePresenceByUserId = new Map();
   for (const user of roster.hrRoster) {
-    for (let dayOffset = 0; dayOffset <= totalDays; dayOffset++) {
+    // Upper bound excludes today (handled on its own, below, as an always-
+    // open "live" entry) — looping through today here would otherwise seed
+    // a clockOutAt later this same day, before it's actually happened yet.
+    for (let dayOffset = 0; dayOffset < totalDays; dayOffset++) {
       const day = new Date(start);
       day.setDate(day.getDate() + dayOffset);
       const dow = day.getDay();
@@ -698,6 +723,26 @@ async function seedRealisticDemoData(agencyId, options = {}) {
       });
     }
 
+    // Today, live: always on (no business-hours gating — a demo may be
+    // viewed at any hour and should never look idle), so Team Status shows
+    // a real active team instead of everyone defaulting to AWAY. An open
+    // entry (no clockOutAt) is what "currently clocked in" means in this
+    // schema — see lib/timeClockState.js's stateOf().
+    if (Math.random() >= 0.2) { // a few genuinely out, same as any real day
+      const { year, month, day } = easternNowParts();
+      const clockInAt = easternWallClockToUtc(year, month, day, randomInt(8, 9), randomInt(0, 59));
+      const presence = weightedPick([
+        { value: 'GRINDING', weight: 75 },
+        { value: 'BREAK', weight: 15 },
+        { value: 'LUNCH', weight: 10 },
+      ]);
+      const liveRow = { id: uuid(), userId: user.id, agencyId, clockInAt, clockOutAt: null, createdAt: clockInAt };
+      if (presence === 'LUNCH') liveRow.lunchStartAt = new Date(now.getTime() - randomInt(5, 30) * 60 * 1000);
+      else if (presence === 'BREAK') liveRow.breakStartAt = new Date(now.getTime() - randomInt(2, 10) * 60 * 1000);
+      timeClockRows.push(liveRow);
+      livePresenceByUserId.set(user.id, presence);
+    }
+
     const ptoCount = randomInt(2, 4);
     for (let i = 0; i < ptoCount; i++) {
       const startDate = new Date(start.getTime() + Math.random() * (now.getTime() - start.getTime()));
@@ -713,6 +758,17 @@ async function seedRealisticDemoData(agencyId, options = {}) {
   await createManyChunked(prisma.timeClockEntry, timeClockRows);
   await createManyChunked(prisma.ptoRequest, ptoRows);
 
+  // Reset everyone to AWAY first — idempotent across repeated reseeds, so
+  // a prior run's live subset never lingers as a stale GRINDING/BREAK/LUNCH
+  // once this run recomputed who's actually live today — then apply the
+  // real "today, live" presence just seeded above.
+  await prisma.user.updateMany({ where: { id: { in: roster.hrRoster.map((u) => u.id) } }, data: { presenceStatus: 'AWAY' } });
+  await Promise.all(
+    [...livePresenceByUserId.entries()].map(([userId, presence]) =>
+      prisma.user.update({ where: { id: userId }, data: { presenceStatus: presence } })
+    )
+  );
+
   const clockEntriesByUser = new Map();
   for (const row of timeClockRows) {
     if (!clockEntriesByUser.has(row.userId)) clockEntriesByUser.set(row.userId, []);
@@ -723,7 +779,11 @@ async function seedRealisticDemoData(agencyId, options = {}) {
   const sessionRows = [];
   const bestScores = new Map(); // `${userId}:${gameType}` -> { score, sessionId, achievedAt }
   for (const user of roster.hrRoster) {
-    const entries = clockEntriesByUser.get(user.id) || [];
+    // A Break Room session happens during a break, so only entries that
+    // actually recorded one are eligible — true of every historical row,
+    // but the "today, live" entry above only sets breakStartAt when that
+    // user's live presence happens to be BREAK.
+    const entries = (clockEntriesByUser.get(user.id) || []).filter((entry) => entry.breakStartAt);
     if (entries.length === 0) continue;
     const sessionsForUser = Math.round(entries.length / 3); // roughly 1-3/week
     for (let i = 0; i < sessionsForUser; i++) {
@@ -769,6 +829,28 @@ async function seedRealisticDemoData(agencyId, options = {}) {
       opportunities: opportunityRows.length, totalItemsSold, vendors: vendors.length,
     },
   });
+
+  // Flow Score is entirely event-triggered in production (a lead
+  // disposition change, a task update, a processed call — see
+  // routes/leads.js, lib/leadStatusAuto.js, routes/tasks.js,
+  // jobs/callProcessing.js) and persists a FlowScoreSnapshot as a side
+  // effect of those routes. This seeder writes historical rows directly
+  // via createMany/create for performance and never goes through them, so
+  // without this step no snapshot would ever exist for this agency or any
+  // producer no matter how much history was just seeded. Computed against
+  // the fully-seeded dataset (leads, sales, opportunities, goals, HR);
+  // call-quality components correctly stay excluded via
+  // combineComponents' existing zero-sample-size rule since this seeder
+  // creates no Call/CallAnalysis rows — honest, not a gap.
+  // Sequential, not Promise.all — every producer shares one
+  // FlowScoreWeightConfig row per (role, agencyId) (same for telemarketers,
+  // scoped platform-wide), and getActiveWeightConfig's first-run
+  // find-or-create isn't race-safe against itself: fine for real
+  // one-at-a-time event-triggered calls in production, but concurrent
+  // calls here hit its unique constraint on the first reseed.
+  await computeAgencyScore(agencyId);
+  for (const p of roster.producers) await computeProducerScore(p.id);
+  for (const tm of roster.telemarketers) await computeTelemarketerScore(tm.id);
 
   return {
     seeded: true,
@@ -874,9 +956,14 @@ async function seedBackstageHr({ agencyId, agency, roster, start, now, totalDays
     const entries = clockEntriesByUser.get(user.id) || [];
     for (const entry of entries) {
       const workDate = new Date(entry.clockInAt.getFullYear(), entry.clockInAt.getMonth(), entry.clockInAt.getDate());
+      // A still-open "today, live" entry has no clockOutAt yet — a
+      // SCHEDULED shift always has a defined end, even before the actual
+      // punch-out happens, so the template's own scheduled end time
+      // (17:00 Eastern, matching 'Standard 9-5' above) stands in for it.
+      const endAt = entry.clockOutAt || easternWallClockToUtc(entry.clockInAt.getFullYear(), entry.clockInAt.getMonth(), entry.clockInAt.getDate(), 17, 0);
       shiftRows.push({
         id: uuid(), agencyId, employeeProfileId: employee.id, shiftTemplateId: shiftTemplate.id,
-        workDate, startAt: entry.clockInAt, endAt: entry.clockOutAt, status: 'SCHEDULED',
+        workDate, startAt: entry.clockInAt, endAt, status: 'SCHEDULED',
         createdById: roster.owner ? roster.owner.id : user.id, createdAt: entry.clockInAt,
       });
       if (Math.random() < 0.03) {
@@ -923,7 +1010,11 @@ async function seedBackstageHr({ agencyId, agency, roster, start, now, totalDays
   for (const user of roster.hrRoster) {
     const employee = employeeByUserId.get(user.id);
     if (!employee) continue;
-    const entries = clockEntriesByUser.get(user.id) || [];
+    // A timesheet period only finalizes closed-out shifts — the still-open
+    // "today, live" entry (if any) has no clockOutAt/lunchEndAt/breakEndAt
+    // yet and is naturally excluded, same as a real in-progress shift
+    // can't be finalized into a timesheet before it ends.
+    const entries = (clockEntriesByUser.get(user.id) || []).filter((e) => e.clockOutAt);
     for (let m = 0; m < Math.ceil((totalDays + 1) / 30); m++) {
       const periodStart = new Date(start);
       periodStart.setDate(periodStart.getDate() + m * 30);
