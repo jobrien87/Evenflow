@@ -7,7 +7,7 @@ const { recordAudit } = require('../lib/audit');
 const { sendInvitationEmail } = require('../lib/email');
 const { reissueInvitation, recordInvitationEmailResult } = require('../lib/invitations');
 const { resolveSettings } = require('../lib/breakRoom');
-const { createDemoAgency } = require('../lib/demoAgency');
+const { createDemoAgencyShell } = require('../lib/demoAgency');
 const { seedRealisticDemoData } = require('../lib/demoDataSeeder');
 
 const router = express.Router();
@@ -272,24 +272,51 @@ const createDemoAgencySchema = z.object({
   // reused here, not loosened, even though nothing is emailed.
   password: z.string().min(10, 'Password must be at least 10 characters.'),
   seedDemoData: z.boolean().optional().default(true),
+  // Passed straight through to seedRealisticDemoData, which already
+  // merges a partial object against its own DEFAULTS — lets a caller
+  // (tests, or a future admin control) ask for a smaller/larger seed
+  // instead of always hitting the full 6-month/300-leads-day default.
+  seedOptions: z.record(z.any()).optional(),
 });
+
+// In-process guard against two overlapping seed/reseed runs on the same
+// agency — e.g. a slow request that LOOKS like it failed (a client-side
+// timeout, a dropped connection) prompting a second click while the
+// first is still actually running server-side. wipeAgencyDemoData()+
+// seedRealisticDemoData() were never designed to run twice concurrently
+// against the same agency: both calls would wipe/rebuild the same rows
+// at once, and whichever finishes its wipe last can delete rows the
+// other just created — a real way to end up with an agency that looks
+// "lost all their data" even though nothing crashed. Shared by both
+// POST /demo (its own first, backgrounded seed) and POST /demo/reseed
+// below. WEB_CONCURRENCY=1 in production (a single Node process) makes a
+// plain in-memory Set sufficient; no DB-level/distributed lock is needed.
+const agencyReseedsInProgress = new Set();
 
 // Platform Owner only: create a fully active demo/sales-walkthrough
 // agency — owner + roster activated immediately with the given password,
 // no email invite round-trip at all (unlike POST / above), optionally
 // seeded with fabricated demo leads/sales. See lib/demoAgency.js.
+//
+// Responds as soon as the fast, transactional roster creation is done —
+// a full-scale seed (the real default: 6 months, 300 leads/day,
+// 4,000+4,000 opportunities) can run long enough to cross an external
+// proxy timeout, which previously made a real success look like a
+// failure to the caller with no way to tell. Seeding itself still runs,
+// just after the response, guarded the same way a manual reseed already
+// is below.
 router.post('/demo', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
   try {
     const parsed = createDemoAgencySchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: 'VALIDATION', fieldErrors: parsed.error.flatten() });
     }
-    const result = await createDemoAgency({ ...parsed.data, createdById: req.user.id });
+    const result = await createDemoAgencyShell({ ...parsed.data, createdById: req.user.id });
     if (!result.success) {
       const status = result.errorCode === 'EMAIL_IN_USE' || result.errorCode === 'DUPLICATE_EMAIL_IN_REQUEST' ? 409 : 400;
       return res.status(status).json({ success: false, ...result });
     }
-    return res.status(201).json({
+    res.status(201).json({
       success: true,
       agency: result.agency,
       // The only place these credentials are ever shown — nothing is
@@ -298,8 +325,19 @@ router.post('/demo', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
       producers: result.producers.map((p) => ({ id: p.id, email: p.email, firstName: p.firstName, lastName: p.lastName })),
       telemarketers: result.telemarketers.map((t) => ({ id: t.id, email: t.email, firstName: t.firstName, lastName: t.lastName })),
       password: parsed.data.password,
-      seeded: result.seeded,
+      // Not ready yet — seeding (if any) runs in the background below and
+      // finishes after this response. RESEED DEMO DATA on this same
+      // agency, or a page refresh, is how the counts actually show up.
+      seeded: null,
     });
+
+    if (parsed.data.seedDemoData && result.producers.length > 0) {
+      const agencyId = result.agency.id;
+      agencyReseedsInProgress.add(agencyId);
+      seedRealisticDemoData(agencyId, parsed.data.seedOptions || {})
+        .catch((err) => console.error(`[agencies] background demo seed failed for agency=${agencyId}`, err))
+        .finally(() => agencyReseedsInProgress.delete(agencyId));
+    }
   } catch (err) {
     next(err);
   }
@@ -312,19 +350,6 @@ router.post('/demo', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
 // working. Hard-blocked to isDemo agencies — the one safety rail that
 // makes this reusable without a full exact-name-retype confirm (unlike
 // Reset Record Store, there's no real billing/customer impact here).
-// In-process guard against two overlapping reseeds on the same agency —
-// e.g. a slow request that LOOKS like it failed (a client-side timeout,
-// a dropped connection) prompting a second click while the first is
-// still actually running server-side. wipeAgencyDemoData()+
-// seedRealisticDemoData() were never designed to run twice concurrently
-// against the same agency: both calls would wipe/rebuild the same rows
-// at once, and whichever finishes its wipe last can delete rows the
-// other just created — a real way to end up with an agency that looks
-// "lost all their data" even though nothing crashed. WEB_CONCURRENCY=1
-// in production (a single Node process) makes a plain in-memory Set
-// sufficient; no DB-level/distributed lock is needed.
-const agencyReseedsInProgress = new Set();
-
 router.post('/:agencyId/demo/reseed', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
   const agencyId = req.params.agencyId;
   if (agencyReseedsInProgress.has(agencyId)) {

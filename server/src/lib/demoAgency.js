@@ -14,9 +14,16 @@ const { prisma } = require('./db');
 const { recordAudit } = require('./audit');
 const { seedRealisticDemoData } = require('./demoDataSeeder');
 
+// The fast, transactional half of "Create Demo Agency" — everything that
+// has to finish before a caller can be told the agency exists, with no
+// seeding. Split out from createDemoAgency (below) so the HTTP route can
+// respond as soon as this resolves and run the slow, full-scale seed
+// afterward in the background, instead of blocking the request on it (a
+// full 6-month/300-leads-day seed can run long enough to cross an
+// external proxy timeout, making a real success look like a failure).
 // { agencyName, owner: {firstName,lastName,email}, producers: [{firstName,lastName,email}],
-//   telemarketers: [...], password, seedDemoData, createdById } -> result
-async function createDemoAgency({ agencyName, owner, producers = [], telemarketers = [], password, seedDemoData = true, seedOptions = {}, createdById }) {
+//   telemarketers: [...], password, createdById } -> result (no `seeded` field)
+async function createDemoAgencyShell({ agencyName, owner, producers = [], telemarketers = [], password, createdById }) {
   const allEmails = [owner, ...producers, ...telemarketers].map((u) => u.email.trim().toLowerCase());
   const uniqueEmails = new Set(allEmails);
   if (uniqueEmails.size !== allEmails.length) {
@@ -90,19 +97,31 @@ async function createDemoAgency({ agencyName, owner, producers = [], telemarkete
     after: { ownerEmail: created.ownerUser.email, producerCount: created.producerUsers.length, telemarketerCount: created.telemarketerUsers.length },
   });
 
-  let seeded = null;
-  if (seedDemoData && created.producerUsers.length > 0) {
-    seeded = await seedRealisticDemoData(created.agency.id, seedOptions);
-  }
-
   return {
     success: true,
     agency: created.agency,
     owner: created.ownerUser,
     producers: created.producerUsers,
     telemarketers: created.telemarketerUsers,
-    seeded,
   };
 }
 
-module.exports = { createDemoAgency };
+// Full create-and-seed flow, synchronous end to end — kept for every
+// existing caller that wants one awaitable result with real seed counts
+// (e.g. demoAgency.test.js). The HTTP route itself no longer uses this
+// directly; see routes/agencies.js, which calls createDemoAgencyShell and
+// backgrounds the seed instead.
+// { ...createDemoAgencyShell's args, seedDemoData, seedOptions } -> result
+async function createDemoAgency({ seedDemoData = true, seedOptions = {}, ...shellArgs }) {
+  const shell = await createDemoAgencyShell(shellArgs);
+  if (!shell.success) return shell;
+
+  let seeded = null;
+  if (seedDemoData && shell.producers.length > 0) {
+    seeded = await seedRealisticDemoData(shell.agency.id, seedOptions);
+  }
+
+  return { ...shell, seeded };
+}
+
+module.exports = { createDemoAgency, createDemoAgencyShell };

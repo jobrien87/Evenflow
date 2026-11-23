@@ -170,13 +170,24 @@ export default function AgenciesPanel() {
         seedDemoData: demoForm.seedDemoData,
       };
       const res = await api.createDemoAgency(payload);
-      setDemoResult(res);
+      // The server no longer waits for seeding before responding (see
+      // routes/agencies.js) — it always comes back with seeded: null.
+      // Whether that means "seeding just hasn't finished yet" or "no
+      // seeding was requested" only this submitted payload knows, so it's
+      // captured here before demoForm resets below.
+      setDemoResult({ ...res, seedRequested: payload.seedDemoData && payload.producers.length > 0 });
       setDemoStatus('');
       setDemoForm(emptyDemoForm());
       setShowDemoForm(false);
       await refresh();
     } catch (err) {
       setDemoStatus(err.data?.message || 'Failed to create demo agency.');
+      // A request that threw or timed out doesn't mean nothing happened —
+      // agency/roster creation commits before seeding even starts, so a
+      // slow or dropped request can still have created a real agency.
+      // Refreshing shows the truth instead of leaving the list looking
+      // like the attempt did nothing.
+      await refresh();
     }
   }
 
@@ -311,7 +322,14 @@ export default function AgenciesPanel() {
                 {demoResult.telemarketers.map((t) => <div key={t.id}>{t.firstName} {t.lastName} — {t.email} / {demoResult.password}</div>)}
               </div>
             )}
-            {demoResult.seeded?.counts && <SeedCountsSummary counts={demoResult.seeded.counts} />}
+            {demoResult.seeded?.counts ? (
+              <SeedCountsSummary counts={demoResult.seeded.counts} />
+            ) : demoResult.seedRequested ? (
+              <div style={{ marginTop: 10 }}>
+                Demo data is generating in the background — a full agency can take a minute or two.
+                Refresh the page or use RESEED DEMO DATA on this agency to check.
+              </div>
+            ) : null}
           </div>
           <Button variant="secondary" size="sm" onClick={() => setDemoResult(null)}>DISMISS</Button>
         </Card>

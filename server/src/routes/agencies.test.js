@@ -12,6 +12,7 @@ const http = require('http');
 const bcrypt = require('bcryptjs');
 const { prisma } = require('../lib/db');
 const { createSession } = require('../lib/auth');
+const { wipeAgencyDemoData } = require('../lib/demoDataSeeder');
 const app = require('../app');
 
 const suffix = Date.now();
@@ -136,6 +137,69 @@ test('POST /agencies/demo is Platform-Owner-only, and a created demo agency show
     await prisma.agencySubscription.deleteMany({ where: { agencyId: created.agency.id } });
     await prisma.session.deleteMany({ where: { userId: created.owner.id } });
     await prisma.user.delete({ where: { id: created.owner.id } });
+    await prisma.agency.delete({ where: { id: created.agency.id } });
+  }
+});
+
+async function waitUntil(check, { timeoutMs = 20000, intervalMs = 300 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await check()) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
+test('POST /agencies/demo responds before seeding finishes, and a reseed attempted immediately after is rejected as already in progress', async () => {
+  const createRes = await fetch(`${baseUrl}/api/agencies/demo`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: platformOwnerCookie },
+    body: JSON.stringify({
+      agencyName: `Route Demo Agency Backgrounded ${suffix}`,
+      owner: { firstName: 'Backgrounded', lastName: 'Demo', email: `route-demo-bg-owner-${suffix}@test.local` },
+      producers: [{ firstName: 'Backgrounded', lastName: 'Producer', email: `route-demo-bg-producer-${suffix}@test.local` }],
+      password: 'password123',
+      seedDemoData: true,
+      seedOptions: { months: 1, leadsPerDay: 5, transfersPerDay: 1, crossSellCount: 5, winbackCount: 5 },
+    }),
+  });
+  assert.equal(createRes.status, 201);
+  const created = await createRes.json();
+  // Not awaited server-side — the response comes back before seeding has
+  // had any real chance to finish, so it must never claim real counts.
+  assert.equal(created.seeded, null);
+
+  try {
+    // The fast, transactional part is already done by the time the
+    // response lands — no polling needed for this part.
+    const agency = await prisma.agency.findUnique({ where: { id: created.agency.id } });
+    assert.ok(agency, 'the agency must already exist immediately after the response');
+    const owner = await prisma.user.findUnique({ where: { id: created.owner.id } });
+    assert.ok(owner, 'the owner must already exist immediately after the response');
+
+    // The background seed was just kicked off — a reseed attempted right
+    // now must be rejected rather than racing it.
+    const reseedRes = await fetch(`${baseUrl}/api/agencies/${created.agency.id}/demo/reseed`, {
+      method: 'POST', headers: { Cookie: platformOwnerCookie },
+    });
+    assert.equal(reseedRes.status, 409);
+    const reseedData = await reseedRes.json();
+    assert.equal(reseedData.error, 'RESEED_IN_PROGRESS');
+
+    // The background seed itself must still actually run to completion —
+    // confirms this isn't silently dropped, just delayed.
+    const seeded = await waitUntil(async () => {
+      const snapshot = await prisma.flowScoreSnapshot.findFirst({ where: { subjectType: 'AGENCY', subjectId: created.agency.id } });
+      return Boolean(snapshot);
+    });
+    assert.ok(seeded, 'the background seed must eventually produce a real FlowScoreSnapshot for the agency');
+
+    const leadCount = await prisma.lead.count({ where: { agencyId: created.agency.id } });
+    assert.ok(leadCount > 0, 'the background seed must eventually create real leads');
+  } finally {
+    await wipeAgencyDemoData(created.agency.id);
+    await prisma.agencySubscription.deleteMany({ where: { agencyId: created.agency.id } });
+    await prisma.session.deleteMany({ where: { userId: { in: [created.owner.id, ...created.producers.map((p) => p.id)] } } });
+    await prisma.user.deleteMany({ where: { id: { in: [created.owner.id, ...created.producers.map((p) => p.id)] } } });
     await prisma.agency.delete({ where: { id: created.agency.id } });
   }
 });
