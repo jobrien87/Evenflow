@@ -55,10 +55,21 @@ router.get('/', requireRole('AGENCY_OWNER', 'AGENCY_MANAGER', 'PRODUCER', 'PLATF
       status: { in: ['ASSIGNED', 'ATTEMPTED', 'CONTACTED', 'QUOTED', 'SNOOZED'] },
     };
 
+    // Bounded, not exhaustive: a "what should I do next" triage queue has no
+    // business returning literally every active row once an agency has a
+    // realistic amount of history. Ordered by each model's own periodically
+    // -recomputed priority column (Lead/Opportunity.priorityScore, kept fresh
+    // by leadPriorityRecompute.js every 15 min) and capped well above what
+    // any human actually works through in a sitting — the per-item re-score
+    // below still runs live on whatever comes back, so what's shown stays
+    // exactly as fresh as before; only the selection of the top N relies on
+    // the periodic column instead of live-scoring the entire active set just
+    // to throw away everything past the top few.
+    const QUEUE_ITEM_CAP = 200;
     const [leads, tasks, opportunities, agencyRow] = await Promise.all([
-      prisma.lead.findMany({ where: leadWhere, include: { customer: true } }),
-      prisma.task.findMany({ where: taskWhere, include: { lead: { include: { customer: true } } } }),
-      prisma.opportunity.findMany({ where: opportunityWhere, include: { customer: true } }),
+      prisma.lead.findMany({ where: leadWhere, include: { customer: true }, orderBy: { priorityScore: 'desc' }, take: QUEUE_ITEM_CAP }),
+      prisma.task.findMany({ where: taskWhere, include: { lead: { include: { customer: true } } }, orderBy: { priority: 'desc' }, take: QUEUE_ITEM_CAP }),
+      prisma.opportunity.findMany({ where: opportunityWhere, include: { customer: true }, orderBy: { priorityScore: 'desc' }, take: QUEUE_ITEM_CAP }),
       agencyId ? prisma.agency.findUnique({ where: { id: agencyId }, select: { priorityRules: true } }) : Promise.resolve(null),
     ]);
 
