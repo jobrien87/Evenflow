@@ -21,6 +21,21 @@ const { computeFunnel } = require('./funnelMetrics');
 
 const MIN_CONFIDENT_SAMPLE = 3;
 
+// Every query below that scales with an agency's/producer's full history
+// is bounded to this trailing window — "how is this producer/agency doing
+// lately," not an unbounded all-time scan. Without this, an agency with a
+// large lead volume (demo or real) makes every one of these — fired
+// fire-and-forget on every lead disposition change, task update, and
+// processed call (routes/leads.js, lib/leadStatusAuto.js, routes/tasks.js,
+// jobs/callProcessing.js) — pull tens of thousands of rows into Node
+// memory with zero caching or dedup, on the same single process that also
+// serves /api/health. Same recency-bounded tradeoff already accepted for
+// /api/work-queue earlier this session.
+const FLOW_SCORE_WINDOW_DAYS = 180;
+function recentCutoff() {
+  return new Date(Date.now() - FLOW_SCORE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+}
+
 // ---- Low/Medium/High/Very High weight tiers ----
 
 const LEVEL_POINTS = { LOW: 1, MEDIUM: 2, HIGH: 3, VERY_HIGH: 4 };
@@ -384,7 +399,7 @@ async function computeProducerScore(userId) {
     // below with leads they never organically worked. Manual/vendor-API/
     // telemarketer leads never carry an importBatchId, so they're
     // unaffected.
-    where: { assignedToId: userId, importBatchId: null },
+    where: { assignedToId: userId, importBatchId: null, receivedAt: { gte: recentCutoff() } },
     select: {
       status: true, assignedAt: true, firstAttemptAt: true, vendorId: true,
       moshpitEligible: true, isLiveTransfer: true, receivedAt: true,
@@ -402,7 +417,7 @@ async function computeProducerScore(userId) {
   );
 
   const tasks = await prisma.task.findMany({
-    where: { assignedToId: userId },
+    where: { assignedToId: userId, createdAt: { gte: recentCutoff() } },
     select: { status: true, dueAt: true, completedAt: true },
   });
   const now = new Date();
@@ -422,8 +437,8 @@ async function computeProducerScore(userId) {
   );
 
   const [breakdown, opportunities, trainingAssignments, employeeProfile, goals] = await Promise.all([
-    computeCoachingBreakdown({ prisma, agencyId, userId, from: new Date(0), to: new Date() }),
-    prisma.opportunity.findMany({ where: { assignedToId: userId }, select: { status: true } }),
+    computeCoachingBreakdown({ prisma, agencyId, userId, from: recentCutoff(), to: new Date() }),
+    prisma.opportunity.findMany({ where: { assignedToId: userId, createdAt: { gte: recentCutoff() } }, select: { status: true } }),
     prisma.trainingAssignment.findMany({ where: { userId }, select: { status: true, dueAt: true } }),
     prisma.hrEmployeeProfile.findUnique({ where: { userId }, select: { id: true } }),
     // Required here, lazily, instead of at module top — runningReport.js
@@ -451,7 +466,11 @@ async function computeProducerScore(userId) {
   let resolvedAttendance = [];
   if (employeeProfile) {
     resolvedAttendance = await prisma.hrAttendanceException.findMany({
-      where: { employeeProfileId: employeeProfile.id, status: { in: ['RESOLVED_EXCUSED', 'RESOLVED_UNEXCUSED'] } },
+      where: {
+        employeeProfileId: employeeProfile.id,
+        status: { in: ['RESOLVED_EXCUSED', 'RESOLVED_UNEXCUSED'] },
+        detectedAt: { gte: recentCutoff() },
+      },
       select: { status: true },
     });
   }
@@ -520,7 +539,7 @@ const LEAD_QUALITY_FAILURES = ['BAD_CONTACT', 'DUPLICATE', 'DO_NOT_CONTACT'];
 
 async function computeTelemarketerScore(userId) {
   const leads = await prisma.lead.findMany({
-    where: { createdById: userId, source: 'telemarketer' },
+    where: { createdById: userId, source: 'telemarketer', receivedAt: { gte: recentCutoff() } },
     select: { status: true },
   });
 
@@ -552,7 +571,7 @@ async function computeAgencyScore(agencyId) {
     // CRM work, and would otherwise dominate funnelHealth's unfiltered
     // denominator for any agency that's ever uploaded a large historical
     // or Winback/Cross-Sell list.
-    where: { agencyId, importBatchId: null },
+    where: { agencyId, importBatchId: null, receivedAt: { gte: recentCutoff() } },
     select: { status: true, assignedAt: true, firstAttemptAt: true, vendorId: true },
   });
   // Same vendor-API-only gate as computeProducerScore's responsiveness
@@ -565,8 +584,8 @@ async function computeAgencyScore(agencyId) {
   const soldLeads = leads.filter((l) => l.status === 'SOLD');
 
   const [breakdown, funnel, goals] = await Promise.all([
-    computeCoachingBreakdown({ prisma, agencyId, userId: undefined, from: new Date(0), to: new Date() }),
-    computeFunnel({ agencyId, from: new Date(0), to: new Date() }),
+    computeCoachingBreakdown({ prisma, agencyId, userId: undefined, from: recentCutoff(), to: new Date() }),
+    computeFunnel({ agencyId, from: recentCutoff(), to: new Date() }),
     // Lazily required — see the matching comment in computeProducerScore.
     require('./runningReport').goalsWithProgress({ agencyId }),
   ]);

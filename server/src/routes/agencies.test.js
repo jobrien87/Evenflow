@@ -204,6 +204,63 @@ test('POST /agencies/demo responds before seeding finishes, and a reseed attempt
   }
 });
 
+test('a global concurrency cap limits background demo seeds to one platform-wide', async () => {
+  async function createDemoAgencyRequest(label) {
+    const res = await fetch(`${baseUrl}/api/agencies/demo`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: platformOwnerCookie },
+      body: JSON.stringify({
+        agencyName: `Route Demo Agency Concurrency ${label} ${suffix}`,
+        owner: { firstName: `Concurrency${label}`, lastName: 'Demo', email: `route-demo-conc-${label.toLowerCase()}-owner-${suffix}@test.local` },
+        producers: [{ firstName: `Concurrency${label}`, lastName: 'Producer', email: `route-demo-conc-${label.toLowerCase()}-producer-${suffix}@test.local` }],
+        password: 'password123',
+        seedDemoData: true,
+        seedOptions: { months: 1, leadsPerDay: 5, transfersPerDay: 1, crossSellCount: 5, winbackCount: 5 },
+      }),
+    });
+    assert.equal(res.status, 201);
+    return res.json();
+  }
+
+  const first = await createDemoAgencyRequest('A');
+  // Sent right after the first's response — its background seed is
+  // already registered in agencyReseedsInProgress by the time this lands,
+  // same deterministic ordering the per-agency 409 test above relies on.
+  const second = await createDemoAgencyRequest('B');
+  // The shell always succeeds regardless of the cap — only the background
+  // seed is held back.
+  assert.equal(second.seeded, null);
+
+  // A reseed attempted against the SECOND agency right now must still be
+  // rejected — the cap is platform-wide, not scoped to whichever agency
+  // actually holds the in-flight slot.
+  const reseedRes = await fetch(`${baseUrl}/api/agencies/${second.agency.id}/demo/reseed`, {
+    method: 'POST', headers: { Cookie: platformOwnerCookie },
+  });
+  assert.equal(reseedRes.status, 429);
+  const reseedData = await reseedRes.json();
+  assert.equal(reseedData.error, 'TOO_MANY_CONCURRENT_SEEDS');
+
+  try {
+    const firstSeeded = await waitUntil(async () => {
+      const snapshot = await prisma.flowScoreSnapshot.findFirst({ where: { subjectType: 'AGENCY', subjectId: first.agency.id } });
+      return Boolean(snapshot);
+    });
+    assert.ok(firstSeeded, 'the first agency\'s background seed must still genuinely complete');
+
+    const secondLeadCount = await prisma.lead.count({ where: { agencyId: second.agency.id } });
+    assert.equal(secondLeadCount, 0, 'the second agency\'s auto-seed must have been skipped, not silently run anyway');
+  } finally {
+    const agencyIds = [first.agency.id, second.agency.id];
+    const userIds = [first.owner.id, ...first.producers.map((p) => p.id), second.owner.id, ...second.producers.map((p) => p.id)];
+    await wipeAgencyDemoData(first.agency.id);
+    await wipeAgencyDemoData(second.agency.id);
+    await prisma.agencySubscription.deleteMany({ where: { agencyId: { in: agencyIds } } });
+    await prisma.session.deleteMany({ where: { userId: { in: userIds } } });
+    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+    await prisma.agency.deleteMany({ where: { id: { in: agencyIds } } });
+  }
+});
+
 test('GET /agencies enriches each row with its real active owner (ownerId/ownerName) — the "Log in as" button\'s target — and omits it for an agency with no active owner', async () => {
   const res = await fetch(`${baseUrl}/api/agencies?pageSize=200`, { headers: { Cookie: platformOwnerCookie } });
   assert.equal(res.status, 200);

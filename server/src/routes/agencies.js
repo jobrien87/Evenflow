@@ -291,7 +291,17 @@ const createDemoAgencySchema = z.object({
 // POST /demo (its own first, backgrounded seed) and POST /demo/reseed
 // below. WEB_CONCURRENCY=1 in production (a single Node process) makes a
 // plain in-memory Set sufficient; no DB-level/distributed lock is needed.
+//
+// Its size also doubles as a platform-wide concurrency cap, not just a
+// per-agency one: each full-scale seed runs dozens of sequential DB round
+// trips against the one shared free-tier Postgres instance and its one
+// Prisma connection pool — the same pool GET /api/health itself queries
+// through (routes/health.js). A handful of these running at once (e.g.
+// Josh retrying "Create Demo Agency" a few times) can saturate that
+// shared pool long enough for health checks to go unanswered and Render
+// to restart the instance — a real incident this guard now also prevents.
 const agencyReseedsInProgress = new Set();
+const MAX_CONCURRENT_DEMO_SEEDS = 1;
 
 // Platform Owner only: create a fully active demo/sales-walkthrough
 // agency — owner + roster activated immediately with the given password,
@@ -333,10 +343,18 @@ router.post('/demo', requireRole('PLATFORM_OWNER'), async (req, res, next) => {
 
     if (parsed.data.seedDemoData && result.producers.length > 0) {
       const agencyId = result.agency.id;
-      agencyReseedsInProgress.add(agencyId);
-      seedRealisticDemoData(agencyId, parsed.data.seedOptions || {})
-        .catch((err) => console.error(`[agencies] background demo seed failed for agency=${agencyId}`, err))
-        .finally(() => agencyReseedsInProgress.delete(agencyId));
+      if (agencyReseedsInProgress.size >= MAX_CONCURRENT_DEMO_SEEDS) {
+        // Don't start a second full-scale seed on top of one already
+        // running platform-wide — the agency itself still exists (the
+        // shell above already committed); it just won't auto-populate.
+        // RESEED DEMO DATA on this agency once the other one clears.
+        console.warn(`[agencies] skipped auto-seed for agency=${agencyId} — a demo seed is already running platform-wide`);
+      } else {
+        agencyReseedsInProgress.add(agencyId);
+        seedRealisticDemoData(agencyId, parsed.data.seedOptions || {})
+          .catch((err) => console.error(`[agencies] background demo seed failed for agency=${agencyId}`, err))
+          .finally(() => agencyReseedsInProgress.delete(agencyId));
+      }
     }
   } catch (err) {
     next(err);
@@ -354,6 +372,9 @@ router.post('/:agencyId/demo/reseed', requireRole('PLATFORM_OWNER'), async (req,
   const agencyId = req.params.agencyId;
   if (agencyReseedsInProgress.has(agencyId)) {
     return res.status(409).json({ success: false, error: 'RESEED_IN_PROGRESS', message: 'A reseed is already running for this agency — wait for it to finish before trying again.' });
+  }
+  if (agencyReseedsInProgress.size >= MAX_CONCURRENT_DEMO_SEEDS) {
+    return res.status(429).json({ success: false, error: 'TOO_MANY_CONCURRENT_SEEDS', message: 'A demo seed is already running platform-wide — wait for it to finish before trying another.' });
   }
   agencyReseedsInProgress.add(agencyId);
   try {
