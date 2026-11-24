@@ -6,6 +6,13 @@ const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Set only when the initial session check itself failed to get a real
+  // answer (network error, a 500, a timed-out request during a backend
+  // hiccup) — distinct from a confirmed 401, which is a real "not signed
+  // in." Collapsing the two used to bounce a legitimately logged-in user
+  // to /login just because one background check happened to land during
+  // a slow moment, with nothing to tell them that's what happened.
+  const [authError, setAuthError] = useState(false);
   // Impersonation state lives here, alongside `user`, rather than in its
   // own component-local fetch (ImpersonationBar.jsx used to own this) —
   // a "Log in as" action can be triggered from more than one place in the
@@ -25,12 +32,29 @@ export function AuthProvider({ children }) {
     }
   }
 
+  async function checkAuth() {
+    setLoading(true);
+    try {
+      const data = await api.me();
+      setUser(data.user);
+      setAuthError(false);
+    } catch (err) {
+      // Only a real 401 means "not signed in" — anything else (network
+      // error, a 500) means the check itself failed, which is not the
+      // same thing as being logged out.
+      if (err.status === 401) {
+        setUser(null);
+        setAuthError(false);
+      } else {
+        setAuthError(true);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
-    api
-      .me()
-      .then((data) => setUser(data.user))
-      .catch(() => setUser(null))
-      .finally(() => setLoading(false));
+    checkAuth();
     loadImpersonationStatus();
   }, []);
 
@@ -66,7 +90,7 @@ export function AuthProvider({ children }) {
     return data.user;
   }
 
-  return <AuthContext.Provider value={{ user, loading, login, logout, refreshUser, impersonation }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ user, loading, login, logout, refreshUser, impersonation, authError, retryAuthCheck: checkAuth }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

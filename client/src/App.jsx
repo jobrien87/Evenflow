@@ -58,8 +58,21 @@ import EvenFlow101DetailPage from './pages/EvenFlow101DetailPage';
 import SalesScriptsDetailPage from './pages/SalesScriptsDetailPage';
 
 function RequireAuth() {
-  const { user, loading } = useAuth();
+  const { user, loading, authError, retryAuthCheck } = useAuth();
   if (loading) return <div style={{ color: '#fff', padding: 40 }}>Loading…</div>;
+  // The session check itself failed to get a real answer — a real cookie
+  // may still be valid, so this is not the same as being logged out.
+  // Redirecting to /login here would be a guess, not a fact.
+  if (authError && !user) {
+    return (
+      <div style={{ color: '#fff', padding: 40 }}>
+        Could not confirm your session — the server didn't respond.{' '}
+        <button onClick={retryAuthCheck} style={{ color: '#fff', textDecoration: 'underline', background: 'none', border: 'none', cursor: 'pointer', padding: 0, font: 'inherit' }}>
+          Retry
+        </button>
+      </div>
+    );
+  }
   if (!user) return <Navigate to="/login" replace />;
   return <AppLayout />;
 }

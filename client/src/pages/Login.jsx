@@ -31,7 +31,9 @@ export default function Login() {
       }
       navigate('/');
     } catch (err) {
-      setError(err.data?.message || 'Incorrect email or password.');
+      // "The server said no" and "the server never answered" are
+      // different failures — only the former is really "wrong password."
+      setError(err.networkError ? 'Could not reach the server. Please try again.' : (err.data?.message || 'Incorrect email or password.'));
     } finally {
       setBusy(false);
     }

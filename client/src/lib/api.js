@@ -4,17 +4,37 @@
 const BASE = `${import.meta.env.VITE_API_BASE_URL || ''}/api`;
 
 async function request(path, { method = 'GET', body } = {}) {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    credentials: 'include',
-    headers: body ? { 'Content-Type': 'application/json' } : {},
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await res.json().catch(() => ({}));
+  // The server saying no (a real JSON error body) and the server never
+  // answering at all (a dropped connection, a timed-out proxy, an HTML
+  // error page) are different things — a caller like Login.jsx needs to
+  // tell them apart instead of guessing "wrong password" for both.
+  let res;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      method,
+      credentials: 'include',
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (err) {
+    const networkErr = new Error('Could not reach the server. Check your connection and try again.');
+    networkErr.networkError = true;
+    throw networkErr;
+  }
+  let data = {};
+  let parsed = true;
+  try {
+    data = await res.json();
+  } catch {
+    parsed = false;
+  }
   if (!res.ok) {
     const err = new Error(data.message || data.error || 'Request failed');
     err.data = data;
     err.status = res.status;
+    // A non-JSON error body (an HTML proxy error page, a response cut
+    // off mid-stream) carries no real message from the app itself.
+    if (!parsed) err.networkError = true;
     throw err;
   }
   return data;

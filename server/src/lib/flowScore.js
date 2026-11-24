@@ -36,6 +36,15 @@ function recentCutoff() {
   return new Date(Date.now() - FLOW_SCORE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
 }
 
+// A date window alone doesn't bound anything for data that's deliberately
+// shaped to fill it (the demo seeder's own 6-month default is ~180 days —
+// almost exactly FLOW_SCORE_WINDOW_DAYS, so the window above was close to
+// a no-op for that agency). This is the real, guaranteed ceiling — same
+// orderBy+take technique already used for /api/work-queue — far above
+// MIN_CONFIDENT_SAMPLE for a statistically meaningful score, but a hard
+// stop regardless of how deep any agency's history gets.
+const FLOW_SCORE_ROW_CAP = 3000;
+
 // ---- Low/Medium/High/Very High weight tiers ----
 
 const LEVEL_POINTS = { LOW: 1, MEDIUM: 2, HIGH: 3, VERY_HIGH: 4 };
@@ -404,6 +413,8 @@ async function computeProducerScore(userId) {
       status: true, assignedAt: true, firstAttemptAt: true, vendorId: true,
       moshpitEligible: true, isLiveTransfer: true, receivedAt: true,
     },
+    orderBy: { receivedAt: 'desc' },
+    take: FLOW_SCORE_ROW_CAP,
   });
   // Speed-to-first-attempt is additionally a real-time-vendor-intake SLA —
   // only leads that actually came through the authenticated vendor API
@@ -419,6 +430,8 @@ async function computeProducerScore(userId) {
   const tasks = await prisma.task.findMany({
     where: { assignedToId: userId, createdAt: { gte: recentCutoff() } },
     select: { status: true, dueAt: true, completedAt: true },
+    orderBy: { createdAt: 'desc' },
+    take: FLOW_SCORE_ROW_CAP,
   });
   const now = new Date();
   const decidedTasks = tasks.filter((t) => t.status === 'COMPLETED' || (t.dueAt && t.dueAt < now));
@@ -438,7 +451,7 @@ async function computeProducerScore(userId) {
 
   const [breakdown, opportunities, trainingAssignments, employeeProfile, goals] = await Promise.all([
     computeCoachingBreakdown({ prisma, agencyId, userId, from: recentCutoff(), to: new Date() }),
-    prisma.opportunity.findMany({ where: { assignedToId: userId, createdAt: { gte: recentCutoff() } }, select: { status: true } }),
+    prisma.opportunity.findMany({ where: { assignedToId: userId, createdAt: { gte: recentCutoff() } }, select: { status: true }, orderBy: { createdAt: 'desc' }, take: FLOW_SCORE_ROW_CAP }),
     prisma.trainingAssignment.findMany({ where: { userId }, select: { status: true, dueAt: true } }),
     prisma.hrEmployeeProfile.findUnique({ where: { userId }, select: { id: true } }),
     // Required here, lazily, instead of at module top — runningReport.js
@@ -541,6 +554,8 @@ async function computeTelemarketerScore(userId) {
   const leads = await prisma.lead.findMany({
     where: { createdById: userId, source: 'telemarketer', receivedAt: { gte: recentCutoff() } },
     select: { status: true },
+    orderBy: { receivedAt: 'desc' },
+    take: FLOW_SCORE_ROW_CAP,
   });
 
   const goodLeads = leads.filter((l) => !LEAD_QUALITY_FAILURES.includes(l.status));
@@ -573,6 +588,8 @@ async function computeAgencyScore(agencyId) {
     // or Winback/Cross-Sell list.
     where: { agencyId, importBatchId: null, receivedAt: { gte: recentCutoff() } },
     select: { status: true, assignedAt: true, firstAttemptAt: true, vendorId: true },
+    orderBy: { receivedAt: 'desc' },
+    take: FLOW_SCORE_ROW_CAP,
   });
   // Same vendor-API-only gate as computeProducerScore's responsiveness
   // component — team speed-to-first-attempt only measures real vendor

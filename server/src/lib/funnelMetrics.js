@@ -43,6 +43,14 @@ async function computeFunnel({ agencyId, userId, vendorId, product, from, to }) 
   const leads = await prisma.lead.findMany({
     where,
     select: { status: true, assignedAt: true, firstAttemptAt: true, firstContactAt: true, vendorId: true },
+    orderBy: { receivedAt: 'desc' },
+    // A hard ceiling, not just the from/to range above — a caller that
+    // passes a wide window (flowScore.js's computeAgencyScore) could
+    // otherwise still pull an agency's entire history in one call. Far
+    // above any real agency's typical monthly volume, so this is a no-op
+    // for the already-bounded GET /leads/funnel route's usual "this
+    // month"/"this week" ranges.
+    take: 3000,
   });
 
   const total = leads.length;
