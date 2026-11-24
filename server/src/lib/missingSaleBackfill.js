@@ -47,6 +47,12 @@ async function backfillMissingSales({ agencyId } = {}) {
       customer: { select: { firstName: true, lastName: true, zip: true, state: true } },
       productQuotes: { select: { product: true, status: true } },
     },
+    // Platform-wide and runs on every boot (see index.js) — a hard ceiling,
+    // not just a correctness nicety, so a large backlog can never balloon
+    // memory on a single run. Oldest-first so a backlog closes in order
+    // across repeated boots rather than re-scanning the same tail forever.
+    orderBy: { updatedAt: 'asc' },
+    take: 1000,
   });
   if (soldLeads.length === 0) {
     console.log('[missingSaleBackfill] no SOLD leads found, nothing to do');

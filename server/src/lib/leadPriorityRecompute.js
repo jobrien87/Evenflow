@@ -21,6 +21,11 @@ const OPPORTUNITY_BASE_SCORE = 40;
 async function recomputeAgencyLeadPriority(agencyId, priorityRules, closedStatuses, now = new Date()) {
   const leads = await prisma.lead.findMany({
     where: { agencyId, archivedAt: null, status: { notIn: closedStatuses || DEFAULT_CLOSED_STATUSES } },
+    // Runs every 15 minutes across every agency — a hard ceiling so one
+    // large agency can't balloon memory on a single tick. Recently-touched
+    // leads are the ones most likely to need a fresh priority score.
+    orderBy: { updatedAt: 'desc' },
+    take: 3000,
   });
   for (const lead of leads) {
     const { priorityScore, priorityReason } = scoreLead(lead, priorityRules, now);
@@ -37,6 +42,8 @@ async function recomputeAgencyOpportunityPriority(agencyId, priorityRules) {
     : DEFAULT_TYPE_RANK;
   const opportunities = await prisma.opportunity.findMany({
     where: { agencyId, status: { notIn: TERMINAL_OPPORTUNITY_STATUSES } },
+    orderBy: { updatedAt: 'desc' },
+    take: 3000,
   });
   for (const opp of opportunities) {
     const priorityScore = OPPORTUNITY_BASE_SCORE + typeRankBonus(opp.type, typeRank);

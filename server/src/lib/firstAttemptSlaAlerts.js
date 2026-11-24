@@ -56,6 +56,12 @@ async function checkFirstAttemptSla() {
       customer: { select: { firstName: true, lastName: true } },
       agency: { select: { firstAttemptSlaMinutes: true, closedLeadStatuses: true } },
     },
+    // Platform-wide, runs every 2 minutes — a hard ceiling so a large
+    // backlog can't balloon memory on one tick. Oldest-assigned first is
+    // also the right priority order for an SLA alert, not just a memory
+    // mitigation: the most overdue leads get alerted first.
+    orderBy: { assignedAt: 'asc' },
+    take: 2000,
   });
 
   let alerted = 0;

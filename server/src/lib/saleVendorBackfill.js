@@ -35,6 +35,10 @@ async function backfillSaleVendorFromLead({ agencyId } = {}) {
       ...(agencyId ? { agencyId } : {}),
     },
     select: { id: true, agencyId: true, lead: { select: { vendorId: true } } },
+    // Same reasoning as missingSaleBackfill.js's cap — platform-wide, runs
+    // on every boot, needs a hard ceiling regardless of backlog size.
+    orderBy: { id: 'asc' },
+    take: 2000,
   });
 
   if (candidates.length === 0) {

@@ -54,6 +54,11 @@ async function checkStaleLeads() {
       activities: { select: { occurredAt: true }, orderBy: { occurredAt: 'desc' }, take: 1 },
       events: { where: { type: 'lead.disposition' }, select: { createdAt: true, type: true }, orderBy: { createdAt: 'desc' }, take: 1 },
     },
+    // Platform-wide, runs every 30 minutes — a hard ceiling so a large
+    // backlog can't balloon memory on one tick. Oldest-assigned first is
+    // also the most likely to actually be stale.
+    orderBy: { assignedAt: 'asc' },
+    take: 3000,
   });
 
   let checkedCount = 0;
