@@ -28,6 +28,7 @@ let agency;
 let owner;
 let producers;
 let telemarketers;
+let trainingCourse;
 
 after(async () => {
   if (!agency) return;
@@ -42,6 +43,14 @@ after(async () => {
   await prisma.agencySubscription.deleteMany({ where: { agencyId } });
   await prisma.user.deleteMany({ where: { id: { in: userIds } } });
   await prisma.agency.delete({ where: { id: agencyId } });
+  // TrainingCourse/TrainingLesson are platform-wide (no agencyId), so
+  // wipeAgencyDemoData never touches them — this fixture is this test
+  // file's own to clean up. Any TrainingAssignment/LessonCompletion the
+  // seeder created against it is already gone via wipeAgencyDemoData above.
+  if (trainingCourse) {
+    await prisma.trainingLesson.deleteMany({ where: { courseId: trainingCourse.id } });
+    await prisma.trainingCourse.delete({ where: { id: trainingCourse.id } });
+  }
   await prisma.$disconnect();
 });
 
@@ -57,6 +66,21 @@ test('setup: build a throwaway demo-shaped agency + roster', async () => {
     return u;
   }));
   assert.ok(agency.id);
+});
+
+test('setup: a real TrainingCourse/TrainingLesson fixture for the seeder\'s Training step to assign against', async () => {
+  // TrainingCourse/TrainingLesson are platform-wide content (no
+  // agencyId) — this file creates its own small, deterministic fixture
+  // rather than relying on whatever courses happen to already exist in
+  // the shared test database.
+  trainingCourse = await prisma.trainingCourse.create({ data: { title: `Seeder Test Course ${suffix}`, isActive: true } });
+  await prisma.trainingLesson.createMany({
+    data: [
+      { id: `${suffix}-lesson-1`, courseId: trainingCourse.id, title: 'Lesson 1', content: 'x', orderIndex: 0, quiz: [{ question: 'q', options: ['a', 'b'], correctIndex: 0 }] },
+      { id: `${suffix}-lesson-2`, courseId: trainingCourse.id, title: 'Lesson 2', content: 'x', orderIndex: 1 },
+    ],
+  });
+  assert.ok(trainingCourse.id);
 });
 
 test('seedRealisticDemoData: exactly 5 "Lead Source" vendors averaging ~$5.25/lead, each with real CostEvent coverage', async () => {
@@ -234,6 +258,75 @@ test('seedRealisticDemoData: worked leads carry real notes, and the live pipelin
   for (const t of openTaskLeads) {
     const lead = await prisma.lead.findUnique({ where: { id: t.leadId } });
     assert.ok(['CONTACTED', 'QUOTED', 'FOLLOW_UP', 'APPOINTMENT', 'NEW'].includes(lead.status), 'an open follow-up task must only sit on a still-in-progress lead');
+  }
+});
+
+test('seedRealisticDemoData: firstAttemptAt/firstContactAt agree with status — contact rate and speed-to-attempt must never be a blanket zero', async () => {
+  const newLead = await prisma.lead.findFirst({ where: { agencyId: agency.id, status: 'NEW' } });
+  assert.ok(newLead, 'the small-scale seed should still produce at least one untouched NEW lead');
+  assert.equal(newLead.firstAttemptAt, null, 'a NEW lead has never been attempted');
+  assert.equal(newLead.firstContactAt, null, 'a NEW lead has never been contacted');
+
+  const soldLeads = await prisma.lead.findMany({ where: { agencyId: agency.id, status: 'SOLD' } });
+  for (const lead of soldLeads) {
+    assert.ok(lead.firstAttemptAt, `a SOLD lead (${lead.id}) must have been attempted`);
+    assert.ok(lead.firstContactAt, `a SOLD lead (${lead.id}) must have been genuinely contacted — you can't close a sale with no contact`);
+    assert.ok(lead.firstContactAt >= lead.firstAttemptAt, 'contact can never happen before the first attempt');
+    assert.ok(lead.firstAttemptAt >= lead.assignedAt, 'the first attempt can never happen before the lead was assigned');
+  }
+
+  // Across the whole seeded set, a terminal-unsold lead (LOST/
+  // NOT_INTERESTED/DO_NOT_CONTACT/BAD_CONTACT) only probabilistically
+  // gets a firstContactAt — confirm both outcomes actually occur, not a
+  // blanket always/never.
+  const terminalUnsold = await prisma.lead.findMany({
+    where: { agencyId: agency.id, status: { in: ['LOST', 'NOT_INTERESTED', 'DO_NOT_CONTACT', 'BAD_CONTACT'] } },
+  });
+  assert.ok(terminalUnsold.length > 0, 'the small-scale seed should still produce some terminal-unsold leads');
+  assert.ok(terminalUnsold.every((l) => l.firstAttemptAt), 'every terminal-unsold lead was still attempted');
+  assert.ok(terminalUnsold.some((l) => l.firstContactAt), 'some terminal-unsold leads must have actually been reached');
+  assert.ok(terminalUnsold.some((l) => !l.firstContactAt), 'some terminal-unsold leads must never have actually been reached');
+});
+
+test('seedRealisticDemoData: a small, genuinely-unclaimed Moshpit pool exists', async () => {
+  const moshpitLeads = await prisma.lead.findMany({
+    where: { agencyId: agency.id, assignedToId: null, status: 'NEW' },
+  });
+  assert.equal(moshpitLeads.length, 12, 'MOSHPIT_UNCLAIMED_COUNT unclaimed leads must exist');
+  for (const lead of moshpitLeads) {
+    assert.equal(lead.moshpitEligible, true);
+    assert.equal(lead.isLiveTransfer, true);
+    assert.equal(lead.assignedAt, null, 'an unclaimed lead was never assigned');
+  }
+});
+
+test('seedRealisticDemoData: Training/Drills progress is seeded for producers against real courses, never fabricated course content', async () => {
+  const assignments = await prisma.trainingAssignment.findMany({ where: { courseId: trainingCourse.id, userId: { in: producers.map((p) => p.id) } } });
+  assert.ok(assignments.length > 0, 'at least one producer should have been assigned the real test course');
+
+  for (const assignment of assignments) {
+    const completions = await prisma.lessonCompletion.findMany({ where: { assignmentId: assignment.id } });
+    if (assignment.status === 'ASSIGNED') {
+      assert.equal(completions.length, 0, 'an ASSIGNED-only assignment has no lesson completions yet');
+    } else if (assignment.status === 'COMPLETED') {
+      assert.equal(completions.length, 2, 'a COMPLETED assignment must have completed every lesson in the course');
+      assert.ok(assignment.completedAt, 'a COMPLETED assignment must carry a completedAt');
+    } else {
+      assert.equal(assignment.status, 'IN_PROGRESS');
+      assert.ok(completions.length >= 1 && completions.length < 2, 'an IN_PROGRESS assignment has completed some but not all lessons');
+    }
+  }
+});
+
+test('seedRealisticDemoData: fake-but-safe Record Store subscriptions exist, never carrying a real Boberdoo id', async () => {
+  const subs = await prisma.recordStoreSubscription.findMany({ where: { agencyId: agency.id } });
+  assert.ok(subs.length >= 2 && subs.length <= 4, 'should seed a small, plausible handful of subscriptions');
+  for (const sub of subs) {
+    assert.equal(sub.boberdooPartnerId, null, 'must never fabricate a real Boberdoo partner id');
+    assert.equal(sub.boberdooFilterSetId, null, 'must never fabricate a real Boberdoo filter set id — this is also what keeps it invisible to recordStoreSourceOptimization\'s sweep');
+    assert.equal(sub.autoOptimizeSources, false);
+    assert.equal(sub.status, 'ACTIVE');
+    assert.ok(sub.priceSnapshotCents > 0, 'a demo subscription must still carry a plausible price for display');
   }
 });
 

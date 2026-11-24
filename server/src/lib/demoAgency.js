@@ -90,7 +90,19 @@ async function createDemoAgencyShell({ agencyName, owner, producers = [], telema
       data: { agencyId: agency.id, planId: plan.id, status: 'ACTIVE', assignedById: createdById },
     });
 
-    return { agency, ownerUser, producerUsers, telemarketerUsers, subscription };
+    // The subscription alone is cosmetic — entitlements.js's
+    // requireModuleEnabled/requireSalesStudioAccess read these three
+    // booleans straight off the Agency row, not off any subscription/plan,
+    // so without this sync a demo agency's plan would be "Full Platform"
+    // on paper but 403 on Sales Studio, Transfers, Calls, and Training.
+    // Same sync routes/billing.js and routes/agencies.js already do for a
+    // real agency's plan change.
+    const updatedAgency = await tx.agency.update({
+      where: { id: agency.id },
+      data: { crmEnabled: plan.crmEnabled, transfersEnabled: plan.transfersEnabled, coachingEnabled: plan.coachingEnabled },
+    });
+
+    return { agency: updatedAgency, ownerUser, producerUsers, telemarketerUsers, subscription };
   }, { timeout: 30000 });
 
   await recordAudit({

@@ -105,6 +105,12 @@ const WORKING_NOTES = [
   'Sent the quote over email, waiting to hear back.',
 ];
 const TERMINAL_UNSOLD_STATUSES = new Set(['LOST', 'NOT_INTERESTED', 'DO_NOT_CONTACT', 'BAD_CONTACT']);
+// Statuses that can only be reached after an actual live conversation —
+// used to decide which leads get a firstContactAt, not just a
+// firstAttemptAt (see buildLeadBundle: a terminal-unsold lead may or may
+// not have ever actually been reached, so it only gets a probabilistic
+// chance at contact; these always do).
+const CONTACTED_LIKE_STATUSES = new Set(['CONTACTED', 'QUOTED', 'FOLLOW_UP', 'APPOINTMENT', 'SOLD']);
 
 function uuid() {
   return crypto.randomUUID();
@@ -232,6 +238,18 @@ async function wipeAgencyDemoData(agencyId) {
   const vendorIds = (await prisma.vendor.findMany({ where: { agencyId }, select: { id: true } })).map((v) => v.id);
   const saleIds = (await prisma.sale.findMany({ where: { agencyId }, select: { id: true } })).map((s) => s.id);
 
+  // TrainingAssignment/LessonCompletion carry no agencyId of their own
+  // (platform-wide course content, per-user assignment) — scoped via a
+  // relation filter down to this agency's own users instead. This clears
+  // any real progress a demo user clicked through too, same as every
+  // other model this wipe clears — a demo agency's whole history is
+  // disposable on reseed, not just what this seeder itself wrote.
+  await prisma.lessonCompletion.deleteMany({ where: { assignment: { user: { agencyId } } } });
+  await prisma.trainingAssignment.deleteMany({ where: { user: { agencyId } } });
+  // No real Lead ever references these (this seeder never sets
+  // Lead.recordStoreSubscriptionId), so a plain agencyId-scoped delete is
+  // always FK-safe.
+  await prisma.recordStoreSubscription.deleteMany({ where: { agencyId } });
   await prisma.breakRoomAchievement.deleteMany({ where: { agencyId } });
   await prisma.breakRoomHighScore.deleteMany({ where: { agencyId } });
   await prisma.breakRoomGameSession.deleteMany({ where: { agencyId } });
@@ -411,6 +429,27 @@ function buildLeadBundle({
     ]);
   }
 
+  // Speed-to-first-attempt and contact rate (funnelMetrics.js's
+  // computeFunnel) read these two fields directly — unlike quote/close
+  // rate, which come straight from `status` alone, nothing else in this
+  // file ever populates them. A NEW lead is genuinely untouched (no
+  // attempt yet, same reasoning as it getting no note/task below).
+  // Everything else was at least attempted; a terminal-unsold lead may or
+  // may not have actually been reached (BAD_CONTACT/DO_NOT_CONTACT-style
+  // outcomes can happen without ever truly speaking to the customer), so
+  // only CONTACTED_LIKE_STATUSES — which can't be reached any other way —
+  // always get a firstContactAt.
+  let firstAttemptAt = null;
+  let firstContactAt = null;
+  if (status !== 'NEW') {
+    firstAttemptAt = new Date(receivedAt.getTime() + randomInt(10, 240) * 60 * 1000);
+    const reallyContacted = CONTACTED_LIKE_STATUSES.has(status)
+      || (TERMINAL_UNSOLD_STATUSES.has(status) && Math.random() < 0.55);
+    if (reallyContacted) {
+      firstContactAt = new Date(firstAttemptAt.getTime() + randomInt(0, 45) * 60 * 1000);
+    }
+  }
+
   buckets.customers.push({ id: customerId, firstName, lastName, zip, state: 'GA' });
   buckets.leads.push({
     id: leadId, agencyId, customerId,
@@ -421,7 +460,7 @@ function buildLeadBundle({
     isLiveTransfer: isTransfer, moshpitEligible: isTransfer,
     assignedToId: producer.id,
     createdById: isTransfer ? tm.id : (roster.owner ? roster.owner.id : producer.id),
-    receivedAt, assignedAt: receivedAt, zip, state: 'GA',
+    receivedAt, assignedAt: receivedAt, firstAttemptAt, firstContactAt, zip, state: 'GA',
   });
   if (!isTransfer) {
     buckets.costEvents.push({ id: uuid(), agencyId, vendorId: vendor.id, category: 'VENDOR_LEAD_COST', amountCents: vendor.costPerLeadCents, occurredAt: receivedAt, notes: `Vendor lead cost for lead ${leadId}` });
@@ -548,6 +587,41 @@ async function seedRealisticDemoData(agencyId, options = {}) {
     leadNoteCount += buckets.leadNotes.length;
     taskCount += buckets.tasks.length;
     soldLeadSaleInputs.push(...buckets.soldLeadSaleInputs);
+  }
+
+  // --- A small, genuinely-unclaimed Moshpit pool ---
+  // Every transfer lead above (including isLiveTransfer/moshpitEligible
+  // ones) is immediately assigned to a producer, so none of them can ever
+  // appear in GET /leads/moshpit, which requires assignedToId: null — a
+  // demo agency's Moshpit queue would otherwise always be empty despite
+  // the eligibility flags being set correctly. Kept as its own standalone
+  // step (not threaded through buildLeadBundle/the day loop above) since
+  // it's a different kind of lead entirely: just-arrived and genuinely
+  // unclaimed, not historical.
+  const MOSHPIT_UNCLAIMED_COUNT = 12;
+  let moshpitUnclaimedCount = 0;
+  if (roster.telemarketers.length > 0) {
+    const moshpitCustomers = [];
+    const moshpitLeads = [];
+    for (let i = 0; i < MOSHPIT_UNCLAIMED_COUNT; i++) {
+      const { firstName, lastName } = demoName();
+      const customerId = uuid();
+      const zip = weightedPick(zipTiers.map((t) => ({ value: t.zip, weight: t.weight })));
+      const receivedAt = new Date(now.getTime() - randomInt(10, 6 * 60) * 60 * 1000); // last 10min-6h
+      const tm = roster.telemarketers[i % roster.telemarketers.length];
+      moshpitCustomers.push({ id: customerId, firstName, lastName, zip, state: 'GA' });
+      moshpitLeads.push({
+        id: uuid(), agencyId, customerId,
+        source: 'telemarketer', vendorId: null,
+        product: randomChoice(PRODUCTS), status: 'NEW', leadType: 'TRANSFER',
+        isLiveTransfer: true, moshpitEligible: true,
+        assignedToId: null, createdById: tm.id,
+        receivedAt, assignedAt: null, zip, state: 'GA',
+      });
+    }
+    await createManyChunked(prisma.customer, moshpitCustomers);
+    await createManyChunked(prisma.lead, moshpitLeads);
+    moshpitUnclaimedCount = moshpitLeads.length;
   }
 
   // --- Sales for every terminal-SOLD lead, posting the one real revenue entry every dashboard reads ---
@@ -813,6 +887,73 @@ async function seedRealisticDemoData(agencyId, options = {}) {
   // --- Backstage HR: departments, positions, employee profiles, shifts, leave ---
   const hr = await seedBackstageHr({ agencyId, agency, roster, start, now, totalDays, clockEntriesByUser, ptoRows });
 
+  // --- Training/Drills progress for producers ---
+  // TrainingCourse/TrainingLesson are platform-wide content (no agencyId
+  // — only a Platform Owner authors them), so there may be none at all in
+  // a given environment; this only assigns against whatever real courses
+  // already exist and never fabricates course content itself.
+  const courses = await prisma.trainingCourse.findMany({ where: { isActive: true }, include: { lessons: { orderBy: { orderIndex: 'asc' } } } });
+  const trainingAssignmentRows = [];
+  const lessonCompletionRows = [];
+  for (const course of courses) {
+    for (const producer of roster.producers) {
+      if (Math.random() >= randomInt(60, 100) / 100) continue; // 60-100% of producers get each course
+      const assignedAt = new Date(now.getTime() - randomInt(5, 60) * 24 * 60 * 60 * 1000);
+      const progress = weightedPick([{ value: 'ASSIGNED', weight: 25 }, { value: 'IN_PROGRESS', weight: 35 }, { value: 'COMPLETED', weight: 40 }]);
+      const assignmentId = uuid();
+      trainingAssignmentRows.push({
+        id: assignmentId, courseId: course.id, userId: producer.id, status: progress,
+        assignedAt, completedAt: progress === 'COMPLETED' ? new Date(assignedAt.getTime() + randomInt(1, 20) * 24 * 60 * 60 * 1000) : null,
+      });
+      if (progress === 'ASSIGNED' || course.lessons.length === 0) continue;
+      const lessonCount = progress === 'COMPLETED' ? course.lessons.length : randomInt(1, Math.max(1, course.lessons.length - 1));
+      let completedAt = assignedAt;
+      for (const lesson of course.lessons.slice(0, lessonCount)) {
+        completedAt = new Date(completedAt.getTime() + randomInt(1, 5) * 24 * 60 * 60 * 1000);
+        lessonCompletionRows.push({
+          id: uuid(), assignmentId, lessonId: lesson.id, completedAt,
+          quizScorePercent: lesson.quiz ? randomInt(70, 100) : null,
+        });
+      }
+    }
+  }
+  await createManyChunked(prisma.trainingAssignment, trainingAssignmentRows);
+  await createManyChunked(prisma.lessonCompletion, lessonCompletionRows);
+
+  // --- Fake-but-safe Record Store subscriptions ---
+  // boberdooPartnerId/boberdooFilterSetId stay null on purpose — confirmed
+  // safe: recordStoreSourceOptimization.js's sweep (the only background
+  // job reading this model) hard-requires boberdooFilterSetId: not null,
+  // and the inbound Boberdoo delivery webhook matches on
+  // Agency.boberdooPartnerId (also left unset here), not anything
+  // subscription-level — so these rows can never be mistaken for, or
+  // picked up by, a real external integration.
+  const recordStoreTemplates = await prisma.recordStoreTemplate.findMany({
+    where: { slug: { in: ['HOME_BASIC', 'AUTO_BASIC', 'HOME_PREFERRED', 'AUTO_PREFERRED'] } },
+  });
+  // Seeded by prisma/seed.js — should always exist, but never fabricate a
+  // template row if it somehow doesn't.
+  const chosenTemplates = recordStoreTemplates.length === 0
+    ? []
+    : [...recordStoreTemplates].sort(() => Math.random() - 0.5).slice(0, randomInt(2, Math.min(4, recordStoreTemplates.length)));
+  const recordStoreSubscriptionRows = chosenTemplates.map((template) => ({
+    id: uuid(), agencyId, recordStoreTemplateId: template.id,
+    boberdooPartnerId: null, boberdooFilterSetId: null,
+    productNameSnapshot: template.displayName, leadType: template.leadType,
+    filterSetType: template.filterSetType, isIpr: template.isIpr,
+    // A real price snapshot if a Super Admin ever configured one;
+    // otherwise a plausible per-lead placeholder for this demo agency
+    // only — same fabrication latitude this seeder already uses for
+    // vendor cost (vendorAvgCostCents) and sale premiums elsewhere.
+    priceSnapshotCents: template.wholesalePriceCents ?? randomInt(400, 900),
+    dailyVolume: template.defaultDailyVolume,
+    desiredStatus: 'ACTIVE', status: 'ACTIVE', provisioningStatus: 'ACTIVE', fundingStatus: 'CONFIRMED',
+    autoOptimizeSources: false,
+    startedAt: new Date(now.getTime() - randomInt(30, 60) * 24 * 60 * 60 * 1000),
+    createdById: roster.owner ? roster.owner.id : null,
+  }));
+  await createManyChunked(prisma.recordStoreSubscription, recordStoreSubscriptionRows);
+
   const blendedCostPerLeadCents = Math.round(
     vendors.reduce((sum, v) => sum + v.costPerLeadCents, 0) / vendors.length,
   );
@@ -858,6 +999,7 @@ async function seedRealisticDemoData(agencyId, options = {}) {
       vendors: vendors.length,
       generalLeads: generalCount,
       transferLeads: transferCount,
+      moshpitUnclaimedLeads: moshpitUnclaimedCount,
       leadNotes: leadNoteCount,
       tasks: taskCount,
       sales: saleCount,
@@ -871,6 +1013,9 @@ async function seedRealisticDemoData(agencyId, options = {}) {
       totalItemsSold,
       blendedCostPerLeadCents,
       telemarketerCount: roster.telemarketers.length,
+      trainingAssignments: trainingAssignmentRows.length,
+      trainingLessonCompletions: lessonCompletionRows.length,
+      recordStoreSubscriptions: recordStoreSubscriptionRows.length,
       ...hr,
     },
   };

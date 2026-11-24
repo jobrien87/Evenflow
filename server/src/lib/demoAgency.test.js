@@ -93,6 +93,15 @@ test('createDemoAgency activates owner/producers/telemarketers directly, with a 
   assert.equal(subscription.plan.name, 'Full Platform');
   assert.equal(subscription.status, 'ACTIVE');
 
+  // The subscription alone is cosmetic — entitlements.js reads these
+  // three booleans straight off the Agency row, so without this sync a
+  // demo agency would 403 on Sales Studio/Transfers/Calls/Training
+  // despite being on the "Full Platform" plan on paper.
+  const agencyRow = await prisma.agency.findUnique({ where: { id: result.agency.id } });
+  assert.equal(agencyRow.crmEnabled, true);
+  assert.equal(agencyRow.transfersEnabled, true);
+  assert.equal(agencyRow.coachingEnabled, true);
+
   assert.ok(result.seeded && result.seeded.seeded);
   assert.ok(result.seeded.counts.generalLeads > 0);
   assert.ok(result.seeded.counts.sales > 0);
