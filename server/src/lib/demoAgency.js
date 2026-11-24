@@ -31,7 +31,13 @@ async function createDemoAgencyShell({ agencyName, owner, producers = [], telema
   }
   const existing = await prisma.user.findMany({ where: { email: { in: allEmails } }, select: { email: true } });
   if (existing.length > 0) {
-    return { success: false, errorCode: 'EMAIL_IN_USE', emails: existing.map((e) => e.email) };
+    const conflictingEmails = existing.map((e) => e.email);
+    return {
+      success: false,
+      errorCode: 'EMAIL_IN_USE',
+      emails: conflictingEmails,
+      message: `Already registered: ${conflictingEmails.join(', ')}`,
+    };
   }
 
   const passwordHash = await bcrypt.hash(password, 12);
